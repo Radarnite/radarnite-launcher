@@ -7,7 +7,8 @@
      RadarniteLauncher.exe and WebView2 processes run and hold files; locks one file in its WebView2 profile; runs
      <New> silently over it (as an update would) and records which processes survived.
   3. Checks: only that install's processes were closed; the folder holds exactly the 3.x files (<Expected>, relative
-     paths) plus config.json, the logs, the uninstaller and the locked file; config.json and update.log unchanged;
+     paths) plus config.json, the logs, the uninstaller and the locked file; every key and value of config.json kept
+     (the installer's --set-builds-folder rewrites it in the launcher's own format) and update.log unchanged;
      InstallDir, BuildsFolder and the uninstall key kept, DisplayVersion updated; the silent uninstaller removes the
      uninstall key in place (_?=) without waiting on itself, and leaves a desktop shortcut it did not create.
   Refuses to run when a Radarnite Launcher install, its registry keys or shortcuts exist; removes exactly what it
@@ -75,6 +76,12 @@ public static class RlDesk {
     $res.otherHelpersGone = @($others | Where-Object { $mains -notcontains $_ -and -not $alive.ContainsKey([int]$_.ProcessId) }).Count
     $cfgAfter = [IO.File]::ReadAllBytes((Join-Path $inst 'config.json')); $logAfter = [IO.File]::ReadAllBytes((Join-Path $inst 'update.log'))
     $res.configJsonUnchanged = [Convert]::ToBase64String($cfgAfter) -eq [Convert]::ToBase64String($snap.config)
+    # every key of the 2.x config, with the same value (unknown keys included); bytes and key order may change
+    $u8 = New-Object Text.UTF8Encoding $false
+    $cb = $u8.GetString($snap.config).TrimStart([char]0xFEFF) | ConvertFrom-Json; $ca = $u8.GetString($cfgAfter).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $res.configJsonChangedKeys = @($cb.PSObject.Properties | Where-Object { -not ($ca.PSObject.Properties.Name -contains $_.Name) -or
+      (($_.Value | ConvertTo-Json -Compress -Depth 10) -cne ($ca.($_.Name) | ConvertTo-Json -Compress -Depth 10)) } | ForEach-Object { $_.Name })
+    $res.configJsonValuesKept = $res.configJsonChangedKeys.Count -eq 0
     $res.updateLogKept = ($logAfter.Length -ge $snap.log.Length) -and ([Convert]::ToBase64String($logAfter, 0, $snap.log.Length) -eq [Convert]::ToBase64String($snap.log))
   } catch { $res.error = "$($_.Exception.Message) @ $($_.InvocationInfo.ScriptLineNumber)" }
   finally {
@@ -141,7 +148,8 @@ try {
   $R.unexpected = @($have | Where-Object { $want -notcontains $_ -and $keep -notcontains $_ })
   $checks.exactly3xFilesPlusUserData = ($R.missing3x.Count -eq 0) -and ($R.unexpected.Count -eq 0)
   $checks.lockedFileToleratedAndKept = Test-Path (Join-Path $udf 'rl-migration-lock.tmp')
-  $checks.configJsonUnchanged = [bool]$S.configJsonUnchanged
+  $checks.configJsonValuesKept = [bool]$S.configJsonValuesKept
+  $R.configJsonBytesUnchanged = [bool]$S.configJsonUnchanged   # info: false once the real exe's --set-builds-folder runs
   $checks.updateLogKept = [bool]$S.updateLogKept
   # info: whether an unknown config key survived the 2.x window itself (3.x must keep unknown keys)
   $R.unknownConfigKeyAfter2xAndUpgrade = (Get-Content $cfgPath -Raw | ConvertFrom-Json)._migrationMarker -eq 'keep-me'
