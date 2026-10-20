@@ -246,16 +246,21 @@ impl App {
         }
         let mut cos_items = Vec::new();
         let mut variants_of = HashMap::new();
-        match &items {
+        match items {
             Value::Array(arr) => {
-                for it in arr {
-                    let tid = js::prop(it, "templateId").map_err(crash)?;
+                for mut it in arr {
+                    let tid = js::prop(&it, "templateId").map_err(crash)?;
                     let id = js::lower(tid.as_ref(), "it.templateId").map_err(crash)?;
-                    variants_of.insert(id.clone(), js::or(js::get(it, "variants"), json!([])));
+                    // the item is not needed afterwards: its variants are moved, not copied
+                    let variants = match &mut it {
+                        Value::Object(o) => o.shift_remove("variants"),
+                        _ => None,
+                    };
+                    variants_of.insert(id.clone(), js::or(variants, json!([])));
                     cos_items.push((tid.and_then(|t| t.as_str().map(String::from)).unwrap_or_default(), id));
                 }
             }
-            v if !js::truthy(Some(v)) => {}
+            v if !js::truthy(Some(&v)) => {}
             Value::String(_) => return Err(crash(type_error("Cannot read properties of undefined (reading 'toLowerCase')"))),
             _ => return Err(crash(type_error("cosmetics.items is not iterable"))),
         }

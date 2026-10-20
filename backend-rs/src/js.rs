@@ -434,10 +434,14 @@ pub fn obj(v: Value) -> Obj {
 
 /// JSON.parse (None on a syntax error), with V8's key order and double-precision numbers.
 pub fn parse(s: &str) -> Option<Value> {
-    serde_json::from_str::<Value>(s).ok().map(normalize)
+    let mut v = serde_json::from_str::<Value>(s).ok()?;
+    normalize(&mut v);
+    Some(v)
 }
 
-fn normalize(v: Value) -> Value {
+/// In place: integers beyond 2^53 become doubles, and objects with array-index keys get V8's order (index keys first,
+/// ascending). Objects without such keys are left as they are (no copy).
+fn normalize(v: &mut Value) {
     match v {
         Value::Number(n) => {
             let big = match (n.as_i64(), n.as_u64()) {
@@ -446,40 +450,21 @@ fn normalize(v: Value) -> Value {
                 _ => false,
             };
             if big {
-                Number::from_f64(n.as_f64().unwrap_or(0.0)).map(Value::Number).unwrap_or(Value::Null)
-            } else {
-                Value::Number(n)
+                *v = Number::from_f64(n.as_f64().unwrap_or(0.0)).map(Value::Number).unwrap_or(Value::Null);
             }
         }
-        Value::Array(a) => Value::Array(a.into_iter().map(normalize).collect()),
+        Value::Array(a) => a.iter_mut().for_each(normalize),
         Value::Object(m) => {
-            let has_index = m.keys().any(|k| is_index_key(k));
-            let mut out = Obj::new();
-            if has_index {
-                let mut idx: Vec<(u64, String, Value)> = Vec::new();
-                let mut rest: Vec<(String, Value)> = Vec::new();
-                for (k, v) in m {
-                    if is_index_key(&k) {
-                        idx.push((k.parse().unwrap(), k, normalize(v)));
-                    } else {
-                        rest.push((k, normalize(v)));
-                    }
-                }
-                idx.sort_by_key(|e| e.0);
-                for (_, k, v) in idx {
-                    out.insert(k, v);
-                }
-                for (k, v) in rest {
-                    out.insert(k, v);
-                }
-            } else {
-                for (k, v) in m {
-                    out.insert(k, normalize(v));
-                }
+            m.values_mut().for_each(normalize);
+            if m.keys().any(|k| is_index_key(k)) {
+                let old = std::mem::take(m);
+                let (mut idx, rest): (Vec<(String, Value)>, Vec<(String, Value)>) = old.into_iter().partition(|(k, _)| is_index_key(k));
+                idx.sort_by_key(|(k, _)| k.parse::<u64>().unwrap_or(0));
+                m.extend(idx);
+                m.extend(rest);
             }
-            Value::Object(out)
         }
-        other => other,
+        _ => {}
     }
 }
 

@@ -254,15 +254,24 @@ fn set_slot(
 
 fn athena(app: &App, st: &Obj, info: &Info) -> JsResult<Value> {
     let mut items = Obj::new();
+    let favorites = st.get("favorites");
     for (tid, id) in &app.cos_items {
         let variants = styles_of(app, st, id)?;
-        let fav = st.get("favorites").and_then(|f| js::get(f, id));
-        js::set(
-            &mut items,
-            id,
-            json!({ "templateId": tid, "attributes": { "max_level_bonus": 0, "level": 1, "item_seen": true, "xp": 0, "variants": variants,
-                "favorite": js::truthy(fav.as_ref()), "rnd_sel_cnt": 0 }, "quantity": 1 }),
-        );
+        let fav = favorites.and_then(|f| js::get(f, id));
+        // built by hand: json! would copy the variants through serde
+        let mut attrs = Obj::with_capacity(7);
+        attrs.insert("max_level_bonus".into(), Value::from(0));
+        attrs.insert("level".into(), Value::from(1));
+        attrs.insert("item_seen".into(), Value::Bool(true));
+        attrs.insert("xp".into(), Value::from(0));
+        attrs.insert("variants".into(), variants);
+        attrs.insert("favorite".into(), Value::Bool(js::truthy(fav.as_ref())));
+        attrs.insert("rnd_sel_cnt".into(), Value::from(0));
+        let mut item = Obj::with_capacity(3);
+        item.insert("templateId".into(), Value::String(tid.clone()));
+        item.insert("attributes".into(), Value::Object(attrs));
+        item.insert("quantity".into(), Value::from(1));
+        js::set(&mut items, id, Value::Object(item));
     }
     for (_, d) in DEFAULTS {
         let k = d.to_lowercase();
@@ -310,7 +319,9 @@ fn athena(app: &App, st: &Obj, info: &Info) -> JsResult<Value> {
     let mut p = js::obj(json!({ "_id": app.account_id, "created": SINCE, "updated": js::now_iso(), "rvn": rvn, "wipeNumber": 1,
         "accountId": app.account_id, "profileId": "athena", "version": "offline", "commandRevision": rvn }));
     p.insert("items".into(), Value::Object(items));
-    p.insert("stats".into(), json!({ "attributes": a }));
+    let mut stats = Obj::with_capacity(1);
+    stats.insert("attributes".into(), Value::Object(a));
+    p.insert("stats".into(), Value::Object(stats));
     Ok(Value::Object(p))
 }
 
@@ -434,7 +445,10 @@ pub fn mcp(app: &App, command: &str, profile_id: &str, body: &Value, info: &Info
     js::put_opt(&mut r, "profileRevision", rvn.clone());
     r.insert("profileId".into(), json!(profile_id));
     js::put_opt(&mut r, "profileChangesBaseRevision", rvn);
-    r.insert("profileChanges".into(), json!([{ "changeType": "fullProfileUpdate", "profile": profile }]));
+    let mut change = Obj::with_capacity(2);
+    change.insert("changeType".into(), json!("fullProfileUpdate"));
+    change.insert("profile".into(), profile);
+    r.insert("profileChanges".into(), Value::Array(vec![Value::Object(change)]));
     js::put_opt(&mut r, "profileCommandRevision", cmd);
     r.insert("serverTime".into(), json!(js::now_iso()));
     r.insert("multiUpdate".into(), json!([]));
