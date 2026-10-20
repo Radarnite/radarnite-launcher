@@ -184,7 +184,8 @@ jobs:
         run: |
           x="$RUNNER_TEMP/program"; rm -rf "$x"
           7z x -y -bso0 -bsp0 -o"$x" "dist/RadarniteLauncherSetup-$VERSION.exe"
-          rm -rf "$x/\$PLUGINSDIR"
+          # no NSIS internals, and no uninstaller: run from an unzipped folder it would remove the installed one's keys
+          rm -rf "$x/\$PLUGINSDIR" "$x/Uninstall Radarnite Launcher.exe"
           (cd "$x" && 7z a -tzip -mx=9 -bso0 -bsp0 "$GITHUB_WORKSPACE/dist/RadarniteLauncher-$VERSION.zip" '*')
           stat -c '%10s %n' dist/*
           { echo '### Installer'; echo '```'; stat -c '%10s %n' dist/*; cat "dist/RadarniteLauncherSetup-$VERSION.exe.sha256"; echo; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

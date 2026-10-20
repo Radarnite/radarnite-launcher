@@ -34,7 +34,7 @@ folder and otherwise ignored; a PC with no internet is never blocked and an unve
   `vX.Y.Z-<branch>.N` (`feat/3.0` -> `v3.0.0-feat-3-0.1`), never the latest: only prerelease builds offer it.
 - A head commit whose message contains `[skip release]` is built and tested but not published.
 - Assets: `RadarniteLauncherSetup-<version>.exe`, its `.sha256` (2.x format) and `RadarniteLauncher-<version>.zip` (the
-  program folder, without the installer's registry, shortcuts and 2.x cleanup). Notes: the commits since the last tag.
+  program folder: no uninstaller, registry keys, shortcuts or 2.x cleanup). Notes: the commits since the last tag.
 - The payload (tools, gameserver, redirect, patches, notices) comes from the v2.2.1 installer, pinned by sha256
   (`tools/payload-from-release.sh` says why it is not built in CI). A new payload = pin there the installer of a
   release built with `just release`, which takes it from the PC's dev tree.

@@ -207,12 +207,13 @@ cmd_build() {
   echo "== verify the installer content"
   local x="$stage/extracted"; mkdir -p "$x"
   7z x -y -bso0 -bsp0 -o"$x" "$exe" >/dev/null || die "7z could not extract $exe"
-  # 7z puts NSIS internals in \$PLUGINSDIR and the uninstaller stub out; the payload is at the root
+  # 7z puts NSIS internals in \$PLUGINSDIR; the payload is at the root. 7-Zip 23+ (not p7zip 16.02) also extracts the
+  # uninstaller makensis wrote (radarnite.nsi's WriteUninstaller): not staged, so compared without it, gated with it
   local want got
   want="$(hash_tree "$app")"
-  got="$(hash_tree "$x" '$PLUGINSDIR')"
+  got="$(hash_tree "$x" '$PLUGINSDIR' | { grep -v '  \./Uninstall Radarnite Launcher\.exe$' || true; })"
   if [ "$want" != "$got" ]; then
-    diff <(echo "$want") <(echo "$got") | head -20 >&2
+    { diff <(echo "$want") <(echo "$got") || true; } | head -20 >&2
     die "the installer content differs from the staging"
   fi
   echo "  $(echo "$got" | wc -l | tr -d ' ') files identical to the staging"
