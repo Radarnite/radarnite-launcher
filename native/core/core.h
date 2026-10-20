@@ -12,7 +12,8 @@ namespace core {
 // Single instance (2.2.1 names): the UI's WinMain owns the mutex Local\RadarniteLauncher.MainWindow and the event
 // Local\RadarniteLauncher.ShowMainWindow. This only signals that event for a launch that lost the mutex, handing it
 // the foreground. true = an open main window (2.2.1 or 3.0) was signalled. The console verbs never call it.
-bool ForwardToRunningInstance();
+// suffix: appended to the event name, only for the UI selftest's own names (never the real launcher's).
+bool ForwardToRunningInstance(const wchar_t* suffix = nullptr);
 } // namespace core
 
 } // namespace rn

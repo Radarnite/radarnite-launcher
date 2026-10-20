@@ -1,16 +1,18 @@
-// Radarnite Launcher 3.0 native window (Win32 + Direct2D/DirectWrite), running against the mock core until
-// native/core plugs in through api.h.
+// Radarnite Launcher 3.0 native window (Win32 + Direct2D/DirectWrite) over the real core (native/core, api.h).
 //
-//   RadarniteUI.exe                         interactive, mock core (several builds; launch/stop simulated)
-//   RadarniteUI.exe --scenario <id>         interactive, one scenario of tests/ui-scenarios.mjs
-//   RadarniteUI.exe --selftest-ui [dir]     no visible window: first frame, RAM and CPU at rest, then every scenario
-//                                           rendered to <dir>\<id>.png (WIC) + <dir>\selftest.json; exit 0 when all ok
+//   RadarniteLauncher.exe                         the launcher window (real core)
+//   RadarniteLauncher.exe --check|--scan|...      the 2.x console verbs (native/core/cli.h): no window, no mutex
+//   RadarniteLauncher.exe --play <build>          launch that build; the window closes when the game closes
+//   RadarniteLauncher.exe --scenario <id>         interactive, mock core, one scenario of tests/ui-scenarios.mjs
+//   RadarniteLauncher.exe --selftest-ui [dir]     mock core, no visible window: first frame, RAM and CPU at rest, then
+//                                                 every scenario rendered to <dir>\<id>.png (WIC) + <dir>\selftest.json;
+//                                                 exit 0 when all ok
 //   options: --render hw (Direct2D on the GPU instead of its software rasterizer), --exit-after <ms>,
 //            --new-instance (developer: open the window even if one is already open)
 //
 // The window is single-instance per Windows session like 2.2.1 (launcher/Program.cs SingleInstance, same mutex and
 // event names, so 2.x and 3.0 share them): starting it again brings the open window to the front and exits. The
-// command-line modes (--selftest-ui) never take the mutex.
+// command-line modes (console verbs, --play, --selftest-ui) never take the mutex.
 //
 // Software rendering is the default: measured on the PC (125 %, 1500x1000 px) it draws a frame in ~8 ms and keeps the
 // process at ~22 MB private / 111 ms to the first frame, against ~56 MB / 290 ms with a D3D device (driver memory).
@@ -19,6 +21,8 @@
 // rounded corners), WM_NCCALCSIZE gives it all to the client, WM_NCHITTEST answers the resize edges and HTCAPTION
 // on the title bar (drag, double-click maximize, system menu are native).
 #include "ui.h"
+#include "../core/cli.h"
+#include "../core/core.h"
 #include "resource.h"
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -58,13 +62,8 @@ bool claim(const std::wstring& suffix) {
     HANDLE m = CreateMutexW(nullptr, TRUE, (kMutex + suffix).c_str());
     if (!m) return true;   // never block the launcher on a mutex problem
     if (GetLastError() != ERROR_ALREADY_EXISTS) { g_mutex = m; return true; }
-    // an open main window listens on the event: ask it to come to the front and step aside
-    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, (kShow + suffix).c_str())) {
-        AllowSetForegroundWindow(ASFW_ANY);   // we were just started by the user: hand the foreground over
-        SetEvent(ev);
-        CloseHandle(ev); CloseHandle(m);
-        return false;
-    }
+    // an open main window listens on the event: ask it to come to the front and step aside (the core signals it)
+    if (rn::core::ForwardToRunningInstance(suffix.c_str())) { CloseHandle(m); return false; }
     // no listener: the owner is exiting (e.g. closing for an update) or still starting; wait for it briefly
     DWORD w = WaitForSingleObject(m, 3000);
     if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { g_mutex = m; return true; }   // abandoned: the owner died, it is ours
@@ -540,12 +539,19 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    std::wstring scenario, selftestDir, probeSuffix;
+    {
+        // console verbs of 2.x (--check, --scan, --firewall, --set-builds-folder, --update-check ...): no window, no mutex
+        bool handled = false;
+        int rc = rn::cli::run(argc, argv, &handled);
+        if (handled) { LocalFree(argv); CoUninitialize(); return rc; }
+    }
+    std::wstring scenario, selftestDir, probeSuffix, autoPlay;
     bool selftestMode = false, newInstance = false, probe = false;
     int exitAfter = 0;
     for (int i = 1; i < argc; i++) {
         std::wstring a = argv[i];
-        if (a == L"--selftest-ui") { selftestMode = true; if (i + 1 < argc && argv[i + 1][0] != L'-') selftestDir = argv[++i]; }
+        if (a == L"--play" && i + 1 < argc) autoPlay = argv[++i];
+        else if (a == L"--selftest-ui") { selftestMode = true; if (i + 1 < argc && argv[i + 1][0] != L'-') selftestDir = argv[++i]; }
         else if (a == L"--scenario" && i + 1 < argc) scenario = argv[++i];
         else if (a == L"--render" && i + 1 < argc) g_software = std::wstring(argv[++i]) != L"hw";
         else if (a == L"--exit-after" && i + 1 < argc) exitAfter = _wtoi(argv[++i]);
@@ -555,8 +561,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     LocalFree(argv);
     // selftest probe: a second launch on the selftest's names; 10 = it signalled the open window and stepped aside
     if (probe) { int code = single::claim(probeSuffix) ? 0 : 10; single::release(); CoUninitialize(); return code; }
-    // the window: one per session (2.2.1 behaviour), unless --new-instance; command-line modes never take the mutex
-    if (!selftestMode && !newInstance && !single::claim(L"")) { CoUninitialize(); return 0; }
+    // the window: one per session (2.2.1 behaviour), unless --new-instance; --play and --selftest-ui never take the mutex
+    if (!selftestMode && !newInstance && autoPlay.empty() && !single::claim(L"")) { CoUninitialize(); return 0; }
     if (!g_gfx.init(inst)) return 3;
     g_tGfx = msSinceStart();
 
@@ -565,7 +571,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         if (selftestDir.empty()) { wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH); selftestDir = exe; selftestDir = selftestDir.substr(0, selftestDir.find_last_of(L'\\')) + L"\\selftest-ui"; }
         rc = selftest(inst, selftestDir);
     } else {
-        Core* core = createMockCore(scenario.empty() ? nullptr : scenario.c_str());
+        // the real core; the mock only for a --scenario (it, and --selftest-ui, show made-up builds)
+        Core* core = !scenario.empty() ? createMockCore(scenario.c_str()) : rn::createCore(autoPlay.empty() ? nullptr : autoPlay.c_str());
         g_app = new App(g_gfx, core);
         HWND h = createWindow(inst, false, 1180, 740);
         single::listen(h, L"");
@@ -576,7 +583,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         if (exitAfter > 0) SetTimer(h, 99, exitAfter, nullptr);
         MSG m;
         while (GetMessageW(&m, nullptr, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
-        delete core;   // stops the mock's timers before the window state goes away
+        delete core;   // stops the core's session (or the mock's timers) before the window state goes away
         delete g_app; g_app = nullptr;
         discardTarget();
         single::release();

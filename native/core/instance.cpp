@@ -2,12 +2,15 @@
 // window to the front) belongs to the UI's WinMain; the core only signals an open window.
 #include "core.h"
 #include <windows.h>
+#include <string>
 
 namespace rn {
 namespace core {
 
-bool ForwardToRunningInstance() {
-    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\RadarniteLauncher.ShowMainWindow");
+bool ForwardToRunningInstance(const wchar_t* suffix) {
+    std::wstring name = L"Local\\RadarniteLauncher.ShowMainWindow";
+    if (suffix) name += suffix;
+    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, name.c_str());
     if (!ev) return false;
     AllowSetForegroundWindow(ASFW_ANY);   // we were just started by the user: hand the foreground over
     BOOL ok = SetEvent(ev);

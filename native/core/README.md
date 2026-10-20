@@ -18,7 +18,8 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
 
 ## Build
 
-`ZIG=/opt/homebrew/bin/zig native/core/build.sh [outdir]` (Mac or PC, never the dev box):
+`ZIG=/opt/homebrew/bin/zig native/core/build.sh [outdir]` on the Mac (`just build-core`), or `build.cmd [outdir]` on
+the PC, which has no bash; never the dev box:
 
 - `out/librncore.a`: every module plus yyjson
 - `out/rn-core-cli.exe`: the command line alone (console subsystem), for tests
@@ -30,15 +31,15 @@ Test switches (environment): `RADARNITE_LAUNCHER_DIR` (another launcher folder: 
 
 ## Linking the window to the real core
 
-`ui-link.diff` is the change to `native/ui/main.cpp`, checked by linking it (649 KB):
+Done in `native/ui/main.cpp` (`ui-link.diff` was the proposal; the build is `native/ui/build.rsp`, `just build-mac`):
 
 1. `rn::cli::run(argc, argv, &handled)` right after `CommandLineToArgvW`, before any window or mutex; return its exit
    code when `handled`. The installer's `--set-builds-folder` and the elevated `--firewall` go through it.
 2. `--play <build>` → `rn::createCore(build)`; otherwise `rn::createCore(nullptr)` instead of `createMockCore(nullptr)`.
    The mock stays for `--scenario` and `--selftest-ui`.
 3. Single instance stays in WinMain (2.2.1 mutex and event) and, as in 2.2.1, only for the plain window: the console
-   verbs, `--play` and `--selftest-ui` never take the mutex. A launch that loses it may call
-   `rn::core::ForwardToRunningInstance()`.
+   verbs, `--play` and `--selftest-ui` never take the mutex. A launch that loses it signals the open window with
+   `rn::core::ForwardToRunningInstance()` (the only implementation; its suffix is for the UI selftest's own names).
 
 In `build.rsp`: `../core/out/librncore.a` after `app.res`, and `-lwinhttp -lbcrypt -loleaut32 -ladvapi32`. Build the
 core first for the same target. A `native/core/launch.cpp` providing `LaunchGame` replaces the stub: `build.sh` uses it
