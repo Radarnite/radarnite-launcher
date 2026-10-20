@@ -1,0 +1,8 @@
+// Resources of the native UI. Fonts, logo and icon come from launcher/ (the 2.x page assets, unchanged).
+#include "resource.h"
+
+1 24 "app.manifest"
+IDI_APP ICON "../../launcher/radarnite.ico"
+RES_FONT_INTER RCDATA "../../launcher/ui/fonts/Inter-var-latin.woff2"
+RES_FONT_INTER_TIGHT RCDATA "../../launcher/ui/fonts/InterTight-900i-latin.woff2"
+RES_LOGO_PNG RCDATA "../../launcher/ui/radarnite.png"

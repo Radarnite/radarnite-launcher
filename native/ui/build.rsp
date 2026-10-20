@@ -1,0 +1,5 @@
+-target x86_64-windows-gnu -std=c++20 -Os -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections
+-DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN -DNOMINMAX -Wall -Wno-unused-function -Wno-missing-braces
+-Wl,--subsystem,windows -Wl,--gc-sections -s
+main.cpp ui.cpp gfx.cpp mock_api.cpp app.res
+-ld2d1 -ldwrite -lwindowscodecs -ldwmapi -lcomctl32 -lgdi32 -luser32 -lole32 -lpsapi -lshell32 -luuid
