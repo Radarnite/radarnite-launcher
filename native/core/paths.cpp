@@ -67,7 +67,7 @@ void resetRoot() { Guard g(g_lock); g_rootSet = false; g_rootGen++; }
 std::wstring config() { return join(launcherDir(), L"config.json"); }
 std::wstring node() { return join(launcherDir(), L"node\\node.exe"); }
 std::wstring backendScript() { return join(launcherDir(), L"backend\\server.mjs"); }
-std::wstring backend() { return join(launcherDir(), L"backend\\radarnite-backend.exe"); }
+std::wstring backend() { return join(launcherDir(), L"radarnite-backend.exe"); }   // where radarnite.nsi installs it
 std::wstring redirectDll() { return join(launcherDir(), L"redirect\\fnredirect.dll"); }
 std::wstring gameServerDll() { return join(launcherDir(), L"gameserver\\radarnite-server.dll"); }
 std::wstring pakPatchDll() { return join(launcherDir(), L"patches\\fnpakpatch.dll"); }

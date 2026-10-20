@@ -21,7 +21,7 @@ std::wstring preflight(const BuildInfo& b, bool needMatch, const std::vector<pro
 std::wstring preflight(const BuildInfo& b, bool needMatch);
 // The same with the build's firewall check already made (firewall::check result; only used when the earlier checks pass).
 std::wstring preflightChecked(const BuildInfo& b, const std::vector<proc::Info>& procs, const std::wstring& firewallCheck);
-// The backend the session would start: backend\radarnite-backend.exe, or node\node.exe + backend\server.mjs (2.x).
+// The backend the session would start: radarnite-backend.exe, or node\node.exe + backend\server.mjs (2.x).
 bool backendAvailable();
 // Session.StopAll: kills only processes whose executable is inside the builds root (the offline builds, their stubs,
 // a dev tree's node.exe), never the launcher itself. Returns how many.

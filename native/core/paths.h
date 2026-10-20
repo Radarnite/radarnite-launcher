@@ -25,7 +25,7 @@ struct ConfigLock {
 std::wstring config();               // <launcher>\config.json
 std::wstring node();                 // <launcher>\node\node.exe (2.x dev tree backend runtime)
 std::wstring backendScript();        // <launcher>\backend\server.mjs
-std::wstring backend();              // <launcher>\backend\radarnite-backend.exe (3.0 backend, same CLI as server.mjs)
+std::wstring backend();              // <launcher>\radarnite-backend.exe (3.0 backend, same CLI as server.mjs)
 std::wstring redirectDll();
 std::wstring gameServerDll();
 std::wstring pakPatchDll();

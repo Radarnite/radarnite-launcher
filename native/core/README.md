@@ -7,7 +7,8 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
   version scan with the `offline\build.json` cache, lobby/match support
 - `firewall`: `INetFwPolicy2` through vtables, one rule enumeration per read, create or remove
 - `proc`, `session`: process list, job objects (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), preflight, StopAll, the backend
-  (`backend\radarnite-backend.exe`, else `node\node.exe backend\server.mjs`), health wait, write audit
+  (`radarnite-backend.exe` next to the launcher, where the installer puts it, else `node\node.exe backend\server.mjs`),
+  health wait, write audit
 - `launch.h`: the one game-launch entry point, `LaunchGame`; `launch_stub.cpp` answers
   "game launch not implemented in this core"
 - `net`, `update`: WinHTTP + BCrypt SHA-256 self-update, same assets and `.sha256` check as `Update.cs`
