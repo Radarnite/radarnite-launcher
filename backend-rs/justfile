@@ -1,9 +1,9 @@
 # radarnite-backend (Rust port of backend/server.mjs) recipes, run from the Linux dev box.
 # Builds and tests run on the Mac (ssh `mac`, cargo zigbuild), never here; the PC (ssh `windows`) only runs the exe,
 # one job at a time for all agents (flock /tmp/rn-launcher-pc.lock). No machine starts anything above 70 % CPU.
-# Usable alone (just -f backend-rs/justfile <recipe>) or from the root justfile (`import 'backend-rs/justfile'`).
-
-set shell := ["bash", "-euo", "pipefail", "-c"]
+# Usable alone (just -f backend-rs/justfile <recipe>) or from the root justfile, with `import 'backend-rs/justfile'`
+# (recipes and variables are prefixed so they do not collide) or `mod backend 'backend-rs/justfile'`.
+# No `set shell` here: the root justfile owns it; every line also runs under plain sh.
 
 backend_src := source_directory()
 backend_mac := "agent-work/rl-backend"
