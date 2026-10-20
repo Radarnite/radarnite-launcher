@@ -158,6 +158,7 @@ std::wstring newGuidN() {
 } // namespace
 
 LauncherConfig LauncherConfig::load() {
+    paths::ConfigLock lock;
     LauncherConfig c;
     std::wstring path = paths::config();
     std::string text;
@@ -214,6 +215,7 @@ std::string LauncherConfig::serialize() const {
 }
 
 bool LauncherConfig::save() const {
+    paths::ConfigLock lock;
     bool ok = writeFile(paths::config(), serialize());
     paths::resetRoot();
     return ok;

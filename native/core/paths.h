@@ -12,6 +12,16 @@ namespace paths {
 const std::wstring& launcherDir();
 std::wstring root();                 // cached until resetRoot()
 void resetRoot();                    // config.json was saved
+// Held while config.json is read or written in this process (the window saves on its thread while the core's
+// threads load it): a reader never sees a half-written file. Recursive: Config::load may save.
+void lockConfig();
+void unlockConfig();
+struct ConfigLock {
+    ConfigLock() { lockConfig(); }
+    ~ConfigLock() { unlockConfig(); }
+    ConfigLock(const ConfigLock&) = delete;
+    ConfigLock& operator=(const ConfigLock&) = delete;
+};
 std::wstring config();               // <launcher>\config.json
 std::wstring node();                 // <launcher>\node\node.exe (2.x dev tree backend runtime)
 std::wstring backendScript();        // <launcher>\backend\server.mjs
