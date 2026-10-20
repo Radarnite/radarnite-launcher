@@ -361,8 +361,18 @@ static void writeStd(DWORD which, const std::wstring& line) {
     Guard g(g_outLock);
     std::wstring l = line + L"\r\n";
     DWORD mode, w;
-    if (GetConsoleMode(h, &mode)) WriteConsoleW(h, l.data(), (DWORD)l.size(), &w, nullptr);
-    else { std::string u = narrow(l); WriteFile(h, u.data(), (DWORD)u.size(), &w, nullptr); }
+    if (GetConsoleMode(h, &mode)) { WriteConsoleW(h, l.data(), (DWORD)l.size(), &w, nullptr); return; }
+    // Console.Out's encoding (EncodingHelper.GetSupportedConsoleEncoding): the console output code page, which is 0
+    // (= the ANSI code page) in a process without a console like RadarniteLauncher.exe; best-fit, '?' for the rest.
+    UINT cp = GetConsoleOutputCP();
+    std::string bytes;
+    if (cp == CP_UTF8) bytes = narrow(l);
+    else {
+        int n = WideCharToMultiByte(cp, 0, l.data(), (int)l.size(), nullptr, 0, nullptr, nullptr);
+        bytes.resize(n > 0 ? n : 0);
+        if (n > 0) WideCharToMultiByte(cp, 0, l.data(), (int)l.size(), &bytes[0], n, nullptr, nullptr);
+    }
+    WriteFile(h, bytes.data(), (DWORD)bytes.size(), &w, nullptr);
 }
 
 void out(const std::wstring& line) { writeStd(STD_OUTPUT_HANDLE, line); }

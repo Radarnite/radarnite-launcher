@@ -55,7 +55,8 @@ std::wstring nowIso();                                 // DateTime.Now.ToString(
 std::wstring isoLocal(const FILETIME& utc);            // a file time as local DateTime.ToString("O")
 std::wstring nowTime(const wchar_t* pattern);          // "HH:mm:ss", "yyyyMMddHHmmss" ... (y M d H m s only)
 
-// ---- console: Console.WriteLine (UTF-16 to a console, UTF-8 to a pipe/file, nothing when there is no stdout)
+// ---- console: Console.WriteLine (UTF-16 to a console; to a pipe/file in the console output code page, the ANSI one
+//      without a console, like .NET; nothing when there is no stdout)
 void out(const std::wstring& line);
 void err(const std::wstring& line);
 
