@@ -9,8 +9,8 @@
   3. Checks: only that install's processes were closed; the folder holds exactly the 3.x files (<Expected>, relative
      paths) plus config.json, the logs, the uninstaller and the locked file; every key and value of config.json kept
      (the installer's --set-builds-folder rewrites it in the launcher's own format) and update.log unchanged;
-     InstallDir, BuildsFolder and the uninstall key kept, DisplayVersion updated; the silent uninstaller removes the
-     uninstall key in place (_?=) without waiting on itself, and leaves a desktop shortcut it did not create.
+     InstallDir, BuildsFolder and the uninstall key kept, DisplayVersion updated and equal to the new exe's
+     ProductVersion; the silent uninstaller removes the uninstall key in place (_?=) without waiting on itself, and leaves a desktop shortcut it did not create.
   Refuses to run when a Radarnite Launcher install, its registry keys or shortcuts exist; removes exactly what it
   created. Results: <Root>\out\migration.json.
 #>
@@ -157,6 +157,11 @@ try {
   $checks.registryKept = ($after.InstallDir -eq $before.installDir) -and ($after.BuildsFolder -eq $before.buildsFolder) -and ($un.UninstallString -eq $before.uninstall)
   $R.displayVersion = $un.DisplayVersion
   $checks.displayVersionUpdated = $un.DisplayVersion -ne $R.oldVersion
+  # the upgraded exe carries the same full version as the uninstall key (the updater compares that string)
+  $vi = (Get-Item "$inst\RadarniteLauncher.exe").VersionInfo
+  $R.newVersion = $vi.ProductVersion
+  $R.newFileVersion = "$($vi.FileMajorPart).$($vi.FileMinorPart).$($vi.FileBuildPart).$($vi.FilePrivatePart) ($($vi.FileVersion))"
+  $checks.exeProductVersionIsDisplayVersion = $vi.ProductVersion -ceq $un.DisplayVersion
   $checks.startMenuLnk = Test-Path $smLnk
   # the 3.x uninstaller, run in place (_?=) like a Sandbox test: it must not close itself, must keep BuildsFolder and
   # must leave a desktop shortcut it did not create (backed up first and put back if it went anyway)

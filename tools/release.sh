@@ -4,13 +4,18 @@
 #
 #   tools/release.sh build --version 3.0.0-rc.1 --launcher <RadarniteLauncher.exe> --backend <radarnite-backend.exe> \
 #       --payload <dir> [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>] [--ban <text>]...
+#       [--no-version-check]
 #   tools/release.sh privacy-scan <file|dir>...   the privacy gate alone (exit 1 on any hit)
 #   tools/release.sh sha256-line <file>           the .sha256 asset content for <file> (no trailing newline)
+#   tools/release.sh product-version <exe>        the ProductVersion of an exe's version resource ("" = none)
 #
 # build: stage -> scrub the prebuilt payload -> privacy gate on the staging -> makensis -> extract the installer with
 # 7z, compare it file by file with the staging and run the gate again on what is really inside -> write
 # RadarniteLauncherSetup-<version>.exe and its .sha256 ("<sha256>  <name>", no newline: the 2.x asset format, which
 # the 2.x updater reads with First64Hex).
+# --version is the one the launcher was built as (RN_VERSION, native/core/version.sh): its ProductVersion must be
+# exactly --version, so the updater, the version resource, DisplayVersion and the installer name always agree
+# (--no-version-check: only for placeholder exes without a version resource, tools/release-selftest.sh).
 #
 # --payload is the rest of the program folder exactly as installed: redirect\fnredirect.dll,
 # gameserver\radarnite-server.dll, patches\fnpakpatch.dll, tools\ (cosmetics-gen, fn-modkit-sigfit,
@@ -119,10 +124,23 @@ hash_tree() {
 
 sha256_line() { local f="$1"; printf '%s  %s' "$(sha256 "$f")" "$(basename "$f")"; }
 
+# product_version <exe> : the ProductVersion string of its VS_VERSIONINFO (UTF-16LE key, padding, value), "" if none
+product_version() {
+  perl -e 'use strict; use warnings; use Encode qw(decode encode);
+    open my $f, "<:raw", $ARGV[0] or die "cannot read $ARGV[0]\n"; local $/; my $d = <$f> // ""; close $f;
+    my $k = encode("UTF-16LE", "ProductVersion\0");
+    while ($d =~ /\Q$k\E/g) {
+      my $at = pos($d); next if (pos($d) - length $k) % 2;
+      $at += 2 while substr($d, $at, 2) eq "\0\0" && $at % 4;   # padding to a 32-bit boundary
+      my $v = ""; while ($at + 1 < length $d) { my $c = substr($d, $at, 2); last if $c eq "\0\0"; $v .= $c; $at += 2 }
+      print decode("UTF-16LE", $v); exit 0;
+    }' "$1"
+}
+
 # ---------------------------------------------------------------- build
 cmd_build() {
   local version="" launcher="" backend="" payload="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
-  local nsi="$ROOT/radarnite.nsi" makensis="" keep=0
+  local nsi="$ROOT/radarnite.nsi" makensis="" keep=0 vcheck=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --version) version="$2"; shift 2 ;;
@@ -135,6 +153,7 @@ cmd_build() {
       --makensis) makensis="$2"; shift 2 ;;
       --ban) add_ban "$2"; shift 2 ;;
       --keep-stage) keep=1; shift ;;
+      --no-version-check) vcheck=0; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -143,6 +162,10 @@ cmd_build() {
   for f in "$launcher" "$backend" "$icon" "$nsi"; do [ -f "$f" ] || die "missing file: '$f'"; done
   [ -d "$payload" ] || die "missing payload folder: '$payload'"
   for f in "$launcher" "$backend"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
+  if [ "$vcheck" = 1 ]; then
+    local pv; pv="$(product_version "$launcher")"
+    [ "$pv" = "$version" ] || die "the launcher's ProductVersion is '$pv', not $version: build it as $version (RN_VERSION=$version, just release $version)"
+  fi
   [ -n "$makensis" ] || makensis="$(command -v makensis || echo /opt/homebrew/bin/makensis)"
   [ -x "$makensis" ] || die "makensis not found (brew install makensis, or --makensis)"
   command -v 7z >/dev/null || die "7z not found (brew install p7zip / sevenzip): needed to verify the installer"
@@ -151,7 +174,7 @@ cmd_build() {
   STAGE="$(mktemp -d "${TMPDIR:-/tmp}/radarnite-stage.XXXXXX")"; KEEP=$keep
   trap '[ "$KEEP" = 1 ] && echo "staging kept: $STAGE" || rm -rf "$STAGE"' EXIT
   local stage="$STAGE" app="$STAGE/app"; mkdir -p "$app"
-  echo "== stage $version (numeric $vnum)"
+  echo "== stage $version (numeric $vnum)$([ "$vcheck" = 1 ] && echo ", launcher ProductVersion $version")"
   cp -R "$payload/." "$app/"
   # the 3.0 program folder: no .NET runtime, no Node, no WebView2 page, never user data or anything from Epic
   local bad=""
@@ -209,5 +232,6 @@ case "${1:-}" in
   build) shift; cmd_build "$@" ;;
   privacy-scan) shift; [ $# -gt 0 ] || die "usage: release.sh privacy-scan <file|dir>..."; privacy_scan "$@" ;;
   sha256-line) [ -f "${2:-}" ] || die "usage: release.sh sha256-line <file>"; sha256_line "$2" ;;
-  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  product-version) [ -f "${2:-}" ] || die "usage: release.sh product-version <exe>"; product_version "$2"; echo ;;
+  *) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

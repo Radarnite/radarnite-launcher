@@ -11,7 +11,9 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
   health wait, write audit
 - `launch.h`: the one game-launch entry point, `LaunchGame`; `launch_stub.cpp` answers
   "game launch not implemented in this core"
-- `net`, `update`: WinHTTP + BCrypt SHA-256 self-update, same assets and `.sha256` check as `Update.cs`
+- `net`, `update`: WinHTTP + BCrypt SHA-256 self-update, same assets and `.sha256` check as `Update.cs`; versions
+  compared as semver with pre-releases. A release build asks `releases/latest` only, like 2.x; a pre-release build
+  (`3.0.0-rc.N`, a GitHub prerelease) also reads the newest entry of `/releases` and is offered the newer of the two
 - `builddata`: AES keys and mappings download, `fn-cosmetics-gen`, add a build from a zip (Windows `tar.exe`) or a folder
 - `cli`: `--check --scan --set-builds-folder --firewall --firewall-remove --update-check --cosmetics --stop --selftest-inject`
 - `core`: `rn::createCore()` implements `api.h`; `rn::core::ForwardToRunningInstance()` signals an open window
@@ -24,10 +26,14 @@ the PC, which has no bash; never the dev box:
 - `out/librncore.a`: every module plus yyjson
 - `out/rn-core-cli.exe`: the command line alone (console subsystem), for tests
 
-Version: `version.h` (3.0.0), or `RN_DEFINES='-DRN_VERSION_MAJOR=3 -DRN_VERSION_MINOR=0 -DRN_VERSION_PATCH=1'`.
+Version: `version.h` (3.0.0), or `RN_VERSION=3.0.0-rc.1 native/core/build.sh` (`just release 3.0.0-rc.1` does it):
+`version.sh` writes `out/obj/version.gen.h`, which the core and the window's version resource both read (FileVersion
+3.0.0.1, ProductVersion `3.0.0-rc.1`). On the PC, `build.cmd` takes that header as `RN_VERSION_H` (`just build-pc`).
+`RN_CORETEST=1` also links `out/coretest.exe` (test/coretest.cpp).
 Test switches (environment): `RADARNITE_LAUNCHER_DIR` (another launcher folder: its `config.json`, `node`, `tools`),
-`RADARNITE_FW_GROUP` (firewall group instead of `FN Offline Builds`). Neither crosses the UAC prompt of the elevated
-`--firewall` re-run.
+`RADARNITE_FW_GROUP` (firewall group instead of `FN Offline Builds`), `RADARNITE_UPDATE_API` (the updater's GitHub API
+root; only `http://127.0.0.1:<port>` or `http://localhost:<port>` is taken, for `test/fake-github.mjs`, and logged to
+`update.log`). None crosses the UAC prompt of the elevated `--firewall` re-run.
 
 ## Linking the window to the real core
 

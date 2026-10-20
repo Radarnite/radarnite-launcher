@@ -4,7 +4,8 @@
 #   tools/release-selftest.sh [workdir]        (ZIG=/opt/homebrew/bin/zig, MAKENSIS=..., REF_VERSION=2.2.1)
 # Checks: a clean build passes; a builder path or identity planted in an exe (UTF-8 and UTF-16LE) fails the gate;
 # user data in the payload is refused; the gate on the extracted installer catches what LZMA hides from a raw scan;
-# the .sha256 is byte-identical in format to a published 2.x asset; the real 2.x payload passes the gate.
+# the .sha256 is byte-identical in format to a published 2.x asset; the real 2.x payload passes the gate; a launcher
+# without the ProductVersion --version is refused.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REL="$ROOT/tools/release.sh"
@@ -59,7 +60,8 @@ perl -e 'binmode STDOUT; print "MZ..RSDS C:\\Users\\someone\\.nuget\\lib.pdb\0..
 printf 'notices\n' > payload/THIRD-PARTY-NOTICES.txt
 printf 'readme\n' > payload/README-offline.md
 
-build() { "$REL" build --makensis "$MAKENSIS" --payload "${PAYLOAD:-payload}" --out out "$@"; }
+# the placeholders have no version resource: --no-version-check (case 8 runs with NOVC= to get the check)
+build() { "$REL" build --makensis "$MAKENSIS" --payload "${PAYLOAD:-payload}" --out out ${NOVC---no-version-check} "$@"; }
 
 # ---- 1. clean build, prerelease version ----
 V=3.0.0-rc.1
@@ -127,6 +129,11 @@ for p in tools gameserver redirect patches THIRD-PARTY-NOTICES.txt README-offlin
 if PAYLOAD=payload-real build --version 3.0.0-rc.2 --launcher in/RadarniteLauncher.exe --backend in/radarnite-backend.exe > t7.log 2>&1; then
   ok "release with the real $REF_VERSION payload: $(grep '^installer:' t7.log | sed 's|.*/||')"
 else ko "release with the real $REF_VERSION payload"; grep -E 'LEAK|release:' t7.log | head -20; fi
+
+# ---- 8. the launcher's ProductVersion must be --version ----
+if NOVC= build --version 3.0.0-rc.9 --launcher in/RadarniteLauncher.exe --backend in/radarnite-backend.exe > t8.log 2>&1; then
+  ko "a launcher without ProductVersion 3.0.0-rc.9 was accepted"
+else grep -q "ProductVersion is '', not 3.0.0-rc.9" t8.log && ok "launcher without the --version ProductVersion refused" || { ko "t8 wrong reason"; tail -3 t8.log; }; fi
 
 echo "== $pass passed, $fail failed (work dir $W)"
 [ "$fail" -eq 0 ]

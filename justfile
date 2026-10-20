@@ -7,6 +7,9 @@
 # PC jobs share one lock with the other agents (/tmp/rn-launcher-pc.lock): every PC recipe takes it itself and checks the
 # CPU inside it, right before the job, so never wrap them in flock. Everything on the PC lives in pc_dir (just clean-remote).
 # RN_WIN_LANE: optional queue wrapper for PC jobs (a script taking the cmd.exe line as its argument).
+# RN_PC_DIR: another PC work folder than pc_dir's default (an environment variable, so the nested `just` calls get it).
+# RN_VERSION: the version the core and the window are built as (native/core/version.sh), default version.h's;
+# `just release <version>` sets it.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -16,11 +19,12 @@ import 'backend-rs/justfile'
 
 mac_proj := "rl-launcher"
 mac_dir := "agent-work/mirror/" + mac_proj
-pc_dir := 'S:\rl-integ-test'
+pc_dir := env_var_or_default("RN_PC_DIR", 'S:\rl-integ-test')
 pc_fwd := replace(pc_dir, '\', '/')
 pc_lock := "/tmp/rn-launcher-pc.lock"
 zig := "/opt/homebrew/bin/zig"
 mac_path := 'export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"'
+rn_version := env_var_or_default("RN_VERSION", "")
 quiet := '{ grep -v -e nullability -e _Nullable -e _Nonnull -e "note: insert" -e "In file included" -e "^ *|" -e "^ *[0-9]* |" -e "warnings generated" || true; }'
 
 # the published 2.2.1 installer: the reference of the core parity, the window numbers and the migration test
@@ -35,9 +39,9 @@ build:
     if just _cpu-ok mac; then just build-mac; else echo "Mac busy or away: building the core and the window on the PC" >&2; just build-pc; fi
     just build-backend
 
-# Build the core on the Mac: native/core/out/librncore.a and rn-core-cli.exe
+# Build the core on the Mac: native/core/out/librncore.a and rn-core-cli.exe (as RN_VERSION when set)
 build-core: (_wait-cpu "mac") _sync-mac
-    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/native/core && ZIG={{zig}} ./build.sh out 2>&1 | {{quiet}}'
+    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/native/core && RN_VERSION={{rn_version}} ZIG={{zig}} ./build.sh out 2>&1 | {{quiet}}'
     mkdir -p native/core/out
     mac get {{mac_dir}}/native/core/out/librncore.a native/core/out/librncore.a
     mac get {{mac_dir}}/native/core/out/rn-core-cli.exe native/core/out/rn-core-cli.exe
@@ -56,10 +60,17 @@ build-pc:
     exec 9>{{pc_lock}}; flock 9
     just _wait-cpu windows
     pc sh '(if exist {{pc_dir}}\src rmdir /s /q {{pc_dir}}\src) & mkdir {{pc_dir}}\src'
+    # RN_VERSION: its version.gen.h made here (build.cmd has no semver parser) and shipped as src\version.gen.h
+    gen=$(mktemp -d); trap 'rm -rf "$gen"' EXIT
+    vset=""; vtar=()
+    if [ -n "{{rn_version}}" ]; then
+      native/core/version.sh "{{rn_version}}" > "$gen/version.gen.h"
+      vset='set "RN_VERSION_H={{pc_dir}}\src\version.gen.h" && '; vtar=(-C "$gen" version.gen.h)
+    fi
     tar -c native/core/*.cpp native/core/*.h native/core/build.cmd native/core/vendor native/ui/*.cpp native/ui/*.h native/ui/app.rc \
       native/ui/app.manifest native/ui/build.rsp native/ui/build.cmd launcher/ui/fonts launcher/ui/radarnite.png launcher/radarnite.ico \
-      | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\src'
-    pc sh 'set "ZIG=%LOCALAPPDATA%\fp-tools\zig\zig.exe" && {{pc_dir}}\src\native\core\build.cmd out && {{pc_dir}}\src\native\ui\build.cmd {{pc_dir}}\src\native\ui\out\RadarniteLauncher.exe'
+      "${vtar[@]}" | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\src'
+    pc sh "$vset"'set "ZIG=%LOCALAPPDATA%\fp-tools\zig\zig.exe" && {{pc_dir}}\src\native\core\build.cmd out && {{pc_dir}}\src\native\ui\build.cmd {{pc_dir}}\src\native\ui\out\RadarniteLauncher.exe'
     mkdir -p native/core/out native/ui/out
     for f in core/out/librncore.a core/out/rn-core-cli.exe ui/out/RadarniteLauncher.exe; do scp -q "windows:{{pc_fwd}}/src/native/$f" "native/$f"; done
     ls -l native/core/out/librncore.a native/core/out/rn-core-cli.exe native/ui/out/RadarniteLauncher.exe
@@ -73,10 +84,12 @@ parity *args:
     test -x backend-rs/out/radarnite-backend-linux-aarch64 || just build-backend
     tests/parity/run.sh {{args}}
 
-# Local release candidate on the Mac: the real exes, the PC's payload, privacy gate, .sha256 -> dist/ (never published)
-release version="3.0.0-rc.1": build
+# Local release candidate on the Mac: the exes built as <version>, the PC's payload, privacy gate, .sha256 -> dist/
+# (never published). release.sh refuses a launcher whose ProductVersion is not <version>.
+release version="3.0.0-rc.1":
     #!/usr/bin/env bash
     set -euo pipefail
+    RN_VERSION='{{version}}' just build
     just _sync-mac   # the exes in out/ are the ones shipped, wherever they were built
     just _wait-cpu windows
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
@@ -134,6 +147,27 @@ core-parity-pc: _ref-setup _exe
     if (-not $pre -and (Test-Path 'HKCU:\Software\Radarnite')) { Remove-Item -Recurse -Force 'HKCU:\Software\Radarnite'; 'HKCU\Software\Radarnite was created by the runs: removed' }
     EOF
     ! grep -E ' DIFF|TIMEOUT|config restored: False|untouched: False|unchanged by the runs: False' dist/core-parity.txt
+
+# The updater on the PC (native/core/test/update-check.ps1): the version table (coretest semver), then --update-check
+# of rn-core-cli built on the Mac as 3.0.0, 3.0.0-rc.1 and 3.0.0-rc.2 (native/core/out/test) and of the window exe
+# against a fake GitHub API on the PC's loopback (test/fake-github.mjs), and once against the real API
+core-update-test-pc: (_wait-cpu "mac") _sync-mac
+    #!/usr/bin/env bash
+    set -euo pipefail
+    vs="3.0.0 3.0.0-rc.1 3.0.0-rc.2"
+    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/native/core && for v in '"$vs"'; do RN_VERSION=$v RN_CORETEST=1 ZIG={{zig}} ./build.sh out/test/$v 2>&1 | {{quiet}}; done'
+    mkdir -p native/core/out/test
+    for v in $vs; do mac get {{mac_dir}}/native/core/out/test/$v/rn-core-cli.exe native/core/out/test/rn-core-cli-$v.exe; done
+    mac get {{mac_dir}}/native/core/out/test/3.0.0/coretest.exe native/core/out/test/coretest.exe
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    pc sh '(if exist {{pc_dir}}\update rmdir /s /q {{pc_dir}}\update) & mkdir {{pc_dir}}\update'
+    scp -q native/core/out/test/*.exe native/core/test/update-check.ps1 native/core/test/fake-github.mjs 'windows:{{pc_fwd}}/update/'
+    win=""
+    if [ -f native/ui/out/RadarniteLauncher.exe ]; then scp -q native/ui/out/RadarniteLauncher.exe 'windows:{{pc_fwd}}/update/'; win=' -Window {{pc_dir}}\update\RadarniteLauncher.exe'; fi
+    mkdir -p dist
+    ssh -o BatchMode=yes windows 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\update\update-check.ps1 -Dir {{pc_dir}}\update'"$win" | tee dist/update-check.txt
+    grep -q '^update-check: [0-9]* passed, 0 failed' dist/update-check.txt
 
 # Copy the window exe to the PC and run --selftest-ui in the signed-in session (cloaked, mock core): native/ui/selftest/
 selftest-pc *args: _exe

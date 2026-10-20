@@ -13,10 +13,16 @@ the real firewall group is only counted.
   point, `rn::Core` through `coretest.exe`, add from a zip or a folder
 - `oracle.ps1` + `escapes.py`: give every BMP code point to 2.2.1's config writer; `escapes.py` turns its output into
   the escape table in `json.cpp`
-- `coretest.cpp`: harness for `rn::Core` with a printing `UiSink`, and for `builddata::addZip`/`addFolder`
+- `coretest.cpp`: harness for `rn::Core` with a printing `UiSink`, for `builddata::addZip`/`addFolder`, and
+  `coretest semver`: the updater's tag parsing and semver precedence against a table
+- `update-check.ps1` + `fake-github.mjs` (`just core-update-test-pc`): `--update-check` of builds as 3.0.0, 3.0.0-rc.1
+  and 3.0.0-rc.2 (and of the window exe) against a fake GitHub API on 127.0.0.1 (`RADARNITE_UPDATE_API`): a release
+  build never reads the release list and prints what 2.x printed; an rc is offered the next rc or the final, never an
+  older one or a draft; then one check against the real API
 
 Layout the scripts expect in `-Dir`: `rlcoretest-ref\` (the extracted 2.2.1; its config is created with
-`--set-builds-folder S:\FortniteBuilds`), `rn-core-cli.exe`, `rn-core-cli-220.exe` (built with version 2.2.0, for the
-exit 10 path), `coretest.exe`, `RadarniteLauncher-linktest.exe` (`ui-link.diff` applied). The ref folder name must not
+`--set-builds-folder S:\FortniteBuilds`), `rn-core-cli.exe`, `rn-core-cli-220.exe` (`RN_VERSION=2.2.0 build.sh`, for
+the exit 10 path), `coretest.exe` (`RN_CORETEST=1 build.sh`), `RadarniteLauncher-linktest.exe` (`ui-link.diff`
+applied). The ref folder name must not
 be the real install's (`Radarnite Launcher`), and the fake builds are named `rlcoretest-*`: the firewall rule names
 are `FN Offline - <folder>\...`, and creating a rule first removes any rule with the same name.

@@ -5,6 +5,7 @@
 //   coretest.exe addfolder <dir>      builddata::addFolder into the builds folder
 //   coretest.exe fetch <url> <file>   net::download (redirects, streamed SHA-256) + update::sha256Token of the file
 //   coretest.exe sha <file>           net::sha256 of a file's bytes
+//   coretest.exe semver               update::parseTag / update::compare against a table (exit 1 on any failure)
 // Like RadarniteLauncher.exe, it runs rn::cli::run() first (the core re-runs its own exe for "--firewall").
 #include "../buildinfo.h"
 #include "../builddata.h"
@@ -82,6 +83,54 @@ int coreFlow(const std::wstring& build) {
     return 0;
 }
 
+// The updater's version parsing and Semantic Versioning 2.0.0 precedence: one line per check, "FAIL" on a mismatch.
+int semverTable() {
+    int fails = 0, checks = 0;
+    auto expect = [&](bool ok, const std::wstring& what, bool show = true) {
+        checks++;
+        if (!ok) fails++;
+        if (show || !ok) out((ok ? L"ok   " : L"FAIL ") + what);
+    };
+    struct P { const wchar_t* tag; bool ok; int maj, min, pat; const wchar_t* pre; const wchar_t* str; };
+    const P parses[] = {
+        { L"v3.0.0-rc.1", true, 3, 0, 0, L"rc.1", L"3.0.0-rc.1" },
+        { L"v2.2.1", true, 2, 2, 1, L"", L"2.2.1" },
+        { L" V2.3 ", true, 2, 3, 0, L"", L"2.3.0" },                     // 2.x: two fields and white space accepted
+        { L"v3.0.0+build.7", true, 3, 0, 0, L"", L"3.0.0" },              // build metadata dropped
+        { L"3.0.0-rc.1+build.7", true, 3, 0, 0, L"rc.1", L"3.0.0-rc.1" },
+        { L"v3.0.0-beta.x-y.07", true, 3, 0, 0, L"beta.x-y.07", L"3.0.0-beta.x-y.07" },
+        { L"v3", false, 0, 0, 0, L"", L"" },
+        { L"latest", false, 0, 0, 0, L"", L"" },
+        { L"v-1.0.0", false, 0, 0, 0, L"", L"" },
+        { L"v3.0.x-rc.1", false, 0, 0, 0, L"", L"" },
+    };
+    for (auto& p : parses) {
+        update::Version v;
+        bool ok = update::parseTag(p.tag, &v);
+        expect(ok == p.ok && (!ok || (v.major == p.maj && v.minor == p.min && v.patch == p.pat && v.pre == p.pre && v.str() == p.str)),
+               fmt(L"parseTag('%ls') -> %ls", p.tag, ok ? v.str().c_str() : L"(not a version)"));
+    }
+    auto ver = [](const wchar_t* t) { update::Version v; update::parseTag(t, &v); return v; };
+    // each one sorts strictly before the next (the semver.org section 11 chain, then the release-candidate line)
+    const wchar_t* chain[] = { L"1.0.0-alpha", L"1.0.0-alpha.1", L"1.0.0-alpha.beta", L"1.0.0-beta", L"1.0.0-beta.2", L"1.0.0-beta.11",
+                               L"1.0.0-rc.1", L"1.0.0", L"2.2.1", L"3.0.0-rc.1", L"3.0.0-rc.2", L"3.0.0-rc.10", L"3.0.0",
+                               L"3.0.1-rc.1", L"3.0.1", L"3.1.0-0", L"3.1.0-1", L"3.1.0-99999999999999999999", L"3.1.0-a", L"3.1.0", L"10.0.0" };
+    const size_t n = sizeof chain / sizeof chain[0];
+    for (size_t i = 0; i < n; i++)
+        for (size_t j = 0; j < n; j++) {
+            int want = i < j ? -1 : i > j ? 1 : 0, got = update::compare(ver(chain[i]), ver(chain[j]));
+            expect(got == want, fmt(L"compare(%ls, %ls) = %d", chain[i], chain[j], got), j == i + 1);   // all pairs, neighbours shown
+        }
+    struct E { const wchar_t* a; const wchar_t* b; };
+    const E equal[] = { { L"v3.0.0-rc.1", L"3.0.0-rc.1+meta" }, { L"2.3", L"v2.3.0" }, { L"3.0.0+a", L"3.0.0+b" }, { L"3.0.0-rc.01", L"3.0.0-rc.1" } };
+    for (auto& e : equal) expect(update::compare(ver(e.a), ver(e.b)) == 0, fmt(L"compare(%ls, %ls) = 0", e.a, e.b));
+    update::Version cur = update::current();
+    update::Version again;
+    expect(update::parseTag(cur.str(), &again) && update::compare(cur, again) == 0, L"current() = " + cur.str());
+    out(fmt(L"semver: %d checks, %d failed", checks, fails));
+    return fails ? 1 : 0;
+}
+
 } // namespace
 
 int main() {
@@ -103,11 +152,13 @@ int main() {
         std::string text;
         readFile(argv[3], &text);
         out(rc ? L"download failed: " + error : fmt(L"downloaded %d bytes, sha256 %ls, token %ls", (int)text.size(), sha.c_str(), update::sha256Token(widen(text)).c_str()));
+    } else if (mode == L"semver") {
+        rc = semverTable();
     } else if (mode == L"sha") {
         std::string data;
         rc = readFile(arg, &data) ? 0 : 1;
         out(L"sha256 " + net::sha256(data.data(), data.size()));
-    } else { err(L"usage: coretest core <build> | addzip <zip> | addfolder <dir> | fetch <url> <file> | sha <file>"); rc = 2; }
+    } else { err(L"usage: coretest core <build> | addzip <zip> | addfolder <dir> | fetch <url> <file> | sha <file> | semver"); rc = 2; }
     LocalFree(argv);
     return rc;
 }
