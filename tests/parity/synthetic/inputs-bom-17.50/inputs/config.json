@@ -1,0 +1,11 @@
+﻿{
+  "_help": {
+    "displayName": "Your in-game name (random by default)."
+  },
+  "displayName": "Ñandú_ThisNameIsLongerThan32Characters_Cut",
+  "accountId": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+  "port": 3551,
+  "buildsFolder": "S:\\FortniteBuilds",
+  "mode": "practice",
+  "bots": 20
+}
