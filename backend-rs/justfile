@@ -46,8 +46,10 @@ backend-smoke-linux:
 # Run out/radarnite-backend.exe on the PC next to Node + server.mjs (temporary folder, hidden, all stopped at the end):
 # readiness, memory, idle CPU, sockets, routes, matchmaker, XMPP, and both answers compared. Nothing under
 # S:\FortniteBuilds is touched. cosmetics = a local cosmetics.json copied there for a realistic athena profile.
-backend-smoke-pc cosmetics="": (_backend-wait-cpu "windows")
-    flock {{backend_lock}} bash -c 'set -e; ssh -o BatchMode=yes windows "if not exist {{backend_pc}} mkdir {{backend_pc}}"; \
+# The CPU check runs inside the shared PC lock, right before the job starts.
+backend-smoke-pc cosmetics="":
+    flock {{backend_lock}} bash -c 'set -e; just -f {{backend_src}}/justfile _backend-wait-cpu windows; \
+      ssh -o BatchMode=yes windows "if not exist {{backend_pc}} mkdir {{backend_pc}}"; \
       scp -q {{backend_src}}/out/radarnite-backend.exe {{backend_src}}/tools/smoke-pc.ps1 {{backend_src}}/../backend/server.mjs "windows:S:/rl-backend-test/"; \
       c=""; if [ -n "{{cosmetics}}" ]; then scp -q "{{cosmetics}}" "windows:S:/rl-backend-test/cosmetics.json"; c="-Cosmetics {{backend_pc}}\cosmetics.json"; fi; \
       ssh -o BatchMode=yes windows "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{backend_pc}}\smoke-pc.ps1 -Dir {{backend_pc}} $c"'
