@@ -674,7 +674,7 @@ pub fn decode_uri_component(s: &str) -> JsResult<String> {
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
     let mut i = 0;
     let pct = |i: usize| -> Option<u8> {
-        if i + 2 < b.len() + 0 && b[i] == b'%' {
+        if i + 2 < b.len() && b[i] == b'%' {
             Some(hexval(b[i + 1])? << 4 | hexval(b[i + 2])?)
         } else {
             None
@@ -728,8 +728,39 @@ fn is_double_dot(s: &str) -> bool {
     matches!(l.as_str(), ".." | ".%2e" | "%2e." | "%2e%2e")
 }
 
-/// `new URL(req.url, 'http://127.0.0.1')` -> (pathname, search without '?').
-pub fn url_parse(raw: &str) -> (String, Option<String>) {
+/// A request target's authority that `new URL()` rejects (empty or forbidden host, broken IPv6, bad port): server.mjs
+/// would throw ERR_INVALID_URL there. Not the whole WHATWG host parser: percent-encoded, IDNA and IPv4 forms pass.
+fn valid_authority(a: &str) -> bool {
+    let hostport = a.rfind('@').map_or(a, |i| &a[i + 1..]);
+    let (host, port) = if hostport.starts_with('[') {
+        match hostport.find(']') {
+            Some(i) => (&hostport[..=i], &hostport[i + 1..]),
+            None => return false,
+        }
+    } else {
+        match hostport.rfind(':') {
+            Some(i) => (&hostport[..i], &hostport[i..]),
+            None => (hostport, ""),
+        }
+    };
+    if let Some(p) = port.strip_prefix(':') {
+        if !p.bytes().all(|c| c.is_ascii_digit()) || (!p.is_empty() && p.parse::<u32>().map_or(true, |n| n > 65535)) {
+            return false;
+        }
+    } else if !port.is_empty() {
+        return false;
+    }
+    if let Some(v6) = host.strip_prefix('[') {
+        return v6.strip_suffix(']').map_or(false, |v| v.parse::<std::net::Ipv6Addr>().is_ok());
+    }
+    !host.is_empty()
+        && !host.chars().any(|c| {
+            (c as u32) < 0x21 || c == '\u{7f}' || matches!(c, '#' | '/' | ':' | '<' | '>' | '?' | '@' | '[' | '\\' | ']' | '^' | '|')
+        })
+}
+
+/// `new URL(req.url, 'http://127.0.0.1')` -> (pathname, search without '?'); None where it throws ERR_INVALID_URL.
+pub fn url_parse(raw: &str) -> Option<(String, Option<String>)> {
     let s: String = raw
         .trim_matches(|c: char| c <= ' ')
         .chars()
@@ -742,17 +773,18 @@ pub fn url_parse(raw: &str) -> (String, Option<String>) {
         .find(|p| lower.starts_with(*p))
         .map(|p| p.len());
     let slash = |c: char| c == '/' || c == '\\';
-    let skip_authority = |r: &str| -> usize {
+    // the authority after the slashes, and where the path starts
+    let authority = |r: &str| -> (usize, usize) {
         let r2 = r.trim_start_matches(slash);
         let skipped = r.len() - r2.len();
-        skipped + r2.find(|c: char| slash(c) || c == '?' || c == '#').unwrap_or(r2.len())
+        (skipped, skipped + r2.find(|c: char| slash(c) || c == '?' || c == '#').unwrap_or(r2.len()))
     };
-    if let Some(n) = scheme_len {
-        rest = &rest[n..];
-        let k = skip_authority(rest);
-        rest = &rest[k..];
-    } else if rest.len() >= 2 && rest.starts_with(slash) && rest[1..].starts_with(slash) {
-        let k = skip_authority(rest);
+    if scheme_len.is_some() || (rest.len() >= 2 && rest.starts_with(slash) && rest[1..].starts_with(slash)) {
+        rest = &rest[scheme_len.unwrap_or(0)..];
+        let (a, k) = authority(rest);
+        if !valid_authority(&rest[a..k]) {
+            return None;
+        }
         rest = &rest[k..];
     }
     let rest = rest.split('#').next().unwrap_or("");
@@ -793,7 +825,7 @@ pub fn url_parse(raw: &str) -> (String, Option<String>) {
             }
         }
     }
-    (format!("/{}", segs.join("/")), query)
+    Some((format!("/{}", segs.join("/")), query))
 }
 
 fn form_decode(s: &str) -> String {
@@ -803,7 +835,7 @@ fn form_decode(s: &str) -> String {
     while i < b.len() {
         match b[i] {
             b'+' => out.push(b' '),
-            b'%' if i + 2 < b.len() + 0 && hexval(b[i + 1]).is_some() && hexval(b[i + 2]).is_some() => {
+            b'%' if i + 2 < b.len() && hexval(b[i + 1]).is_some() && hexval(b[i + 2]).is_some() => {
                 out.push(hexval(b[i + 1]).unwrap() << 4 | hexval(b[i + 2]).unwrap());
                 i += 2;
             }
@@ -904,20 +936,25 @@ mod tests {
 
     #[test]
     fn url_pathname_like_whatwg() {
-        assert_eq!(url_parse("/a/b?x=1").0, "/a/b");
-        assert_eq!(url_parse("/a/b?x=1").1.as_deref(), Some("x=1"));
-        assert_eq!(url_parse("/a/../offline/health").0, "/offline/health");
-        assert_eq!(url_parse("/a/%2E%2e/b").0, "/b");
-        assert_eq!(url_parse("/a/./b/.").0, "/a/b/");
-        assert_eq!(url_parse("/..").0, "/");
-        assert_eq!(url_parse("/").0, "/");
-        assert_eq!(url_parse("/a//b").0, "/a//b");
-        assert_eq!(url_parse("/a\\b").0, "/a/b");
-        assert_eq!(url_parse("/a b{}\"é").0, "/a%20b%7B%7D%22%C3%A9");
-        assert_eq!(url_parse("*").0, "/*");
-        assert_eq!(url_parse("http://h:1/x/y?q").0, "/x/y");
-        assert_eq!(url_parse("//h/x").0, "/x");
-        assert_eq!(url_parse("/x#frag?no").0, "/x");
+        assert_eq!(url_parse("/a/b?x=1").unwrap().0, "/a/b");
+        assert_eq!(url_parse("/a/b?x=1").unwrap().1.as_deref(), Some("x=1"));
+        assert_eq!(url_parse("/a/../offline/health").unwrap().0, "/offline/health");
+        assert_eq!(url_parse("/a/%2E%2e/b").unwrap().0, "/b");
+        assert_eq!(url_parse("/a/./b/.").unwrap().0, "/a/b/");
+        assert_eq!(url_parse("/..").unwrap().0, "/");
+        assert_eq!(url_parse("/").unwrap().0, "/");
+        assert_eq!(url_parse("/a//b").unwrap().0, "/a//b");
+        assert_eq!(url_parse("/a\\b").unwrap().0, "/a/b");
+        assert_eq!(url_parse("/a b{}\"é").unwrap().0, "/a%20b%7B%7D%22%C3%A9");
+        assert_eq!(url_parse("*").unwrap().0, "/*");
+        assert_eq!(url_parse("http://h:1/x/y?q").unwrap().0, "/x/y");
+        assert_eq!(url_parse("//h/x").unwrap().0, "/x");
+        assert_eq!(url_parse("/x#frag?no").unwrap().0, "/x");
+        assert_eq!(url_parse("//user@h:80/p").unwrap().0, "/p");
+        assert_eq!(url_parse("//[::1]:3551/p").unwrap().0, "/p");
+        for bad in ["//[x", "//[x/offline/health", "//", "//h:99999/", "//h:a/", "//a<b/", "//[::1/x", "http://[x/a"] {
+            assert!(url_parse(bad).is_none(), "{}", bad);
+        }
     }
 
     #[test]

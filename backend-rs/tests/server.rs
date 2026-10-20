@@ -271,6 +271,10 @@ fn bad_uri_is_a_500_like_node() {
     let r = s.get("/fortnite/api/cloudstorage/system/%E0%A4%A");
     assert_eq!(r.status, 500);
     assert_eq!(r.body, r#"{"errorCode":"errors.com.epicgames.offline.internal","errorMessage":"URI malformed"}"#);
+    // `new URL()` throws on these in server.mjs (the process dies); here: the per-route 500
+    let r = s.get("//[x/offline/health");
+    assert_eq!((r.status, r.body.as_str()), (500, r#"{"errorCode":"errors.com.epicgames.offline.internal","errorMessage":"Invalid URL"}"#));
+    assert_eq!(s.get("//host/offline/health").status, 200);
     let r = s.get("/fortnite/api/cloudstorage/system/constructor");
     assert_eq!(r.status, 500);
     let log = std::fs::read_to_string(s.off().join("backend.log")).unwrap();
@@ -478,6 +482,19 @@ fn xmpp_login_bind_presence() {
     assert_eq!(c.frame().unwrap(), (8, vec![]));
     let log = std::fs::read_to_string(s.off().join("backend.log")).unwrap();
     assert!(log.contains("xmpp: client connected"));
+}
+
+#[test]
+fn matchmaker_keeps_sending_after_the_client_half_closes() {
+    let s = start();
+    s.get("/fortnite/api/game/v2/matchmakingservice/ticket/player/x?bucketId=1%3A1%3AEU%3Aplaylist_defaultsolo");
+    let (mut c, head) = WsClient::open(s.port, "/matchmaking", None);
+    assert!(head.starts_with("HTTP/1.1 101 "));
+    c.s.shutdown(std::net::Shutdown::Write).unwrap();
+    assert!(c.text().contains("Connecting"));
+    assert!(c.text().contains("Waiting"));
+    assert!(c.text().contains("Queued"));
+    assert!(c.text().contains("Queued"));
 }
 
 #[test]

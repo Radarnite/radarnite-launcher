@@ -330,16 +330,22 @@ async fn match_session(app: Rc<App>, mut ws: Ws<BoxIo>, m: Matchmaking) {
     let mut play_at: Option<Instant> = None;
     let mut close_at: Option<Instant> = None;
     let mut tmp = vec![0u8; 16384];
+    // http.Server sockets allow half-open: after the client's FIN the timers keep sending until a write fails
+    let mut reading = true;
     loop {
         if ws.destroyed {
             return;
         }
         let step_at = if steps < 2 { Some(m.t0 + ms(200 + 400 * steps as u64)) } else { None };
         let deadline = [step_at, next_poll, play_at, close_at].into_iter().flatten().min();
+        if !reading && (ws.ended || deadline.is_none()) {
+            return;
+        }
         tokio::select! {
-            r = ws.io.read(&mut tmp) => {
+            r = ws.io.read(&mut tmp), if reading => {
                 match r {
-                    Ok(0) | Err(_) => return,
+                    Ok(0) => reading = false,
+                    Err(_) => return,
                     Ok(n) => {
                         ws.buf.extend_from_slice(&tmp[..n]);
                         while let Some(f) = ws.next_frame() {
@@ -398,6 +404,8 @@ async fn xmpp_session(app: Rc<App>, mut ws: Ws<BoxIo>) {
             return;
         }
         match ws.io.read(&mut tmp).await {
+            // half-open like Node's http.Server: after the client's FIN the socket stays open (nothing more is sent)
+            Ok(0) if !ws.ended => return std::future::pending().await,
             Ok(0) | Err(_) => return,
             Ok(n) => ws.buf.extend_from_slice(&tmp[..n]),
         }

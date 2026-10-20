@@ -436,7 +436,11 @@ impl App {
     /// The request loop body of server.mjs: first matching route (method, then case-insensitive path), a 500
     /// per route when it throws or panics, else an Epic-style 404 logged once in unknown-routes.log.
     pub fn dispatch(&self, method: String, raw_url: String, ua: String, auth: Option<String>, body: Vec<u8>) -> Resp {
-        let (pathname, query) = js::url_parse(&raw_url);
+        let Some((pathname, query)) = js::url_parse(&raw_url) else {
+            // server.mjs crashes here (uncaught ERR_INVALID_URL); answered like its per-route catch instead
+            self.log(&format!("ERR {} {} TypeError: Invalid URL", method, raw_url));
+            return routes::json(500, &json!({ "errorCode": "errors.com.epicgames.offline.internal", "errorMessage": "Invalid URL" }));
+        };
         let info = Info::from_ua(&ua);
         for r in &self.routes {
             if r.method != method {
