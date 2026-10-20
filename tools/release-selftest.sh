@@ -36,7 +36,8 @@ int main(int argc, char **argv) {
     return 0;
 }
 EOF
-cc() { "$ZIG" cc -target x86_64-windows-gnu -O2 -s "$@" stub.c 2>&1 | grep -v '^$' || true; }
+# GUI subsystem like the real exes: the installer's ExecWait --set-builds-folder must not open a console window
+cc() { "$ZIG" cc -target x86_64-windows-gnu -O2 -s -Wl,--subsystem,windows "$@" stub.c 2>&1 | grep -v '^$' || true; }
 mkdir -p in
 cc -DNAME='"RadarniteLauncher"' -o in/RadarniteLauncher.exe
 cc -DNAME='"radarnite-backend"' -o in/radarnite-backend.exe
