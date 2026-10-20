@@ -13,7 +13,7 @@
     <Company>Radarnite</Company>
     <!-- Single source of truth for the version: the auto-updater reads it from the assembly, and tools\build-release.ps1
          passes it to makensis as -DVERSION. Bump this (and nothing else) for each release. -->
-    <Version>2.2.0</Version>
+    <Version>2.2.1</Version>
     <ApplicationIcon>radarnite.ico</ApplicationIcon>
     <RootNamespace>FnOffline</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
