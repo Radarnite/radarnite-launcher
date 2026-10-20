@@ -5,7 +5,12 @@
 //   RadarniteUI.exe --scenario <id>         interactive, one scenario of tests/ui-scenarios.mjs
 //   RadarniteUI.exe --selftest-ui [dir]     no visible window: first frame, RAM and CPU at rest, then every scenario
 //                                           rendered to <dir>\<id>.png (WIC) + <dir>\selftest.json; exit 0 when all ok
-//   options: --render hw (Direct2D on the GPU instead of its software rasterizer), --exit-after <ms>
+//   options: --render hw (Direct2D on the GPU instead of its software rasterizer), --exit-after <ms>,
+//            --new-instance (developer: open the window even if one is already open)
+//
+// The window is single-instance per Windows session like 2.2.1 (launcher/Program.cs SingleInstance, same mutex and
+// event names, so 2.x and 3.0 share them): starting it again brings the open window to the front and exits. The
+// command-line modes (--selftest-ui) never take the mutex.
 //
 // Software rendering is the default: measured on the PC (125 %, 1500x1000 px) it draws a frame in ~8 ms and keeps the
 // process at ~22 MB private / 111 ms to the first frame, against ~56 MB / 290 ms with a D3D device (driver memory).
@@ -37,6 +42,52 @@ RECT g_client = {};
 double g_lastFrameMs = 0;
 double g_firstFrameMs = -1;
 double g_tGfx = 0, g_tWindow = 0, g_tTarget = 0;   // first-frame breakdown (ms since the process started)
+const UINT WM_APP_SHOW = WM_APP + 16;   // another launch asked the open window to come to the front
+int g_showRequests = 0;
+
+// ------------------------------------------------------------------------------------------------ single instance
+// One main window per Windows session, as 2.2.1 does it: every copy of the launcher (installed or a dev tree) shares a
+// session-local mutex; a new launch signals the named event, the open window restores itself and comes to the front,
+// and the new process exits. `suffix` is only for the selftest (its own names, never the real launcher's).
+namespace single {
+const wchar_t kMutex[] = L"Local\\RadarniteLauncher.MainWindow", kShow[] = L"Local\\RadarniteLauncher.ShowMainWindow";
+HANDLE g_mutex = nullptr, g_show = nullptr, g_wait = nullptr;
+
+// True when this process owns the main window; otherwise the open one was asked to come to the front.
+bool claim(const std::wstring& suffix) {
+    HANDLE m = CreateMutexW(nullptr, TRUE, (kMutex + suffix).c_str());
+    if (!m) return true;   // never block the launcher on a mutex problem
+    if (GetLastError() != ERROR_ALREADY_EXISTS) { g_mutex = m; return true; }
+    // an open main window listens on the event: ask it to come to the front and step aside
+    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, (kShow + suffix).c_str())) {
+        AllowSetForegroundWindow(ASFW_ANY);   // we were just started by the user: hand the foreground over
+        SetEvent(ev);
+        CloseHandle(ev); CloseHandle(m);
+        return false;
+    }
+    // no listener: the owner is exiting (e.g. closing for an update) or still starting; wait for it briefly
+    DWORD w = WaitForSingleObject(m, 3000);
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { g_mutex = m; return true; }   // abandoned: the owner died, it is ours
+    CloseHandle(m);
+    return false;
+}
+
+void CALLBACK signalled(PVOID hwnd, BOOLEAN) { PostMessageW((HWND)hwnd, WM_APP_SHOW, 0, 0); }
+
+// Owner side: restore and focus the window when signalled (thread-pool wait, so it also works in modal loops).
+void listen(HWND h, const std::wstring& suffix) {
+    if (!g_mutex) return;
+    g_show = CreateEventW(nullptr, FALSE, FALSE, (kShow + suffix).c_str());   // auto-reset
+    if (g_show && !RegisterWaitForSingleObject(&g_wait, g_show, signalled, h, INFINITE, WT_EXECUTEDEFAULT)) g_wait = nullptr;
+}
+
+// When the window's message loop ends, so a new launcher can start right away.
+void release() {
+    if (g_wait) { UnregisterWaitEx(g_wait, INVALID_HANDLE_VALUE); g_wait = nullptr; }
+    if (g_show) { CloseHandle(g_show); g_show = nullptr; }
+    if (g_mutex) { ReleaseMutex(g_mutex); CloseHandle(g_mutex); g_mutex = nullptr; }
+}
+} // namespace single
 UINT g_dpi = 96;
 
 double msSinceStart() {
@@ -193,6 +244,13 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         break;
     case WM_APP_SINK: g_app->drain(); return 0;
     case WM_APP_EDITKEY: g_app->editKey((int)l, (UINT)(w & 0xFFFF), (w & 0x20000) != 0, (w & 0x10000) != 0); return 0;
+    case WM_APP_SHOW:
+        g_showRequests++;
+        if (g_selftest) return 0;   // the selftest window stays hidden and never takes the foreground
+        if (!IsWindowVisible(h)) ShowWindow(h, SW_SHOW);
+        if (IsIconic(h)) ShowWindow(h, SW_RESTORE);   // back to normal or maximized, as it was
+        SetForegroundWindow(h);
+        return 0;
     case WM_CLOSE:
         if (!g_selftest && g_app->sessionRunning() &&
             MessageBoxW(h, L"Fortnite is running. Closing Radarnite Launcher stops the game and the local servers.", L"Radarnite Launcher",
@@ -368,6 +426,33 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         addCheck(buf, partialDiff == 0);
         for (auto& r : g_app->liveCheck()) addCheck(json(r.first), r.second);
     } else addCheck("transition checks skipped: no desktop (session 0)", true);
+    // single instance across processes, on names of its own: a second launch signals this window and steps aside;
+    // once the window lets go, a new launch owns it
+    {
+        std::wstring suffix = L".selftest-" + std::to_wstring(GetCurrentProcessId());
+        auto probe = [&]() -> long {
+            wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+            std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --selftest-single-instance " + suffix;
+            STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi = {};
+            if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return -1;
+            DWORD code = (DWORD)-2;
+            if (WaitForSingleObject(pi.hProcess, 10000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+            else TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+            return (long)code;
+        };
+        bool owner = single::claim(suffix);
+        single::listen(h, suffix);
+        int shows = g_showRequests;
+        long second = probe();
+        pump(msSinceStart() + 300);
+        bool signalledOk = g_showRequests == shows + 1;
+        single::release();
+        long after = probe();
+        char buf[200];
+        snprintf(buf, sizeof buf, "single instance: a second launch signals the open window and exits (%ld), then a new one owns it (%ld)", second, after);
+        addCheck(buf, owner && second == 10 && signalledOk && after == 0);
+    }
     BOOL dark = FALSE;
     HRESULT darkHr = DwmGetWindowAttribute(h, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &dark, sizeof dark);
     bool live = captureWindow(h, dir + L"\\00-live-window-01.png");
@@ -455,8 +540,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    std::wstring scenario, selftestDir;
-    bool selftestMode = false;
+    std::wstring scenario, selftestDir, probeSuffix;
+    bool selftestMode = false, newInstance = false, probe = false;
     int exitAfter = 0;
     for (int i = 1; i < argc; i++) {
         std::wstring a = argv[i];
@@ -464,8 +549,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--scenario" && i + 1 < argc) scenario = argv[++i];
         else if (a == L"--render" && i + 1 < argc) g_software = std::wstring(argv[++i]) != L"hw";
         else if (a == L"--exit-after" && i + 1 < argc) exitAfter = _wtoi(argv[++i]);
+        else if (a == L"--new-instance") newInstance = true;
+        else if (a == L"--selftest-single-instance" && i + 1 < argc) { probe = true; probeSuffix = argv[++i]; }   // selftest only
     }
     LocalFree(argv);
+    // selftest probe: a second launch on the selftest's names; 10 = it signalled the open window and stepped aside
+    if (probe) { int code = single::claim(probeSuffix) ? 0 : 10; single::release(); CoUninitialize(); return code; }
+    // the window: one per session (2.2.1 behaviour), unless --new-instance; command-line modes never take the mutex
+    if (!selftestMode && !newInstance && !single::claim(L"")) { CoUninitialize(); return 0; }
     if (!g_gfx.init(inst)) return 3;
     g_tGfx = msSinceStart();
 
@@ -477,6 +568,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Core* core = createMockCore(scenario.empty() ? nullptr : scenario.c_str());
         g_app = new App(g_gfx, core);
         HWND h = createWindow(inst, false, 1180, 740);
+        single::listen(h, L"");
         g_app->attach(h);
         g_app->start();
         ShowWindow(h, SW_SHOWNORMAL);
@@ -487,6 +579,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         delete core;   // stops the mock's timers before the window state goes away
         delete g_app; g_app = nullptr;
         discardTarget();
+        single::release();
     }
     g_gfx.shutdown();
     CoUninitialize();
