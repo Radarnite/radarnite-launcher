@@ -1,0 +1,68 @@
+# radarnite-backend (Rust port of backend/server.mjs) recipes, run from the Linux dev box.
+# Builds and tests run on the Mac (ssh `mac`, cargo zigbuild), never here; the PC (ssh `windows`) only runs the exe,
+# one job at a time for all agents (flock /tmp/rn-launcher-pc.lock). No machine starts anything above 70 % CPU.
+# Usable alone (just -f backend-rs/justfile <recipe>) or from the root justfile (`import 'backend-rs/justfile'`).
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+backend_src := source_directory()
+backend_mac := "agent-work/rl-backend"
+backend_pc := 'S:\rl-backend-test'
+backend_lock := "/tmp/rn-launcher-pc.lock"
+backend_cargo := 'export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"; cd ~/agent-work/rl-backend/backend-rs'
+
+# Mirror backend-rs/ to the Mac work folder (target/ and out/ stay where they are)
+backend-sync:
+    rsync -a --delete --exclude target --exclude out {{backend_src}}/ mac:{{backend_mac}}/backend-rs/
+
+# Release builds: out/radarnite-backend.exe (x86_64-pc-windows-gnu) and out/radarnite-backend-linux-aarch64
+backend-build: (_backend-wait-cpu "mac") backend-sync
+    ssh -o BatchMode=yes mac '{{backend_cargo}} && D=$(pwd -P) && export RUSTFLAGS="--remap-path-prefix=$HOME/.cargo/registry/src=/cargo --remap-path-prefix=$HOME/.cargo/git=/cargo-git --remap-path-prefix=$HOME/.rustup=/rustup --remap-path-prefix=$D=/backend-rs" && cargo zigbuild --release --locked --target x86_64-pc-windows-gnu && cargo zigbuild --release --locked --target aarch64-unknown-linux-gnu'
+    mkdir -p {{backend_src}}/out
+    scp -q mac:{{backend_mac}}/backend-rs/target/x86_64-pc-windows-gnu/release/radarnite-backend.exe {{backend_src}}/out/radarnite-backend.exe
+    scp -q mac:{{backend_mac}}/backend-rs/target/aarch64-unknown-linux-gnu/release/radarnite-backend {{backend_src}}/out/radarnite-backend-linux-aarch64
+    just -f {{backend_src}}/justfile backend-check-out
+
+# Unit + end-to-end tests on the Mac (cargo nextest)
+backend-test: (_backend-wait-cpu "mac") backend-sync
+    ssh -o BatchMode=yes mac '{{backend_cargo}} && cargo nextest run --locked --no-fail-fast 2>&1 | tail -40'
+
+# Size limit (3 MB) and no builder path (Mac user, work folders) inside the binaries
+backend-check-out:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for f in {{backend_src}}/out/radarnite-backend.exe {{backend_src}}/out/radarnite-backend-linux-aarch64; do
+      size=$(stat -c %s "$f"); echo "$(basename "$f"): $size bytes"
+      [ "$size" -le 3145728 ] || { echo "$f is over 3 MB" >&2; exit 1; }
+      if strings "$f" | rg -i -e '/Users/' -e 'justdiego' -e 'agent-work' -e '/home/' -e 'C:\\Users\\'; then
+        echo "builder path inside $f" >&2; exit 1
+      fi
+    done
+
+# Quick check of the Linux binary on this box against a throwaway build folder
+backend-smoke-linux:
+    {{backend_src}}/tools/smoke-linux.sh {{backend_src}}/out/radarnite-backend-linux-aarch64
+
+# Run out/radarnite-backend.exe on the PC (temporary folder, hidden, killed at the end): readiness, RSS, routes, matchmaker.
+# cosmetics = a build folder whose offline\cosmetics.json is copied (read only) for a realistic profile, e.g. S:\FortniteBuilds\17.50
+backend-smoke-pc cosmetics="": (_backend-wait-cpu "windows")
+    flock {{backend_lock}} bash -c 'ssh -o BatchMode=yes windows "if not exist {{backend_pc}} mkdir {{backend_pc}}" && \
+      scp -q {{backend_src}}/out/radarnite-backend.exe "windows:S:/rl-backend-test/radarnite-backend.exe" && \
+      scp -q {{backend_src}}/tools/smoke-pc.ps1 "windows:S:/rl-backend-test/smoke-pc.ps1" && \
+      ssh -o BatchMode=yes windows "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{backend_pc}}\smoke-pc.ps1 -Dir {{backend_pc}} -Cosmetics \"{{cosmetics}}\""'
+
+# Remove the work folders on the Mac and the PC
+backend-clean-remote:
+    ssh -o BatchMode=yes mac 'rm -rf ~/{{backend_mac}}'
+    flock {{backend_lock}} ssh -o BatchMode=yes windows 'if exist {{backend_pc}} rmdir /s /q {{backend_pc}}'
+
+# exit 0 once the host is at or below 70 % CPU (machine-load); 75 when it does not answer or stays busy
+_backend-wait-cpu host:
+    #!/usr/bin/env bash
+    for i in $(seq 40); do
+      cpu=$(machine-load get {{host}} 2>/dev/null | jq -r 'select(.up) | .cpu' || true)
+      [ -n "$cpu" ] || { echo "{{host}}: no load reading" >&2; exit 75; }
+      [ "${cpu%.*}" -le 70 ] && exit 0
+      echo "{{host}} at ${cpu}% CPU: waiting" >&2; sleep 15
+    done
+    echo "{{host}} stayed above 70 % CPU" >&2; exit 75
