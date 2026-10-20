@@ -36,6 +36,7 @@ HRESULT g_lastHr = S_OK, g_createHr = S_FALSE;
 RECT g_client = {};
 double g_lastFrameMs = 0;
 double g_firstFrameMs = -1;
+double g_tGfx = 0, g_tWindow = 0, g_tTarget = 0;   // first-frame breakdown (ms since the process started)
 UINT g_dpi = 96;
 
 double msSinceStart() {
@@ -70,9 +71,12 @@ void paint(HWND h) {
         D2D1_RENDER_TARGET_PROPERTIES p = D2D1::RenderTargetProperties(g_software ? D2D1_RENDER_TARGET_TYPE_SOFTWARE : D2D1_RENDER_TARGET_TYPE_DEFAULT,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), (float)g_dpi, (float)g_dpi);
         g_client = r;
-        // RETAIN_CONTENTS: partial repaints (transitions, spinner) draw over the previous frame, also on the GPU path
-        g_createHr = g_gfx.d2d->CreateHwndRenderTarget(p, D2D1::HwndRenderTargetProperties(h, D2D1::SizeU(r.right, r.bottom), D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS), &g_rt);
+        // GPU path: RETAIN_CONTENTS, so partial repaints (transitions, spinner) draw over the previous frame (the software
+        // target keeps its bitmap anyway; the selftest checks both against a full repaint)
+        g_createHr = g_gfx.d2d->CreateHwndRenderTarget(p, D2D1::HwndRenderTargetProperties(h, D2D1::SizeU(r.right, r.bottom),
+            g_software ? D2D1_PRESENT_OPTIONS_NONE : D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS), &g_rt);
         if (SUCCEEDED(g_createHr)) g_app->setTarget(g_rt, (float)g_dpi);
+        if (!g_tTarget) g_tTarget = msSinceStart();
     }
     if (g_rt) {
         float s = g_dpi / 96.f;
@@ -292,6 +296,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     g_app->setMotion(true);   // the transitions run whatever "Show animations" says, so the checks below measure them
     g_app->start();
     g_app->drain();
+    g_tWindow = msSinceStart();
     ShowWindow(h, SW_SHOWNOACTIVATE);
     UpdateWindow(h);
     // no desktop (ssh runs in session 0): Windows sends no WM_PAINT, so draw the first frame through the same path
@@ -363,6 +368,8 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         addCheck(buf, partialDiff == 0);
         for (auto& r : g_app->liveCheck()) addCheck(json(r.first), r.second);
     } else addCheck("transition checks skipped: no desktop (session 0)", true);
+    BOOL dark = FALSE;
+    HRESULT darkHr = DwmGetWindowAttribute(h, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &dark, sizeof dark);
     bool live = captureWindow(h, dir + L"\\00-live-window-01.png");
     DestroyWindow(h);
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
@@ -427,12 +434,12 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     double idleMs = t1 - t0, idleCpu = cpu1 - cpu0;
     FILE* f = _wfopen((dir + L"\\selftest.json").c_str(), L"wb");
     if (!f) return 1;
-    fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
+    fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"firstFrameSteps\": {\"gfx\": %.1f, \"window\": %.1f, \"target\": %.1f},\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
                "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"idleTimers\": %d,\n  \"exeBytes\": %lu,\n"
-               "  \"systemMotion\": %s,\n  \"animSettledMs\": %.0f,\n  \"hoverFrames\": [%d, %d],\n  \"hoverDirtyMaxPct\": %.2f,\n  \"afterTransition\": {\"paints\": %d, \"timers\": %d},\n  \"partialVsFullDiffPx\": %lld,\n"
+               "  \"dwmDarkFrame\": %s,\n  \"systemMotion\": %s,\n  \"animSettledMs\": %.0f,\n  \"hoverFrames\": [%d, %d],\n  \"hoverDirtyMaxPct\": %.2f,\n  \"afterTransition\": {\"paints\": %d, \"timers\": %d},\n  \"partialVsFullDiffPx\": %lld,\n"
                "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"failed\": %d,\n  \"scenarios\": [%s\n  ],\n  \"interactions\": [%s\n  ]\n}\n",
-            first, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints, idleTimers,
-            fa.nFileSizeLow, systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
+            first, g_tGfx, g_tWindow, g_tTarget, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints, idleTimers,
+            fa.nFileSizeLow, SUCCEEDED(darkHr) ? (dark ? "true" : "false") : "null", systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
             live ? "true" : "false", forced ? "true" : "false", (unsigned long)g_lastHr, (unsigned long)g_createHr, g_client.right, g_client.bottom, g_lastFrameMs, session, failed, items.c_str(), checks.c_str());
     fclose(f);
     return failed ? 1 : 0;
@@ -460,6 +467,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     }
     LocalFree(argv);
     if (!g_gfx.init(inst)) return 3;
+    g_tGfx = msSinceStart();
 
     int rc = 0;
     if (selftestMode) {

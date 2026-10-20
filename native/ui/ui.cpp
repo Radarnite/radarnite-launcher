@@ -152,15 +152,6 @@ void App::attach(HWND hwnd) {
     anim_.motion = systemMotion();
     editBrush_ = CreateSolidBrush(RGB(0x18, 0x1A, 0x1F));
     createEdits();
-    // tooltips like the page's title attributes (Chromium shows them with this same control)
-    tip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT,
-                           CW_USEDEFAULT, CW_USEDEFAULT, hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (tip_) {
-        TTTOOLINFOW ti = { sizeof ti };
-        ti.uFlags = TTF_SUBCLASS; ti.hwnd = hwnd_; ti.uId = 1; ti.lpszText = (LPWSTR)L"";
-        SendMessageW(tip_, TTM_ADDTOOLW, 0, (LPARAM)&ti);
-        SendMessageW(tip_, TTM_SETMAXTIPWIDTH, 0, MulDiv(400, GetDpiForWindow(hwnd_), 96));
-    }
 }
 
 void App::start() { core_->ready(this); }
@@ -1484,8 +1475,19 @@ std::wstring App::tooltip(int id) const {
     return L"";
 }
 
-// The tool is the hovered control's rect with its text; comctl32 shows it after the hover delay (TTF_SUBCLASS)
+// Tooltips like the page's title attributes, with the control Chromium uses on Windows: the tool is the hovered
+// control's rect with its text; comctl32 shows it after the hover delay (TTF_SUBCLASS)
 void App::updateTip() {
+    if (!tip_ && hwnd_ && hover_) {   // created on the first hover, after the first frame
+        tip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT,
+                               CW_USEDEFAULT, CW_USEDEFAULT, hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (tip_) {
+            TTTOOLINFOW ti = { sizeof ti };
+            ti.uFlags = TTF_SUBCLASS; ti.hwnd = hwnd_; ti.uId = 1; ti.lpszText = (LPWSTR)L"";
+            SendMessageW(tip_, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+            SendMessageW(tip_, TTM_SETMAXTIPWIDTH, 0, MulDiv(400, (int)dpi_, 96));
+        }
+    }
     if (!tip_) return;
     std::wstring t = tooltip(hover_);
     const Hit* h = hitById(hover_);
