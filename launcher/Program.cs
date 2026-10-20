@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace FnOffline;
@@ -15,6 +16,9 @@ static class Program
     /// RadarniteLauncher.exe --check 17.50        console report: version, support, firewall, preflight; starts nothing
     /// RadarniteLauncher.exe --cosmetics 17.50    download keys/mappings and generate cosmetics.json (console)
     /// RadarniteLauncher.exe --update-check       console: is a newer public release available? (installs nothing)
+    /// RadarniteLauncher.exe --new-instance       developer: open the main window even if one is already open
+    /// The main window is single-instance per Windows session (whatever folder the exe runs from): starting it again
+    /// brings the open window to the front and exits. --play and the console commands are not affected.
     /// </summary>
     [STAThread]
     static int Main(string[] args)
@@ -114,7 +118,11 @@ static class Program
             Application.Run(WebHost.Available() ? new WebHost(b) : new PlayForm(b));
             return 0;
         }
-        Application.Run(WebHost.Available() ? new WebHost(null) : new MainForm());
+        if (cmd != "--new-instance" && !SingleInstance.Claim()) return 0; // another main window is open: it was brought to the front
+        Form main = WebHost.Available() ? new WebHost(null) : new MainForm();
+        SingleInstance.Listen(main);
+        Application.Run(main);
+        SingleInstance.Release();
         return 0;
     }
 
@@ -140,6 +148,91 @@ static class Program
             return p.ExitCode == 0;
         }
         catch { return false; } // UAC cancelled
+    }
+}
+
+/// <summary>
+/// One main window per Windows session. Every copy of the launcher (installed, or a dev tree such as
+/// S:\FortniteBuilds\launcher) shares the same session-local mutex, so opening it again (Start menu, a pinned icon,
+/// a double-click on the exe) never stacks another window + WebView2 on top of the first one: the new process signals
+/// the named event, the open window restores itself and comes to the front, and the new process exits.
+/// </summary>
+static class SingleInstance
+{
+    const string MutexName = @"Local\RadarniteLauncher.MainWindow", ShowEventName = @"Local\RadarniteLauncher.ShowMainWindow";
+    static Mutex? _mutex;
+    static EventWaitHandle? _show;
+
+    [DllImport("user32")] static extern bool AllowSetForegroundWindow(int pid);
+    [DllImport("user32")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32")] static extern bool IsIconic(IntPtr h);
+    [DllImport("user32")] static extern bool SetForegroundWindow(IntPtr h);
+
+    /// <summary>True when this process owns the main window. Otherwise the open one is asked to come to the front.</summary>
+    public static bool Claim()
+    {
+        try
+        {
+            _mutex = new Mutex(true, MutexName, out var created);
+            if (created) return true;
+            // An open main window listens on the event: ask it to come to the front and step aside.
+            if (EventWaitHandle.TryOpenExisting(ShowEventName, out var ev))
+            {
+                using (ev)
+                {
+                    try { AllowSetForegroundWindow(-1 /*ASFW_ANY*/); } catch { } // we were just started by the user: hand the foreground over
+                    ev.Set();
+                }
+                _mutex.Dispose(); _mutex = null;
+                return false;
+            }
+            // No listener: the owner is exiting (e.g. closing for an update) or still starting. Wait for it briefly.
+            try { if (_mutex.WaitOne(TimeSpan.FromSeconds(3))) return true; }
+            catch (AbandonedMutexException) { return true; } // the previous owner died without releasing it: it is ours now
+            _mutex.Dispose(); _mutex = null;
+            return false;
+        }
+        catch { _mutex = null; return true; } // never block the launcher on a mutex problem
+    }
+
+    /// <summary>Owner side: restore and focus <paramref name="main"/> (or the form it handed over to) when signalled.</summary>
+    public static void Listen(Form main)
+    {
+        if (_mutex == null) return;
+        try { _show = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName); } catch { return; }
+        var ev = _show;
+        new Thread(() =>
+        {
+            try
+            {
+                while (ev.WaitOne())
+                {
+                    if (main.IsDisposed) return;
+                    try { main.BeginInvoke(() => BringToFront(main)); } catch (InvalidOperationException) { } // handle not created yet
+                }
+            }
+            catch (ObjectDisposedException) { }
+        }) { IsBackground = true, Name = "single-instance" }.Start();
+    }
+
+    static void BringToFront(Form main)
+    {
+        // WebHost hands over to the plain WinForms window when WebView2 fails: focus whichever one is showing.
+        var f = Application.OpenForms.Cast<Form>().LastOrDefault(x => x.Visible && x.ShowInTaskbar) ?? main;
+        if (!f.Visible) f.Show();
+        if (IsIconic(f.Handle)) ShowWindow(f.Handle, 9 /*SW_RESTORE: back to normal or maximized, as it was*/);
+        f.Activate();
+        SetForegroundWindow(f.Handle);
+    }
+
+    /// <summary>Called when the main window's message loop ends, so a new launcher can start right away.</summary>
+    public static void Release()
+    {
+        try { _show?.Dispose(); } catch { }
+        _show = null;
+        try { _mutex?.ReleaseMutex(); } catch { }
+        try { _mutex?.Dispose(); } catch { }
+        _mutex = null;
     }
 }
 
