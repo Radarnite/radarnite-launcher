@@ -385,4 +385,25 @@ void runAsync(std::function<void()> f) {
     else { asyncProc(p); }
 }
 
+static DWORD WINAPI parallelProc(LPVOID p) {
+    auto* f = (const std::function<void()>*)p;
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    (*f)();
+    if (SUCCEEDED(hr)) CoUninitialize();
+    return 0;
+}
+
+void parallel(std::initializer_list<std::function<void()>> fs) {
+    std::vector<HANDLE> threads;
+    const std::function<void()>* first = nullptr;
+    for (auto& f : fs) {
+        if (!first) { first = &f; continue; }
+        HANDLE t = CreateThread(nullptr, 0, parallelProc, (LPVOID)&f, 0, nullptr);
+        if (t) threads.push_back(t);
+        else f();
+    }
+    if (first) (*first)();
+    for (HANDLE t : threads) { WaitForSingleObject(t, INFINITE); CloseHandle(t); }
+}
+
 } // namespace rn

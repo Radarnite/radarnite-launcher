@@ -61,6 +61,8 @@ void err(const std::wstring& line);
 
 // ---- threads: a detached worker running f (COM initialised for it)
 void runAsync(std::function<void()> f);
+// Runs every f at the same time (the first on this thread) and returns when all are done.
+void parallel(std::initializer_list<std::function<void()>> fs);
 
 // ---- RAII for handles
 struct Handle {

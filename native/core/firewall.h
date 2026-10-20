@@ -27,6 +27,7 @@ struct Rules {
 Rules read();
 // "" = OK; otherwise what is missing (2.x Firewall.Check text).
 std::wstring check(const Rules& r, const std::wstring& build);
+std::wstring check(const Rules& r, const std::vector<std::wstring>& programs);   // programsFor() already walked
 std::wstring check(const std::wstring& build);
 
 // Creates the outbound + inbound rules of every program of the build (stale rules of the group for those programs

@@ -26,18 +26,24 @@ std::wstring orOk(const std::wstring& s) { return s.empty() ? L"OK" : s; }
 
 int check(const wchar_t* arg) {
     LauncherConfig c = LauncherConfig::load();
-    // one process list and one firewall read for every build reported (2.x read both again per build, twice)
+    // The process list, the firewall rules and the build's exe walk are independent: they run at the same time, once
+    // (2.x read the rules and walked the build twice per build, one after the other).
     bool loaded = false;
     std::vector<proc::Info> procs;
     firewall::Rules rules;
     for (auto& b : BuildInfo::all()) {
         if (arg && b.name() != arg && b.version != arg) continue;
-        if (!loaded) { procs = proc::list(); rules = firewall::read(); loaded = true; }
+        std::vector<std::wstring> programs;
+        if (!loaded) {
+            parallel({ [&] { programs = firewall::programsFor(b.dir); }, [&] { rules = firewall::read(); }, [&] { procs = proc::list(); } });
+            loaded = true;
+        } else programs = firewall::programsFor(b.dir);
+        std::wstring fw = firewall::check(rules, programs);
         auto lobby = b.lobby(), match = b.match();
         out(b.name() + L": Fortnite " + b.version + fmt(L" CL %lld, UE ", (long long)b.cl) + b.engine);
         out(L"  lobby: " + std::wstring(supportName(lobby.first)) + L" (" + lobby.second + L"); local match: " + supportName(match.first) + L" (" + match.second + L")");
-        out(std::wstring(L"  cosmetics: ") + (fileExists(join(b.dir, L"offline\\cosmetics.json")) ? L"yes" : L"no") + L"; firewall: " + orOk(firewall::check(rules, b.dir)));
-        out(L"  preflight: " + orOk(preflight(b, c.mode != L"lobby", procs, rules)));
+        out(std::wstring(L"  cosmetics: ") + (fileExists(join(b.dir, L"offline\\cosmetics.json")) ? L"yes" : L"no") + L"; firewall: " + orOk(fw));
+        out(L"  preflight: " + orOk(preflightChecked(b, procs, fw)));
     }
     out(L"config: " + c.displayName + L" mode=" + c.mode + fmt(L" bots=%d port=%d", c.bots, c.port));
     return 0;

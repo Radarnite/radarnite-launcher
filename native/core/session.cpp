@@ -16,7 +16,10 @@ bool backendAvailable() {
     return fileExists(paths::backend()) || (fileExists(paths::node()) && fileExists(paths::backendScript()));
 }
 
-std::wstring preflight(const BuildInfo& b, bool, const std::vector<proc::Info>& procs, const firewall::Rules& rules) {
+namespace {
+
+template <typename F>
+std::wstring preflightImpl(const BuildInfo& b, const std::vector<proc::Info>& procs, F firewallCheck) {
     for (auto& p : procs) {
         std::wstring name = proc::shortName(p.exe);
         if (istarts(name, L"EpicGamesLauncher") || ieq(name, L"EpicWebHelper"))
@@ -30,9 +33,19 @@ std::wstring preflight(const BuildInfo& b, bool, const std::vector<proc::Info>& 
     auto lobby = b.lobby();
     if (lobby.first == Support::No) return L"Fortnite " + b.version + L" is not supported: " + lobby.second + L".";
     if (!backendAvailable() || !fileExists(paths::redirectDll())) return L"A launcher file is missing (node, backend or redirect).";
-    std::wstring fw = firewall::check(rules, b.dir);
+    std::wstring fw = firewallCheck();
     if (!fw.empty()) return L"Firewall: " + fw + L". Press Create firewall rules (asks for administrator permission).";
     return L"";
+}
+
+} // namespace
+
+std::wstring preflight(const BuildInfo& b, bool, const std::vector<proc::Info>& procs, const firewall::Rules& rules) {
+    return preflightImpl(b, procs, [&] { return firewall::check(rules, b.dir); });
+}
+
+std::wstring preflightChecked(const BuildInfo& b, const std::vector<proc::Info>& procs, const std::wstring& firewallCheck) {
+    return preflightImpl(b, procs, [&] { return firewallCheck; });
 }
 
 std::wstring preflight(const BuildInfo& b, bool needMatch) { return preflight(b, needMatch, proc::list(), firewall::read()); }

@@ -167,8 +167,14 @@ Rules read() {
 std::wstring check(const Rules& r, const std::wstring& build) {
     if (!r.error.empty()) return r.error;
     if (!r.off.empty()) return r.off;
+    return check(r, programsFor(build));
+}
+
+std::wstring check(const Rules& r, const std::vector<std::wstring>& programs) {
+    if (!r.error.empty()) return r.error;
+    if (!r.off.empty()) return r.off;
     std::vector<std::wstring> missing;
-    for (auto& p : programsFor(build)) if (!r.blocked.count(upper(p))) missing.push_back(p);
+    for (auto& p : programs) if (!r.blocked.count(upper(p))) missing.push_back(p);
     if (missing.empty()) return L"";
     return fmt(L"firewall rules missing for %d programs (e.g. %ls)", (int)missing.size(), fileName(missing[0]).c_str());
 }
