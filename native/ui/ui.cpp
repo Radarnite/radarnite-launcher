@@ -11,7 +11,7 @@ enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
     ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3,
     ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_LINES, ID_ACT, ID_PLAY,
-    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_MENU0 = 200, ID_BUILD0 = 1000,
+    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_CELL0, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
 const UINT_PTR T_SPIN = 1, T_TOAST = 2, T_ANIM = 3;
@@ -152,6 +152,15 @@ void App::attach(HWND hwnd) {
     anim_.motion = systemMotion();
     editBrush_ = CreateSolidBrush(RGB(0x18, 0x1A, 0x1F));
     createEdits();
+    // tooltips like the page's title attributes (Chromium shows them with this same control)
+    tip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT,
+                           CW_USEDEFAULT, CW_USEDEFAULT, hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (tip_) {
+        TTTOOLINFOW ti = { sizeof ti };
+        ti.uFlags = TTF_SUBCLASS; ti.hwnd = hwnd_; ti.uId = 1; ti.lpszText = (LPWSTR)L"";
+        SendMessageW(tip_, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+        SendMessageW(tip_, TTM_SETMAXTIPWIDTH, 0, MulDiv(400, GetDpiForWindow(hwnd_), 96));
+    }
 }
 
 void App::start() { core_->ready(this); }
@@ -246,6 +255,7 @@ void App::setDpi(float dpi) {
         e.applied = {}; e.shown = false;
         ShowWindow(e.hwnd, SW_HIDE);
     }
+    if (tip_) SendMessageW(tip_, TTM_SETMAXTIPWIDTH, 0, MulDiv(400, (int)dpi, 96));
     invalidate();
 }
 
@@ -908,6 +918,7 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
     text(season(b->major, b->minor), Font{ Face::UI, 15, 600, false }, x, yy, leftW, 21.75f, C::text); yy += 21.75f + 2;
     text(fmt(L"CL %u · Unreal Engine %ls · %ls", b->cl, b->engine.c_str(), (b->dir.empty() ? b->name : b->dir).c_str()),
          Font{ Face::UI, 12, 400, false, true }, x, yy, leftW, 17.4f, C::dim);   // .meta: tabular-nums
+    hit(ID_META, rc(x, yy, leftW, 17.4f), 0, 0);   // tooltip only
     yy += 17.4f;
     button(ID_BUILDMENU, x + cw - bw, y, L"Build", Icon::More, true, false, false);
     if (menu_ == 2) menuAnchor_ = rc(x + cw - bw, y + oy_, bw, 28);
@@ -935,6 +946,7 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
         icon(cells[i].ic, cx + 16, cy + 12 + (17.4f - 16) / 2, 16, C::muted);
         text(cells[i].k, Font{ Face::UI, 12, 400, false }, cx + 16 + 22, cy + 12, iw - 22, 17.4f, C::muted);
         text(cells[i].v, Font{ Face::UI, 13, 600, false }, cx + 16, cy + 12 + 17.4f + 2, iw, 18.85f, clsColor(cells[i].cls));
+        hit(ID_CELL0 + i, rc(cx, cy, iw + 32, cellH), 0, 0);   // tooltip only
     }
     y += stripH;
 
@@ -1446,6 +1458,47 @@ void App::setHover(int id) {
     const Hit* p = hitById(ID_PLAY);
     if (id == ID_PLAY && p && !(p->flags & F_DISABLED)) { anim_.to(K_SHEEN, -1.2f, 1.2f, 700, Curve::Ui, grow(p->r, 4)); animate(); }   // .play:hover::after
     else if (old == ID_PLAY) anim_.stop(K_SHEEN);
+    updateTip();
+}
+
+std::wstring App::tooltip(int id) const {
+    const Build* b = sel();
+    switch (id) {
+    case ID_MIN: return L"Minimize";
+    case ID_MAX: return maximized_ ? L"Restore down" : L"Maximize";
+    case ID_CLOSE: return L"Close";
+    case ID_ADD: return L"Add build";
+    case ID_ROOT: return st_.builds.empty() ? L"Change the builds folder" : L"Builds folder: " + st_.root + L" (click to change)";   // as renderRail leaves it
+    case ID_BUILDMENU: return L"Build actions";
+    case ID_GRIP: return L"Drag to resize";
+    case ID_COPY: return L"Copy activity";
+    case ID_OPENLOGS: return L"Open the build's log folder";
+    case ID_CLEAR: return L"Clear";
+    case ID_META: return b ? b->dir : L"";
+    case ID_CELL0: return b ? b->lobbyWhy : L"";
+    case ID_CELL0 + 1: return b ? (b->matchServer ? b->matchWhy : L"launcher\\gameserver\\radarnite-server.dll is missing") : L"";
+    case ID_CELL0 + 2: return L"Read from the build's own data";
+    case ID_CELL0 + 3: return b ? (b->firewall == L"OK" ? L"Every exe of the build is blocked from the internet" : b->firewall) : L"";
+    }
+    if (id >= ID_BUILD0 && id - ID_BUILD0 < (int)st_.builds.size()) { const Build& x = st_.builds[id - ID_BUILD0]; return x.version + L" · " + season(x.major, x.minor); }
+    return L"";
+}
+
+// The tool is the hovered control's rect with its text; comctl32 shows it after the hover delay (TTF_SUBCLASS)
+void App::updateTip() {
+    if (!tip_) return;
+    std::wstring t = tooltip(hover_);
+    const Hit* h = hitById(hover_);
+    TTTOOLINFOW ti = { sizeof ti };
+    ti.hwnd = hwnd_; ti.uId = 1;
+    if (h && !t.empty()) {
+        D2D1_RECT_F r = inter(h->r, h->clip);
+        ti.rect = { lroundf(r.left * scale_), lroundf(r.top * scale_), lroundf(r.right * scale_), lroundf(r.bottom * scale_) };
+    }
+    SendMessageW(tip_, TTM_POP, 0, 0);
+    SendMessageW(tip_, TTM_NEWTOOLRECTW, 0, (LPARAM)&ti);
+    ti.lpszText = (LPWSTR)t.c_str();
+    SendMessageW(tip_, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
 }
 
 void App::mouseDown(float x, float y) {
@@ -1758,6 +1811,62 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     // launch bar: Ctrl+Enter only when a build can launch
     const Hit* p = hitById(ID_PLAY);
     check(L"Launch enabled for a supported build", p && !(p->flags & F_DISABLED));
+
+    // keyboard on the other widgets
+    bool mats = st_.config.infiniteMaterials;
+    setFocus(ID_TG2, true); key(VK_SPACE, false, false); frame();
+    check(L"Space toggles the focused switch", st_.config.infiniteMaterials == !mats);
+    openActivity(true); frame();
+    focus_ = 0; for (int i = 0; i < 200 && focus_ != ID_F1; i++) key(VK_TAB, false, false);
+    bool reached = focus_ == ID_F1;
+    key(VK_RETURN, false, false); frame();
+    check(L"Tab reaches the Activity filters and Enter picks one", reached && filter_ == 1);
+    filter_ = 0; rowsDirty_ = true; openActivity(false); frame();
+    setFocus(ID_ADD, true); key(VK_RETURN, false, false); frame();
+    key(VK_DOWN, false, false); key(VK_DOWN, false, false); frame();   // over the separator: "Rescan builds"
+    bool onRescan = focus_ == ID_MENU0 + 3;
+    key(VK_RETURN, false, false); drain(); frame();
+    check(L"Enter on a menu item runs it and gives the focus back to its button",
+          onRescan && menu_ == 0 && focus_ == ID_ADD && !logs_.empty() && logs_.back().lower.find(L"rescanned") != std::wstring::npos);
+
+    // frame: the title bar drags (HTCAPTION) except over the window buttons
+    check(L"title bar is a caption except the window buttons, the rest is client",
+          ncHit(300, 20) == HTCAPTION && ncHit(W - 23, 20) == HTCLIENT && ncHit(W - 23 - 46 * 2, 20) == HTCLIENT && ncHit(300, 60) == HTCLIENT);
+    // tooltips: the page's title attributes
+    bool tips = true;
+    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0 };
+    for (int id : tipIds) tips = tips && !tooltip(id).empty();
+    const Build* sb = sel();
+    check(L"icon buttons, build items and status cells have the page's tooltips",
+          tips && sb && tooltip(ID_CELL0) == sb->lobbyWhy && tooltip(ID_CELL0 + 1) == (sb->matchServer ? sb->matchWhy : L"launcher\\gameserver\\radarnite-server.dll is missing"));
+
+    key(VK_RETURN, true, false); drain(); frame();
+    check(L"Ctrl+Enter launches the selected build", se_.state == SessionState::Launching);
+    return out;
+}
+
+std::vector<std::pair<std::wstring, bool>> App::liveCheck() {
+    std::vector<std::pair<std::wstring, bool>> out;
+    if (!hwnd_) return out;
+    auto check = [&](const wchar_t* name, bool ok) { out.push_back({ name, ok }); };
+    RECT wr, cr; GetWindowRect(hwnd_, &wr); GetClientRect(hwnd_, &cr);
+    check(L"no system frame: the client area is the whole window (WM_NCCALCSIZE)", wr.right - wr.left == cr.right && wr.bottom - wr.top == cr.bottom);
+    auto nc = [&](float x, float y) {
+        POINT pt = { lroundf(x * scale_), lroundf(y * scale_) }; ClientToScreen(hwnd_, &pt);
+        return (int)SendMessageW(hwnd_, WM_NCHITTEST, 0, MAKELPARAM(pt.x, pt.y));
+    };
+    float W = cr.right / scale_, H = cr.bottom / scale_;
+    check(L"WM_NCHITTEST: resize edges and corners, caption, window buttons, client",
+          nc(1, 300) == HTLEFT && nc(W - 1, 300) == HTRIGHT && nc(300, 0.5f) == HTTOP && nc(300, H - 1) == HTBOTTOM &&
+          nc(1, 1) == HTTOPLEFT && nc(W - 1, H - 1) == HTBOTTOMRIGHT && nc(300, 20) == HTCAPTION && nc(W - 23, 20) == HTCLIENT && nc(400, 300) == HTCLIENT);
+    // the search box is a native EDIT: typing filters, Escape clears it
+    openActivity(true); UpdateWindow(hwnd_);
+    EditBox& e = edits_[2];
+    SetWindowTextW(e.hwnd, L"Error");
+    bool typed = q_ == L"error" && e.shown;
+    editKey(ID_SEARCH, VK_ESCAPE, false, false);
+    check(L"typing in the search EDIT filters, Escape clears it", typed && q_.empty() && GetWindowTextLengthW(e.hwnd) == 0);
+    openActivity(false); UpdateWindow(hwnd_);
     return out;
 }
 

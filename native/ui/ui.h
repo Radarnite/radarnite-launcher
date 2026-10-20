@@ -55,6 +55,8 @@ public:
     bool animating() const { return anim_.running(); }
     int animTicks = 0;                          // animation timer ticks (selftest)
     D2D1_RECT_F actButtonRect() const;          // selftest: where the Activity button is (hover check)
+    // Selftest in the live window: frame hit-testing (WM_NCHITTEST), no system frame, Escape in the search EDIT.
+    std::vector<std::pair<std::wstring, bool>> liveCheck();
 
     // Selftest: drives the window through clicks and keys on the current target and checks the state after each
     // step. Returns { name, ok } pairs. Needs a render target (setTarget) and a scenario with the match server.
@@ -95,6 +97,8 @@ private:
     void moveFocus(int dir);
     void setFocus(int id, bool keyboard);
     void setHover(int id);
+    std::wstring tooltip(int id) const;   // the page's title attributes
+    void updateTip();
     void ensureVisible(int id);
     void syncEdits();
     void layoutEdits();
@@ -194,6 +198,7 @@ private:
     float dragY0_ = 0, dragV0_ = 0;
     EditBox edits_[3];
     HBRUSH editBrush_ = nullptr;
+    HWND tip_ = nullptr;        // one comctl32 tooltip, its tool = the hovered control
     bool spinning_ = false;
     bool pendingEnsure_ = false;
 };

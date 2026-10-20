@@ -361,6 +361,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         if (ga && gb && aw == bw && ah == bh) { partialDiff = 0; for (size_t i = 0; i < a.size(); i += 4) if (memcmp(&a[i], &b[i], 3)) partialDiff++; }
         snprintf(buf, sizeof buf, "partial repaints leave the same pixels as a full repaint (%lld px differ)", partialDiff);
         addCheck(buf, partialDiff == 0);
+        for (auto& r : g_app->liveCheck()) addCheck(json(r.first), r.second);
     } else addCheck("transition checks skipped: no desktop (session 0)", true);
     bool live = captureWindow(h, dir + L"\\00-live-window-01.png");
     DestroyWindow(h);
@@ -417,7 +418,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
             app->setTarget(nullptr, 96.f);
         }
         release(rt); release(bmp);
-        delete app; delete c;
+        delete c; delete app;   // the core first: its timers (launch) never reach a deleted window state
     }
 
     wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
