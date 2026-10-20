@@ -14,58 +14,165 @@ use std::io;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tokio::time::Instant;
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const DOMAIN: &str = "prod.ol.epicgames.com";
 
-/// Node's value for a repeated header: the values joined with ", "
-fn header_joined(req: &Request<Incoming>, name: &str) -> Option<String> {
-    let vals: Vec<String> = req.headers().get_all(name).iter().map(|v| js::latin1(v.as_bytes())).collect();
-    if vals.is_empty() {
+/// The socket of an upgraded connection
+pub trait Io: AsyncRead + AsyncWrite + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Unpin> Io for T {}
+type BoxIo = Box<dyn Io>;
+
+/// What server.mjs's upgrade handler looks at: the request target and the Sec-WebSocket-Protocol / -Key values
+/// (repeated headers joined with ", " like Node)
+pub struct Upgrade {
+    pub url: String,
+    pub proto: String,
+    pub key: String,
+}
+
+pub enum Sniff {
+    /// the connection's first request asks for an upgrade; n = bytes already received
+    Upgrade(Upgrade, usize),
+    Http,
+    Closed,
+}
+
+fn joined<'a>(vals: impl Iterator<Item = &'a [u8]>) -> Option<String> {
+    let v: Vec<String> = vals.map(js::latin1).collect();
+    if v.is_empty() {
         None
     } else {
-        Some(vals.join(", "))
+        Some(v.join(", "))
     }
 }
 
-/// server.on('upgrade'): XMPP (path /xmpp or protocol xmpp), the matchmaker (/matchmaking), else the socket is destroyed
-pub fn upgrade(app: Rc<App>, mut req: Request<Incoming>, raw_url: &str) -> Result<Response<Full<Bytes>>, io::Error> {
-    let proto = header_joined(&req, "sec-websocket-protocol").unwrap_or_default();
-    let xmpp = raw_url.starts_with("/xmpp") || proto.contains("xmpp");
-    if !xmpp && !raw_url.starts_with("/matchmaking") {
-        return Err(io::Error::other("upgrade refused"));
+fn has_token<'a>(mut vals: impl Iterator<Item = &'a [u8]>, token: &str) -> bool {
+    vals.any(|v| js::latin1(v).split(',').any(|t| t.trim().eq_ignore_ascii_case(token)))
+}
+
+/// Peeks at a new connection's first request head (nothing is consumed): an upgrade request is answered here
+/// with the exact bytes of server.mjs's wsAccept, anything else goes to hyper.
+pub async fn sniff(s: &TcpStream) -> Sniff {
+    let mut buf = vec![0u8; 16 * 1024];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let n = match tokio::time::timeout_at(deadline, s.peek(&mut buf)).await {
+            Ok(Ok(0)) | Ok(Err(_)) => return Sniff::Closed,
+            Ok(Ok(n)) => n,
+            Err(_) => return Sniff::Http,
+        };
+        let mut headers = [httparse::EMPTY_HEADER; 64];
+        let mut req = httparse::Request::new(&mut headers);
+        match req.parse(&buf[..n]) {
+            Ok(httparse::Status::Complete(_)) => {
+                let h = || req.headers.iter();
+                let upgrade = req.method != Some("CONNECT")
+                    && h().any(|x| x.name.eq_ignore_ascii_case("upgrade"))
+                    && has_token(h().filter(|x| x.name.eq_ignore_ascii_case("connection")).map(|x| x.value), "upgrade");
+                if !upgrade {
+                    return Sniff::Http;
+                }
+                let of = |name: &str| joined(h().filter(|x| x.name.eq_ignore_ascii_case(name)).map(|x| x.value));
+                let u = Upgrade {
+                    url: req.path.unwrap_or("").to_string(),
+                    proto: of("sec-websocket-protocol").unwrap_or_default(),
+                    key: of("sec-websocket-key").unwrap_or_else(|| "undefined".into()),
+                };
+                return Sniff::Upgrade(u, n);
+            }
+            Ok(httparse::Status::Partial) if n < buf.len() => tokio::time::sleep(Duration::from_millis(2)).await,
+            _ => return Sniff::Http,
+        }
     }
-    let key = header_joined(&req, "sec-websocket-key").unwrap_or_else(|| "undefined".into());
-    let accept = js::base64(&js::sha1(format!("{}{}", key, GUID).as_bytes()));
+}
+
+/// XMPP (path /xmpp or protocol xmpp), the matchmaker (/matchmaking), else None: the socket is destroyed
+fn kind_for(app: &App, u: &Upgrade) -> Option<Kind> {
+    if u.url.starts_with("/xmpp") || u.proto.contains("xmpp") {
+        return Some(Kind::Xmpp);
+    }
+    if !u.url.starts_with("/matchmaking") {
+        return None;
+    }
+    Some(Kind::Match(Box::new(Matchmaking {
+        ticket_id: js::random_hex(16),
+        match_id: js::random_hex(16),
+        session_id: js::random_hex(16),
+        w: app.wanted.borrow().clone(),
+        t0: Instant::now(),
+    })))
+}
+
+fn accept_key(key: &str) -> String {
+    js::base64(&js::sha1(format!("{}{}", key, GUID).as_bytes()))
+}
+
+async fn run(app: Rc<App>, io: BoxIo, kind: Kind) {
+    let ws = Ws { io, buf: Vec::new(), ended: false, destroyed: false };
+    match kind {
+        Kind::Xmpp => xmpp_session(app, ws).await,
+        Kind::Match(m) => match_session(app, ws, *m).await,
+    }
+}
+
+/// server.on('upgrade') on the raw socket: the request head and whatever arrived with it are dropped (server.mjs
+/// ignores the upgrade 'head'), then wsAccept's 101 byte for byte.
+pub async fn raw_upgrade(app: Rc<App>, mut s: TcpStream, received: usize, u: Upgrade) {
+    let mut sink = vec![0u8; received];
+    if s.read_exact(&mut sink).await.is_err() {
+        return;
+    }
+    let Some(kind) = kind_for(&app, &u) else { return };
+    let xmpp = matches!(kind, Kind::Xmpp);
+    let protocol = if xmpp && u.proto.contains("xmpp") { "Sec-WebSocket-Protocol: xmpp\r\n" } else { "" };
+    let head = format!(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n{}\r\n",
+        accept_key(&u.key),
+        protocol
+    );
+    if s.write_all(head.as_bytes()).await.is_err() {
+        return;
+    }
+    if xmpp {
+        app.log("xmpp: client connected");
+    }
+    let _ = s.set_nodelay(true);
+    run(app, Box::new(s), kind).await;
+}
+
+/// An upgrade that is not the connection's first request goes through hyper (same routing; hyper writes the 101)
+pub fn upgrade(app: Rc<App>, mut req: Request<Incoming>, raw_url: &str) -> Result<Response<Full<Bytes>>, io::Error> {
+    let hv = |name: &str| joined(req.headers().get_all(name).iter().map(|v| v.as_bytes()));
+    let u = Upgrade {
+        url: raw_url.to_string(),
+        proto: hv("sec-websocket-protocol").unwrap_or_default(),
+        key: hv("sec-websocket-key").unwrap_or_else(|| "undefined".into()),
+    };
+    let Some(kind) = kind_for(&app, &u) else {
+        return Err(io::Error::other("upgrade refused"));
+    };
+    let xmpp = matches!(kind, Kind::Xmpp);
     let mut res = Response::builder()
         .status(101)
         .header("Upgrade", "websocket")
         .header("Connection", "Upgrade")
-        .header("Sec-WebSocket-Accept", accept);
-    if xmpp && proto.contains("xmpp") {
+        .header("Sec-WebSocket-Accept", accept_key(&u.key));
+    if xmpp && u.proto.contains("xmpp") {
         res = res.header("Sec-WebSocket-Protocol", "xmpp");
     }
-    let kind = if xmpp {
-        Kind::Xmpp
-    } else {
-        Kind::Match(Box::new(Matchmaking {
-            ticket_id: js::random_hex(16),
-            match_id: js::random_hex(16),
-            session_id: js::random_hex(16),
-            w: app.wanted.borrow().clone(),
-            t0: Instant::now(),
-        }))
-    };
     let on_upgrade = hyper::upgrade::on(&mut req);
     let app2 = app.clone();
     tokio::task::spawn_local(async move {
         if let Ok(up) = on_upgrade.await {
-            let ws = Ws { io: TokioIo::new(up), buf: Vec::new(), ended: false, destroyed: false };
-            match kind {
-                Kind::Xmpp => xmpp_session(app2, ws).await,
-                Kind::Match(m) => match_session(app2, ws, *m).await,
-            }
+            // bytes read past the request are dropped like server.mjs's upgrade 'head'
+            let io: BoxIo = match up.downcast::<TokioIo<TcpStream>>() {
+                Ok(parts) => Box::new(parts.io.into_inner()),
+                Err(up) => Box::new(TokioIo::new(up)),
+            };
+            run(app2, io, kind).await;
         }
     });
     if xmpp {
@@ -216,7 +323,7 @@ fn status(payload: serde_json::Value, name: &str) -> String {
 /// The matchmaker: Connecting (200 ms), Waiting (600 ms), then Queued every second until the match server for the
 /// wanted playlist is ready (starting one takes 30-120 s); then SessionAssignment, Play 400 ms later and a normal
 /// close (1000) at 900 ms: 17.x closes the socket itself after Play, 3.x waits for the service to close it.
-async fn match_session<T: AsyncRead + AsyncWrite + Unpin>(app: Rc<App>, mut ws: Ws<T>, m: Matchmaking) {
+async fn match_session(app: Rc<App>, mut ws: Ws<BoxIo>, m: Matchmaking) {
     let ms = |n: u64| Duration::from_millis(n);
     let mut steps = 0u32;
     let mut next_poll = Some(m.t0 + ms(1000));
@@ -283,7 +390,7 @@ async fn match_session<T: AsyncRead + AsyncWrite + Unpin>(app: Rc<App>, mut ws: 
     }
 }
 
-async fn xmpp_session<T: AsyncRead + AsyncWrite + Unpin>(app: Rc<App>, mut ws: Ws<T>) {
+async fn xmpp_session(app: Rc<App>, mut ws: Ws<BoxIo>) {
     let mut x = Xmpp { jid: String::new(), authed: false };
     let mut tmp = vec![0u8; 16384];
     loop {

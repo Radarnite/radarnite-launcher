@@ -398,8 +398,8 @@ fn matchmaker_waits_for_the_match_server_then_plays() {
     assert!(w["server"].is_null());
     let t0 = Instant::now();
     let (mut c, head) = WsClient::open(s.port, "/matchmaking", None);
-    assert!(head.starts_with("HTTP/1.1 101 Switching Protocols"), "{}", head);
-    assert!(head.to_ascii_lowercase().contains("sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo="), "{}", head);
+    // wsAccept's bytes exactly: no Date, Node's header case
+    assert_eq!(head, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     assert_eq!(c.text(), r#"{"payload":{"state":"Connecting"},"name":"StatusUpdate"}"#);
     assert!(t0.elapsed() >= Duration::from_millis(150));
     assert_eq!(c.text(), r#"{"payload":{"totalPlayers":1,"connectedPlayers":1,"state":"Waiting"},"name":"StatusUpdate"}"#);
@@ -454,7 +454,7 @@ fn no_match_answers_403_and_other_upgrades_are_dropped() {
 fn xmpp_login_bind_presence() {
     let s = start();
     let (mut c, head) = WsClient::open(s.port, "/", Some("xmpp"));
-    assert!(head.to_ascii_lowercase().contains("sec-websocket-protocol: xmpp"), "{}", head);
+    assert!(head.ends_with("\r\nSec-WebSocket-Protocol: xmpp"), "{}", head);
     c.send(1, b"<open xmlns=\"urn:ietf:params:xml:ns:xmpp-framing\" to=\"prod.ol.epicgames.com\" version=\"1.0\"/>");
     assert!(c.text().starts_with("<open xmlns=\"urn:ietf:params:xml:ns:xmpp-framing\" from=\"prod.ol.epicgames.com\" id=\""));
     assert!(c.text().contains("<mechanism>PLAIN</mechanism>"));
@@ -478,6 +478,29 @@ fn xmpp_login_bind_presence() {
     assert_eq!(c.frame().unwrap(), (8, vec![]));
     let log = std::fs::read_to_string(s.off().join("backend.log")).unwrap();
     assert!(log.contains("xmpp: client connected"));
+}
+
+#[test]
+fn frames_sent_with_the_upgrade_request_are_dropped_like_node() {
+    let s = start();
+    let mut t = TcpStream::connect(("127.0.0.1", s.port)).unwrap();
+    t.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut first = b"GET /xmpp HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: a\r\n\r\n".to_vec();
+    first.extend_from_slice(&[0x81, 0x85, 0, 0, 0, 0]);
+    first.extend_from_slice(b"<open");
+    t.write_all(&first).unwrap();
+    let mut c = WsClient { s: t, buf: Vec::new() };
+    while !c.buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        assert!(c.fill() > 0);
+    }
+    let i = c.buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    c.buf.drain(..i + 4);
+    c.send(1, b"<open/>");
+    assert!(c.text().starts_with("<open "));
+    assert!(c.text().starts_with("<stream:features"));
+    c.send(8, b"");
+    assert_eq!(c.frame().unwrap(), (8, vec![]));
+    assert!(c.frame().is_none());
 }
 
 fn base64(b: &[u8]) -> String {

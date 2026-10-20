@@ -261,6 +261,7 @@ dependencies = [
  "bytes",
  "getrandom",
  "http-body-util",
+ "httparse",
  "hyper",
  "hyper-util",
  "md-5",

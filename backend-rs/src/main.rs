@@ -92,6 +92,11 @@ async fn serve(app: Rc<App>) {
         let _ = stream.set_nodelay(true);
         let app = app.clone();
         tokio::task::spawn_local(async move {
+            match ws::sniff(&stream).await {
+                ws::Sniff::Closed => return,
+                ws::Sniff::Upgrade(u, n) => return ws::raw_upgrade(app, stream, n, u).await,
+                ws::Sniff::Http => {}
+            }
             let svc = service_fn(move |req| handle(app.clone(), req));
             let mut b = http1::Builder::new();
             // Node's answers: Title-Case headers, its own Date, idle keep-alive connections closed after 5 s

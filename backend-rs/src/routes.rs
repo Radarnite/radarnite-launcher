@@ -556,7 +556,7 @@ pub fn table() -> Vec<Route> {
         on("GET", "/fortnite/api/cloudstorage/system/:file", |a, q| {
             let n = js::decode_uri_component(&q.m[1])?;
             if let Some(msg) = proto_hotfix(&n) {
-                return Err(type_error(msg));
+                return Err(JsError { name: "TypeError [ERR_INVALID_ARG_TYPE]", message: msg });
             }
             match a.hotfix.iter().find(|e| e.0 == n) {
                 Some((_, c)) if !c.is_empty() => t(200, c, "application/octet-stream"),
