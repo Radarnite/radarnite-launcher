@@ -1,8 +1,11 @@
 ; Radarnite Launcher installer (NSIS 3, Unicode). Per-user: no administrator needed to install.
-; Build: makensis -DVERSION=2.1.0 -DSRC=<staging folder> -DOUT=<setup.exe> radarnite.nsi
-;   <staging>\app      the launcher exactly as it is installed (RadarniteLauncher.exe, ui\, node\, backend\, redirect\,
-;                      gameserver\, tools\, THIRD-PARTY-NOTICES.txt)
-;   <staging>\radarnite.ico
+; Build (tools/release.sh does it): makensis -DVERSION=3.0.0-rc.1 -DVERSION_NUM=3.0.0 -DSRC=<staging> -DOUT=<setup.exe> radarnite.nsi
+;   <staging>/app      the launcher exactly as it is installed (RadarniteLauncher.exe, radarnite-backend.exe, redirect\,
+;                      gameserver\, patches\, tools\, THIRD-PARTY-NOTICES.txt, README-offline.md)
+;   <staging>/radarnite.ico
+; 3.x replaces a 2.x install in place: same folder, Start menu entry, registry keys, uninstall key and firewall group
+; ("FN Offline Builds", managed by the launcher). config.json and the logs stay; the 2.x runtime files go
+; (radarnite-2x-leftovers.nsh).
 
 Unicode true
 SetCompressor /SOLID lzma
@@ -11,20 +14,23 @@ RequestExecutionLevel user
 ManifestDPIAware true
 
 !ifndef VERSION
-  !define VERSION "2.2.0"
+  !define VERSION "3.0.0"
+!endif
+!ifndef VERSION_NUM
+  !define VERSION_NUM "${VERSION}"   ; numeric X.Y.Z for the version resource (VERSION may carry -rc.N)
 !endif
 !define APP "Radarnite Launcher"
 !define EXE "RadarniteLauncher.exe"
+!define BACKEND "radarnite-backend.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\RadarniteLauncher"
 !define APP_KEY "Software\Radarnite\Launcher"
-!define WEBVIEW2_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 Name "${APP}"
 OutFile "${OUT}"
 InstallDir "$LOCALAPPDATA\Programs\Radarnite Launcher"
 InstallDirRegKey HKCU "${APP_KEY}" "InstallDir"
 BrandingText "${APP} ${VERSION}"
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${VERSION_NUM}.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "CompanyName" "Radarnite"
 VIAddVersionKey "FileDescription" "${APP} setup"
@@ -38,8 +44,8 @@ Var BuildsDir
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
-!define MUI_ICON "${SRC}\radarnite.ico"
-!define MUI_UNICON "${SRC}\radarnite.ico"
+!define MUI_ICON "${SRC}/radarnite.ico"
+!define MUI_UNICON "${SRC}/radarnite.ico"
 !define MUI_ABORTWARNING
 
 !define MUI_WELCOMEPAGE_TITLE "Install ${APP}"
@@ -47,7 +53,7 @@ Var BuildsDir
 !insertmacro MUI_PAGE_WELCOME
 
 !define MUI_PAGE_HEADER_TEXT "Program folder"
-!define MUI_PAGE_HEADER_SUBTEXT "Where Radarnite Launcher itself is installed (about 500 MB)."
+!define MUI_PAGE_HEADER_SUBTEXT "Where Radarnite Launcher itself is installed (about 130 MB)."
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Radarnite Launcher will be installed in this folder."
 !insertmacro MUI_PAGE_DIRECTORY
 
@@ -66,6 +72,7 @@ Var BuildsDir
 !define MUI_FINISHPAGE_SHOWREADME ""
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Create a desktop shortcut"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION DesktopShortcut
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -106,46 +113,121 @@ Function PickDrive
   Push $0
 FunctionEnd
 
+; The desktop shortcut is the installer's only when it made it (DesktopShortcut=1): one the user already has (it may
+; point somewhere else) is neither overwritten by default nor deleted by the uninstaller.
 Function DesktopShortcut
   CreateShortCut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  WriteRegDWORD HKCU "${APP_KEY}" "DesktopShortcut" 1
 FunctionEnd
 
-; The launcher (or a game it started) is running from this folder: files would be locked.
-!macro CheckRunning UN
-Function ${UN}CheckRunning
-  retry:
-  ClearErrors
-  ${If} ${FileExists} "$INSTDIR\${EXE}"
-    FileOpen $0 "$INSTDIR\${EXE}" a
-    ${If} ${Errors}
-      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Radarnite Launcher is open. Close it (and the game, if it is running) and press Retry." IDRETRY retry
-      Abort
-    ${EndIf}
-    FileClose $0
+Function FinishShow
+  ReadRegDWORD $0 HKCU "${APP_KEY}" "DesktopShortcut"
+  ${If} ${FileExists} "$DESKTOP\${APP}.lnk"
+  ${AndIf} $0 != 1
+    SendMessage $mui.FinishPage.ShowReadme ${BM_SETCHECK} ${BST_UNCHECKED} 0
   ${EndIf}
 FunctionEnd
+
+; A folder that cannot go (a file in it is in use) is reported and left for the next update; the install goes on.
+!macro TolerantRMDir DIR
+  RMDir /r "${DIR}"
+  ${If} ${FileExists} "${DIR}\*.*"
+    DetailPrint "Kept (in use, removed on the next update): ${DIR}"
+  ${EndIf}
 !macroend
-!insertmacro CheckRunning ""
-!insertmacro CheckRunning "un."
+!include "radarnite-2x-leftovers.nsh"
+
+; The launcher's own processes (its exe, backend, tools, the 2.x node.exe and WebView2 window) and only those:
+; tools/installer-own-processes.ps1 with RN_MODE=wait|kill; $0 = how many are still running, "error" if it could not run.
+!macro OwnProcesses UN
+Function ${UN}OwnProcesses
+  Exch $R0
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\own-processes.ps1" "tools/installer-own-processes.ps1"
+  System::Call 'kernel32::SetEnvironmentVariable(t "RN_INSTDIR", t "$INSTDIR")'
+  System::Call 'kernel32::SetEnvironmentVariable(t "RN_MODE", t "$R0")'
+  StrCpy $R0 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"   ; 64-bit PowerShell from this 32-bit installer
+  ${IfNot} ${FileExists} $R0
+    StrCpy $R0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  ${EndIf}
+  nsExec::Exec '"$R0" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\own-processes.ps1"'
+  Pop $0
+  Pop $R0
+FunctionEnd
+
+; Before files are replaced: an updating launcher closes itself right after starting this installer, so wait for it;
+; whatever of ours is still running is closed (after asking, unless silent). Files still locked after that (a game
+; holding the launcher's DLLs, or no PowerShell) get the Retry/Cancel prompt; games are never closed from here.
+Function ${UN}CheckRunning
+  Push "wait"
+  Call ${UN}OwnProcesses
+  ${If} $0 != "error"
+  ${AndIf} $0 != 0
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "Radarnite Launcher is still running.$\r$\n$\r$\nClose it now and continue?" /SD IDYES IDYES +2
+    Abort
+    Push "kill"
+    Call ${UN}OwnProcesses
+    ${If} $0 != "error"
+    ${AndIf} $0 != 0
+      DetailPrint "$0 Radarnite Launcher process(es) did not close"
+    ${EndIf}
+  ${EndIf}
+  retry:
+  ClearErrors
+  ${ForEach} $1 0 5 + 1
+    ${Select} $1
+      ${Case} 0
+        StrCpy $2 "$INSTDIR\${EXE}"
+      ${Case} 1
+        StrCpy $2 "$INSTDIR\${BACKEND}"
+      ${Case} 2
+        StrCpy $2 "$INSTDIR\redirect\fnredirect.dll"
+      ${Case} 3
+        StrCpy $2 "$INSTDIR\gameserver\radarnite-server.dll"
+      ${Case} 4
+        StrCpy $2 "$INSTDIR\patches\fnpakpatch.dll"
+      ${Case} 5
+        StrCpy $2 "$INSTDIR\node\node.exe"
+    ${EndSelect}
+    ${If} ${FileExists} $2
+      FileOpen $0 $2 a
+      ${If} ${Errors}
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "A Radarnite Launcher file is in use:$\r$\n$2$\r$\n$\r$\nClose Radarnite Launcher and the game, if it is running, and press Retry." /SD IDCANCEL IDRETRY retry
+        Abort
+      ${EndIf}
+      FileClose $0
+    ${EndIf}
+  ${Next}
+FunctionEnd
+!macroend
+!insertmacro OwnProcesses ""
+!insertmacro OwnProcesses "un."
 
 Section "Radarnite Launcher" SecMain
   SectionIn RO
   Call CheckRunning
   SetOutPath "$INSTDIR"
+  ; Only over an existing Radarnite Launcher (2.x or 3.x): a folder picked by hand that holds other files is never
+  ; cleaned. Upgrading from 2.x: its .NET runtime, WebView2 page and profile, Node and server.mjs go. Wildcards catch
+  ; the runtime files of other 2.x versions; 3.x has no dll in the program folder root (tools/release.sh enforces it).
   ; Program folders are fully replaced on every install (so a file removed between versions cannot linger); only
-  ; config.json (name, account, settings) and the builds, which live elsewhere, stay.
-  RMDir /r "$INSTDIR\ui"
-  RMDir /r "$INSTDIR\tools"
-  RMDir /r "$INSTDIR\gameserver"
-  RMDir /r "$INSTDIR\backend"
-  RMDir /r "$INSTDIR\redirect"
-  RMDir /r "$INSTDIR\patches"
-  File /r "${SRC}\app\*.*"
-  File "${SRC}\radarnite.ico"
+  ; config.json (name, account, settings), the logs and the builds, which live elsewhere, stay.
+  ${If} ${FileExists} "$INSTDIR\${EXE}"
+    !insertmacro Remove2xLeftovers
+    Delete "$INSTDIR\*.dll"
+    Delete "$INSTDIR\*.deps.json"
+    Delete "$INSTDIR\*.runtimeconfig.json"
+    !insertmacro TolerantRMDir "$INSTDIR\tools"
+    !insertmacro TolerantRMDir "$INSTDIR\gameserver"
+    !insertmacro TolerantRMDir "$INSTDIR\redirect"
+    !insertmacro TolerantRMDir "$INSTDIR\patches"
+  ${EndIf}
+  ClearErrors
+  File /r "${SRC}/app/*.*"
 
   ExecWait '"$INSTDIR\${EXE}" --set-builds-folder "$BuildsDir"' $0
   ${If} $0 != 0
-    MessageBox MB_ICONEXCLAMATION "Could not set the builds folder to $BuildsDir. Pick it later in the launcher (bottom left)."
+    MessageBox MB_ICONEXCLAMATION "Could not set the builds folder to $BuildsDir. Pick it later in the launcher (bottom left)." /SD IDOK
   ${EndIf}
 
   CreateDirectory "$SMPROGRAMS"
@@ -166,19 +248,6 @@ Section "Radarnite Launcher" SecMain
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
-
-  ; The window is drawn by Microsoft Edge WebView2 (built into Windows 11 and up-to-date Windows 10).
-  ReadRegStr $0 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_GUID}" "pv"
-  ${If} $0 == ""
-  ${OrIf} $0 == "0.0.0.0"
-    ReadRegStr $0 HKCU "Software\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_GUID}" "pv"
-  ${EndIf}
-  ${If} $0 == ""
-  ${OrIf} $0 == "0.0.0.0"
-    IfSilent +3
-    MessageBox MB_YESNO|MB_ICONINFORMATION "Radarnite Launcher needs Microsoft Edge WebView2 Runtime, which is not on this PC.$\r$\n$\r$\nOpen Microsoft's download page now?" IDNO +2
-    ExecShell "open" "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-  ${EndIf}
 SectionEnd
 
 Section "Uninstall"
@@ -189,7 +258,11 @@ Section "Uninstall"
   ExecShellWait "runas" "$INSTDIR\${EXE}" "--firewall-remove" SW_HIDE
 
   Delete "$SMPROGRAMS\${APP}.lnk"
-  Delete "$DESKTOP\${APP}.lnk"
+  ReadRegDWORD $0 HKCU "${APP_KEY}" "DesktopShortcut"
+  ${If} $0 == 1
+    Delete "$DESKTOP\${APP}.lnk"
+    DeleteRegValue HKCU "${APP_KEY}" "DesktopShortcut"
+  ${EndIf}
   RMDir /r "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegValue HKCU "${APP_KEY}" "InstallDir"
