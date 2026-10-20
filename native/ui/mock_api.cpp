@@ -186,7 +186,7 @@ public:
                 log(L"Firewall rules created."); sink_->onState(s);
             });
             break;
-        case Command::Shortcut: log(L"Shortcut created: C:\\Users\\Public\\Desktop\\Fortnite " + build + L" Offline.lnk"); toast(L"Desktop shortcut created", Level::Ok); break;
+        case Command::Shortcut: log(L"Shortcut created on the desktop: Fortnite " + build + L" Offline.lnk (mock)"); toast(L"Desktop shortcut created", Level::Ok); break;
         case Command::OpenLogs: log(L"Mock: Explorer would open the build's offline folder."); break;
         case Command::OpenConfig: log(L"Mock: Notepad would open config.json."); break;
         }

@@ -342,6 +342,28 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         delete app; delete c;
     }
 
+    // 3) interactions on an offscreen window state (scenario 20: the bots form)
+    std::string checks;
+    {
+        Core* c = createMockCore(L"20-match-server-bots-form");
+        App* app = new App(g_gfx, c);
+        app->start(); app->drain();
+        IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
+        if (SUCCEEDED(g_gfx.wic->CreateBitmap(1200, 800, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp)) &&
+            SUCCEEDED(g_gfx.d2d->CreateWicBitmapRenderTarget(bmp, D2D1::RenderTargetProperties(), &rt))) {
+            app->setTarget(rt, 96.f);
+            for (auto& r : app->selfCheck(1200, 800)) {
+                char line[400];
+                snprintf(line, sizeof line, "%s\n    {\"check\": \"%s\", \"ok\": %s}", checks.empty() ? "" : ",", json(r.first).c_str(), r.second ? "true" : "false");
+                checks += line;
+                if (!r.second) failed++;
+            }
+            app->setTarget(nullptr, 96.f);
+        }
+        release(rt); release(bmp);
+        delete app; delete c;
+    }
+
     wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
     WIN32_FILE_ATTRIBUTE_DATA fa = {}; GetFileAttributesExW(exe, GetFileExInfoStandard, &fa);
     DPI_AWARENESS aw = GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
@@ -350,10 +372,10 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     if (!f) return 1;
     fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
                "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"exeBytes\": %lu,\n"
-               "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"scenarios\": [%s\n  ]\n}\n",
+               "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"failed\": %d,\n  \"scenarios\": [%s\n  ],\n  \"interactions\": [%s\n  ]\n}\n",
             first, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints,
             fa.nFileSizeLow, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
-            live ? "true" : "false", forced ? "true" : "false", (unsigned long)g_lastHr, (unsigned long)g_createHr, g_client.right, g_client.bottom, g_lastFrameMs, session, items.c_str());
+            live ? "true" : "false", forced ? "true" : "false", (unsigned long)g_lastHr, (unsigned long)g_createHr, g_client.right, g_client.bottom, g_lastFrameMs, session, failed, items.c_str(), checks.c_str());
     fclose(f);
     return failed ? 1 : 0;
 }

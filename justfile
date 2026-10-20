@@ -37,8 +37,9 @@ run-pc *args: (_wait-cpu "windows")
     test -f native/ui/out/RadarniteUI.exe || just build
     ssh -o BatchMode=yes windows 'if not exist {{pc_dir}} mkdir {{pc_dir}}'
     scp -q native/ui/out/RadarniteUI.exe 'windows:{{pc_dir}}\RadarniteUI.exe'
-    (printf '$env:RN_UI_DIR=%s; $env:RN_UI_ARGS=%s\n' "'{{pc_dir}}'" "'{{args}}'"; cat native/ui/tools/selftest-session.ps1) | \
-      ${RN_WIN_LANE:-ssh -o BatchMode=yes windows} 'powershell -NoProfile -NonInteractive -Command -' | grep -E 'firstFrame|private|idle|renderer|exeBytes|stopped'
+    scp -q native/ui/tools/selftest-session.ps1 'windows:{{pc_dir}}\selftest-session.ps1'
+    ${RN_WIN_LANE:-ssh -o BatchMode=yes windows} 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\selftest-session.ps1 -Dir {{pc_dir}} -UiArgs "{{args}}"' | \
+      grep -E '"(firstFrameMs|privateMB|idleCpu|idlePaints|renderer|exeBytes|failed)"|stopped|no selftest'
     mkdir -p native/ui/selftest
     scp -q 'windows:S:/native-ui-test/out/*' native/ui/selftest/
 

@@ -902,17 +902,18 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
             float fy = field(bx, by, L"Bots", L"0–99. 20 suits this PC.");
             int bots = botsDrag_ >= 0 ? botsDrag_ : c.bots;
             box(rc(bx, fy, 98, 34), 8, C::bg2, 1, C::line);
-            for (int k = 0; k < 2; k++) {
-                int id = k ? ID_STEP_UP : ID_STEP_DN;
-                float sx = k ? bx + 1 + 30 + 36 : bx + 1;
-                text(k ? L"+" : L"−", Font{ Face::UI, 13, 400, false }, sx, fy, 30, 34, hover_ == id ? C::text : C::muted, 1);
+            // focus order like the page: -, the number, +
+            auto stepBtn = [&](int id, float sx, const wchar_t* label) {
+                text(label, Font{ Face::UI, 13, 400, false }, sx, fy, 30, 34, hover_ == id ? C::text : C::muted, 1);
                 hit(id, rc(sx, fy + 1, 30, 32), F_FOCUS | F_HAND, 6);
-            }
+            };
+            stepBtn(ID_STEP_DN, bx + 1, L"\u2212");
             EditBox& e = edits_[1];
             D2D1_RECT_F inner = { bx + 31, fy + 1, bx + 31 + 36, fy + 33 };
             if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
             if (!e.show || measuring_) text(std::to_wstring(bots), Font{ Face::UI, 13, 600, false }, inner.left, fy, 36, 34, C::text, 1);
             hit(ID_BOTS, rc(inner.left, fy, 36, 34), F_FOCUS | F_EDIT, 4);
+            stepBtn(ID_STEP_UP, bx + 1 + 30 + 36, L"+");
             float rx = bx + 98 + 12, rw = std::max(60.f, colW - 98 - 12);
             float cy = fy + 17;
             fill({ rx, cy - 2, rx + rw, cy + 2 }, C::line, 1, 2);
@@ -1114,7 +1115,6 @@ void App::drawBar(float x, float y, float w) {
     float cx = pr.left + (pw - (18 + 10 + ptw)) / 2;
     icon(stopStyle ? Icon::X : Icon::Play, cx, y + 10 + 17, 18, pc);
     if (text(pl, pf, cx + 28, y + 10, ptw + 2, 52, pc, 0, stopStyle ? 0 : -0.24f)) issues.push_back(L"clipped play");
-    hit(ID_PLAY, pr, F_FOCUS | F_HAND | (disabled ? F_DISABLED : 0), 12);
 
     // activity toggle
     Font af{ Face::UI, 12.5f, 600, false };
@@ -1134,6 +1134,7 @@ void App::drawBar(float x, float y, float w) {
     fill(rc(bx, y + 27, bw, 18), bbg, 1, 9);
     text(bn, Font{ Face::UI, 11, 400, false }, bx, y + 27, bw, 18, bfg, 1);
     hit(ID_ACT, ar, F_FOCUS | F_HAND, 8);
+    hit(ID_PLAY, pr, F_FOCUS | F_HAND | (disabled ? F_DISABLED : 0), 12);   // after Activity, like the page
 
     // status (left)
     float sx = x + 24, sw = ar.left - 16 - sx;
@@ -1504,6 +1505,94 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     }
     if (vk == VK_PRIOR || vk == VK_NEXT) { contentScroll_ += (vk == VK_NEXT ? 1 : -1) * contentView_ * 0.9f; invalidate(); return true; }
     return false;
+}
+
+// ================================================================================================ selftest
+std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
+    std::vector<std::pair<std::wstring, bool>> out;
+    auto frame = [&] { rt_->BeginDraw(); paint(W, H); rt_->EndDraw(); };
+    auto center = [&](int id, float* x, float* y) { D2D1_RECT_F r = rectOf(id); *x = (r.left + r.right) / 2; *y = (r.top + r.bottom) / 2; };
+    auto click = [&](int id) { frame(); float x, y; center(id, &x, &y); mouseDown(x, y); mouseUp(x, y); frame(); };
+    auto check = [&](const wchar_t* name, bool ok) { out.push_back({ name, ok }); };
+    frame(); frame();
+
+    bool late = st_.config.lateGame;
+    click(ID_TG1);
+    check(L"click switch toggles lateGame", st_.config.lateGame == !late);
+    int bots = st_.config.bots;
+    click(ID_STEP_UP);
+    check(L"stepper + adds a bot", st_.config.bots == bots + 1);
+    click(ID_STEP_DN);
+    check(L"stepper - removes a bot", st_.config.bots == bots);
+    frame();
+    { float x, y; center(ID_RANGE, &x, &y); D2D1_RECT_F r = rectOf(ID_RANGE); mouseDown(r.right - 2, y); mouseUp(r.right - 2, y); frame(); }
+    check(L"slider drag to the end = 99 bots", st_.config.bots == 99);
+    setFocus(ID_RANGE, true); key(VK_HOME, false, false); frame();
+    check(L"slider Home = 0 bots", st_.config.bots == 0);
+    key(VK_RIGHT, false, false); key(VK_PRIOR, false, false); frame();
+    check(L"slider Right + PageUp = 11 bots", st_.config.bots == 11);
+
+    // focus order: Tab from nothing reaches every control once and wraps
+    focus_ = 0; frame();
+    int n = 0; for (auto& h : hits_) if ((h.flags & F_FOCUS) && !(h.flags & F_DISABLED) && !(h.id >= ID_MENU0 && h.id < ID_BUILD0)) n++;
+    key(VK_TAB, false, false); int first = focus_;
+    for (int i = 1; i < n; i++) key(VK_TAB, false, false);
+    key(VK_TAB, false, false);
+    check(L"Tab cycles through every control and wraps", first == ID_MIN && focus_ == first);
+    key(VK_TAB, true, true);   // Shift+Tab (ctrl ignored for Tab)
+    check(L"Shift+Tab goes back to the last control", focus_ == ID_PLAY);
+
+    // build list keyboard selection
+    size_t cur = 0; for (size_t i = 0; i < st_.builds.size(); i++) if (st_.builds[i].name == selected_) cur = i;
+    setFocus(ID_BUILD0 + (int)cur, true); frame();
+    key(VK_DOWN, false, false); frame();
+    check(L"Down in the build list selects the next build", cur + 1 < st_.builds.size() ? selected_ == st_.builds[cur + 1].name : true);
+    key(VK_UP, false, false); frame();
+    check(L"Up goes back", selected_ == st_.builds[cur].name);
+
+    // build menu: click opens, Escape closes and returns the focus
+    click(ID_BUILDMENU);
+    check(L"Build menu opens on click", menu_ == 2);
+    key(VK_ESCAPE, false, false); frame();
+    check(L"Escape closes the menu and focuses its button", menu_ == 0 && focus_ == ID_BUILDMENU);
+    setFocus(ID_ADD, true); key(VK_RETURN, false, false); frame();
+    check(L"Enter on + opens the add menu on its first item", menu_ == 1 && focus_ == ID_MENU0);
+    key(VK_DOWN, false, false); frame();
+    check(L"Down moves to the next menu item", focus_ == ID_MENU0 + 1);
+    float ox = 5, oy = H - 5; mouseDown(ox, oy); mouseUp(ox, oy); frame();
+    check(L"Click outside closes the menu", menu_ == 0);
+
+    // activity: Ctrl+L, filters, search, virtualized 3000 lines
+    key('L', true, false); frame();
+    check(L"Ctrl+L opens Activity", actOpen_);
+    for (int i = 0; i < 5000; i++) { LogLine l; l.ts = L"10:00:00"; l.text = i % 7 ? L"Backend ready on 127.0.0.1:3551 (#" + std::to_wstring(i) + L")" : L"Error: could not start (#" + std::to_wstring(i) + L")"; addLog(l); }
+    LARGE_INTEGER f, t0, t1; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t0);
+    frame();
+    QueryPerformanceCounter(&t1);
+    double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+    check(L"log keeps the last 3000 lines", logs_.size() == MAXLOG);
+    check((L"frame with 3000 lines under 50 ms (" + std::to_wstring((int)ms) + L" ms)").c_str(), ms < 50);
+    check(L"log follows the end", logFollow_ && logScroll_ >= logMax_ - 1);
+    click(ID_F2);
+    bool onlyBad = !rows_.empty(); for (int r : rows_) if (logs_[r].lvl != 2) onlyBad = false;
+    check(L"Errors filter shows only errors", filter_ == 2 && onlyBad);
+    q_ = lower(L"#4998"); rowsDirty_ = true; filter_ = 0; frame();
+    check(L"search filters the lines", rows_.size() == 1);
+    q_.clear(); rowsDirty_ = true; frame();
+    float before = actH_;
+    { D2D1_RECT_F g = rectOf(ID_GRIP); float y = (g.top + g.bottom) / 2; mouseDown(100 + g.left, y); mouseMove(100 + g.left, y - 60); mouseUp(100 + g.left, y - 60); frame(); }
+    check(L"dragging the grip makes Activity taller", actH_ > before + 50);
+    setFocus(ID_LINES, true); key(VK_HOME, false, false); frame();
+    check(L"Home in the log goes to the top and stops following", logScroll_ == 0 && !logFollow_);
+    click(ID_CLEAR);
+    check(L"Clear empties the log", logs_.empty());
+    key('L', true, false); frame();
+    check(L"Ctrl+L closes Activity", !actOpen_);
+
+    // launch bar: Ctrl+Enter only when a build can launch
+    const Hit* p = hitById(ID_PLAY);
+    check(L"Launch enabled for a supported build", p && !(p->flags & F_DISABLED));
+    return out;
 }
 
 } // namespace rn

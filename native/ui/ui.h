@@ -48,6 +48,10 @@ public:
     void openActivity(bool open);
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
 
+    // Selftest: drives the window through clicks and keys on the current target and checks the state after each
+    // step. Returns { name, ok } pairs. Needs a render target (setTarget) and a scenario with the match server.
+    std::vector<std::pair<std::wstring, bool>> selfCheck(float width, float height);
+
     // Selftest: text clipped in controls that must not clip (the page's "clipped" checks)
     std::vector<std::wstring> issues;
 
