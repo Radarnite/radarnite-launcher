@@ -1,0 +1,51 @@
+--- a/native/ui/main.cpp
++++ b/native/ui/main.cpp
+@@ -14,6 +14,8 @@
+ // rounded corners), WM_NCCALCSIZE gives it all to the client, WM_NCHITTEST answers the resize edges and HTCAPTION
+ // on the title bar (drag, double-click maximize, system menu are native).
+ #include "ui.h"
++#include "../core/cli.h"
++#include "../core/core.h"
+ #include "resource.h"
+ #include <commctrl.h>
+ #include <dwmapi.h>
+@@ -390,12 +392,19 @@
+ 
+     int argc = 0;
+     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+-    std::wstring scenario, selftestDir;
++    {
++        // console verbs of 2.x (--check, --scan, --firewall, --set-builds-folder, --update-check ...): no window
++        bool handled = false;
++        int rc = rn::cli::run(argc, argv, &handled);
++        if (handled) { LocalFree(argv); CoUninitialize(); return rc; }
++    }
++    std::wstring scenario, selftestDir, autoPlay;
+     bool selftestMode = false;
+     int exitAfter = 0;
+     for (int i = 1; i < argc; i++) {
+         std::wstring a = argv[i];
+-        if (a == L"--selftest-ui") { selftestMode = true; if (i + 1 < argc && argv[i + 1][0] != L'-') selftestDir = argv[++i]; }
++        if (a == L"--play" && i + 1 < argc) autoPlay = argv[++i];
++        else if (a == L"--selftest-ui") { selftestMode = true; if (i + 1 < argc && argv[i + 1][0] != L'-') selftestDir = argv[++i]; }
+         else if (a == L"--scenario" && i + 1 < argc) scenario = argv[++i];
+         else if (a == L"--render" && i + 1 < argc) g_software = std::wstring(argv[++i]) != L"hw";
+         else if (a == L"--exit-after" && i + 1 < argc) exitAfter = _wtoi(argv[++i]);
+@@ -408,7 +417,7 @@
+         if (selftestDir.empty()) { wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH); selftestDir = exe; selftestDir = selftestDir.substr(0, selftestDir.find_last_of(L'\\')) + L"\\selftest-ui"; }
+         rc = selftest(inst, selftestDir);
+     } else {
+-        Core* core = createMockCore(scenario.empty() ? nullptr : scenario.c_str());
++        Core* core = !scenario.empty() ? createMockCore(scenario.c_str()) : rn::createCore(autoPlay.empty() ? nullptr : autoPlay.c_str());
+         g_app = new App(g_gfx, core);
+         HWND h = createWindow(inst, false, 1180, 740);
+         g_app->attach(h);
+@@ -418,7 +427,7 @@
+         if (exitAfter > 0) SetTimer(h, 99, exitAfter, nullptr);
+         MSG m;
+         while (GetMessageW(&m, nullptr, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
+-        delete core;   // stops the mock's timers before the window state goes away
++        delete core;   // stops the core's session (or the mock's timers) before the window state goes away
+         delete g_app; g_app = nullptr;
+         discardTarget();
+     }
