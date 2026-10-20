@@ -1,0 +1,263 @@
+# Build, test and publish Radarnite Launcher 3.x on every push; nothing is released by hand (INSTALL.md).
+#   main         -> release vX.Y.Z, made the latest release: every installed launcher updates to it
+#   other branch -> prerelease vX.Y.Z-<branch>.N, never the latest release: installed release builds (2.x and 3.x)
+#                   only read releases/latest, so they never see it; prerelease builds offer it
+# tools/ci-version.sh picks the version (last stable tag + 1 patch, or VERSION when higher) and writes the notes.
+# Everything builds on ubuntu-latest: zig c++ for the core and the window, cargo zigbuild for the backend, makensis
+# for the installer; the payload comes from the pinned 2.2.1 installer (tools/payload-from-release.sh).
+# Third-party actions run only in the read-only jobs: the one job that can write (publish) runs gh alone.
+name: release
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+# one run at a time per branch, never cancelled: the version is fixed when the run starts and N must not be reused
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: 0.16.0
+  RUST_TOOLCHAIN: 1.94.0
+  CARGO_ZIGBUILD_VERSION: 0.23.4
+  NODE_VERSION: '24'
+  # release.sh bans the builder's account name as an identity and scrubs it out of the prebuilt payload. On a runner
+  # that name is "runner", which is also part of type names in the .NET payload (RegexRunner) that the scrub would
+  # rewrite, so release.sh and its selftest see this neutral name (absent from the payload) instead. HOME
+  # (/home/runner), the checkout, every input folder and the generic '/home/' stay banned.
+  RN_CI_USER: rlcibuilder
+
+jobs:
+  meta:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Version, tag and release notes
+        id: v
+        run: |
+          tools/ci-version.sh --notes "$RUNNER_TEMP/notes.md" | tee "$RUNNER_TEMP/version.txt"
+          { echo '### Version'; echo '```'; cat "$RUNNER_TEMP/version.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+
+  test:
+    name: Tests
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend-rs
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: makensis, 7z and wine
+        run: |
+          pkgs=(nsis wine)
+          command -v 7z >/dev/null || pkgs+=(p7zip-full)
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
+          echo "makensis $(makensis -VERSION), $(wine --version), zig $(zig version), node $(node --version)"
+      - name: Backend tests (cargo test)
+        working-directory: backend-rs
+        run: cargo test --locked
+      - name: Backend parity with backend/server.mjs (synthetic corpus, Linux build)
+        run: |
+          cargo build --release --locked --manifest-path backend-rs/Cargo.toml
+          RN_RUST_BIN="$GITHUB_WORKSPACE/backend-rs/target/release/radarnite-backend" tests/parity/run.sh tests/parity/synthetic
+      - name: Updater version parsing and semver precedence (coretest semver, under wine)
+        env:
+          RN_VERSION: ${{ needs.meta.outputs.version }}
+          RN_CORETEST: '1'
+          WINEDEBUG: -all
+          WINEDLLOVERRIDES: mscoree,mshtml=
+        run: |
+          native/core/build.sh out/test
+          wine native/core/out/test/coretest.exe semver
+      - name: release.sh selftest (privacy gate, .sha256 format, the real 2.2.1 payload)
+        env:
+          USER: ${{ env.RN_CI_USER }}
+          LOGNAME: ${{ env.RN_CI_USER }}
+        run: tools/release-selftest.sh "$RUNNER_TEMP/release-selftest"
+      - name: Payload sources built here (informational, nothing of it ships)
+        continue-on-error: true
+        run: |
+          ref="$RUNNER_TEMP/release-selftest/ref-x"   # the 2.2.1 installer, extracted by the selftest
+          o="$RUNNER_TEMP/src-check"; mkdir -p "$o"
+          zig cc -target x86_64-windows-gnu -O2 -shared -s -o "$o/fnpakpatch.dll" pakpatch/fnpakpatch.c
+          zig cc -target x86_64-windows-gnu -O2 -shared -s -o "$o/fnredirect.dll" redirect/fnredirect.c
+          echo '### Payload sources' >> "$GITHUB_STEP_SUMMARY"
+          for p in fnpakpatch.dll:patches/fnpakpatch.dll.off fnredirect.dll:redirect/fnredirect.dll; do
+            if cmp -s "$o/${p%%:*}" "$ref/${p#*:}"; then r="identical to"; else r="differs from"; fi
+            echo "- ${p%%:*}: builds with zig $(zig version), $r 2.2.1's ${p#*:} (the 2.2.1 one ships)" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+  build:
+    name: Installer
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-pc-windows-gnu
+      - name: Keep the runner's paths out of the backend (the remaps of backend-rs/justfile)
+        run: |
+          c="${CARGO_HOME:-$HOME/.cargo}"; r="${RUSTUP_HOME:-$HOME/.rustup}"
+          echo "RUSTFLAGS=--remap-path-prefix=$c/registry/src=/cargo --remap-path-prefix=$c/git=/cargo-git --remap-path-prefix=$r=/rustup --remap-path-prefix=$GITHUB_WORKSPACE/backend-rs=/backend-rs" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend-rs
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild@${{ env.CARGO_ZIGBUILD_VERSION }}
+      - name: makensis and 7z
+        run: |
+          pkgs=(nsis)
+          command -v 7z >/dev/null || pkgs+=(p7zip-full)
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
+          echo "makensis $(makensis -VERSION), zig $(zig version), $(cargo zigbuild -V 2>/dev/null || cargo-zigbuild -V)"
+      - name: Core and window (zig c++, x86_64-windows-gnu)
+        env:
+          RN_VERSION: ${{ env.VERSION }}
+        run: |
+          native/core/build.sh out
+          mkdir -p native/ui/out
+          native/ui/build.sh out/RadarniteLauncher.exe
+      - name: Backend (cargo zigbuild, x86_64-pc-windows-gnu)
+        working-directory: backend-rs
+        run: |
+          cargo zigbuild --release --locked --target x86_64-pc-windows-gnu
+          size=$(stat -c %s target/x86_64-pc-windows-gnu/release/radarnite-backend.exe)
+          echo "radarnite-backend.exe: $size bytes"
+          [ "$size" -le 3145728 ] || { echo "::error::radarnite-backend.exe is over 3 MB"; exit 1; }
+      - name: Payload from the pinned 2.2.1 installer
+        run: tools/payload-from-release.sh "$RUNNER_TEMP/payload"
+      - name: Installer and .sha256 (release.sh build, privacy gate)
+        env:
+          USER: ${{ env.RN_CI_USER }}
+          LOGNAME: ${{ env.RN_CI_USER }}
+          RN_PRIVACY_BAN: ${{ secrets.RN_PRIVACY_BAN }}
+        run: >-
+          tools/release.sh build --version "$VERSION" --launcher native/ui/out/RadarniteLauncher.exe
+          --backend backend-rs/target/x86_64-pc-windows-gnu/release/radarnite-backend.exe
+          --payload "$RUNNER_TEMP/payload" --out dist --makensis "$(command -v makensis)"
+      - name: Program folder zip (the installer's content; no .sha256 asset, the updaters take any)
+        run: |
+          x="$RUNNER_TEMP/program"; rm -rf "$x"
+          7z x -y -bso0 -bsp0 -o"$x" "dist/RadarniteLauncherSetup-$VERSION.exe"
+          rm -rf "$x/\$PLUGINSDIR"
+          (cd "$x" && 7z a -tzip -mx=9 -bso0 -bsp0 "$GITHUB_WORKSPACE/dist/RadarniteLauncher-$VERSION.zip" '*')
+          stat -c '%10s %n' dist/*
+          { echo '### Installer'; echo '```'; stat -c '%10s %n' dist/*; cat "dist/RadarniteLauncherSetup-$VERSION.exe.sha256"; echo; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Publish
+    needs: [meta, test, build]
+    if: needs.meta.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.meta.outputs.version }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+    steps:
+      - name: Guards (only main publishes a release; the tag is new)
+        run: |
+          if [ "$PRERELEASE" = true ]; then
+            [[ "$VERSION" == *-* ]] || { echo "::error::prerelease $VERSION has no prerelease part"; exit 1; }
+          else
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::$GITHUB_REF must not publish the release $TAG"; exit 1; }
+            [[ "$VERSION" != *-* ]] || { echo "::error::release $VERSION has a prerelease part"; exit 1; }
+          fi
+          if out=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" 2>&1); then echo "::error::tag $TAG already exists"; exit 1; fi
+          grep -q 'HTTP 404' <<<"$out" || { echo "::error::could not check tag $TAG: $out"; exit 1; }
+          echo "LATEST_BEFORE=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: notes
+          path: notes
+      - name: Check the assets
+        run: |
+          exe="RadarniteLauncherSetup-$VERSION.exe"
+          want="$(printf '%s\n' "$exe" "$exe.sha256" "RadarniteLauncher-$VERSION.zip" | sort)"
+          got="$(find dist -mindepth 1 -printf '%P\n' | sort)"
+          [ "$got" = "$want" ] || { echo "::error::unexpected assets: ${got//$'\n'/ }"; exit 1; }
+          [ "$(cat "dist/$exe.sha256")" = "$(sha256sum "dist/$exe" | cut -d' ' -f1)  $exe" ] || { echo "::error::$exe.sha256 does not match"; exit 1; }
+      - name: Draft with the assets, then publish
+        run: |
+          if [ "$PRERELEASE" = true ]; then latest=false; else latest=true; fi
+          id=$(gh api "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f name="Radarnite Launcher $VERSION" \
+            -F body=@notes/notes.md -F draft=true -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq .id)
+          echo "DRAFT_ID=$id" >> "$GITHUB_ENV"
+          for f in dist/*; do
+            gh api -X POST "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$(basename "$f")" \
+              -H 'Content-Type: application/octet-stream' --input "$f" --jq '"uploaded \(.name) (\(.size) bytes)"'
+          done
+          gh api -X PATCH "repos/$GH_REPO/releases/$id" -F draft=false -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq '"published \(.html_url)"'
+      - name: Check what the updaters see
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/$TAG" | jq -e --argjson pre "$PRERELEASE" '.draft == false and .prerelease == $pre' >/dev/null \
+            || { echo "::error::$TAG is not published with prerelease=$PRERELEASE"; exit 1; }
+          sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          [ "$sha" = "$GITHUB_SHA" ] || { echo "::error::$TAG points at $sha, not $GITHUB_SHA"; exit 1; }
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+          if [ "$PRERELEASE" = true ]; then want="$LATEST_BEFORE"; else want="$TAG"; fi
+          [ "$latest" = "$want" ] || { echo "::error::releases/latest is $latest, expected $want"; exit 1; }
+          exe="RadarniteLauncherSetup-$VERSION.exe"; d="$RUNNER_TEMP/check"; mkdir -p "$d"
+          for f in "$exe" "$exe.sha256"; do curl -sSfL --retry 3 -o "$d/$f" "https://github.com/$GH_REPO/releases/download/$TAG/$f"; done
+          got=$(sha256sum "$d/$exe" | cut -d' ' -f1)
+          [ "$got" = "$(head -c 64 "$d/$exe.sha256")" ] || { echo "::error::downloaded $exe does not match its .sha256"; exit 1; }
+          { echo "### Published $TAG"; echo "- prerelease: $PRERELEASE, releases/latest: $latest"; echo "- $exe sha256 $got (downloaded and checked)"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove this run's draft when publishing failed
+        if: failure() && env.DRAFT_ID != ''
+        run: |
+          if [ "$(gh api "repos/$GH_REPO/releases/$DRAFT_ID" --jq .draft)" = true ]; then
+            gh api -X DELETE "repos/$GH_REPO/releases/$DRAFT_ID" && echo "deleted draft $DRAFT_ID"
+          fi

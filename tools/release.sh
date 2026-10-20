@@ -157,7 +157,7 @@ cmd_build() {
       *) die "unknown option $1" ;;
     esac
   done
-  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "--version must be semver (3.0.0 or 3.0.0-rc.1), got '$version'"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "--version must be semver (3.0.0, 3.0.0-rc.1 or 3.0.0-feat-3-0.1), got '$version'"
   local vnum="${version%%-*}"
   for f in "$launcher" "$backend" "$icon" "$nsi"; do [ -f "$f" ] || die "missing file: '$f'"; done
   [ -d "$payload" ] || die "missing payload folder: '$payload'"
