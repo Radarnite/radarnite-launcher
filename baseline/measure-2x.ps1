@@ -42,7 +42,7 @@ function Norm([string]$s) {
     # raw and JSON-escaped (\\) forms
     if ($p[0]) { $s = $s -replace [regex]::Escape($p[0]), $p[1] -replace [regex]::Escape($p[0].Replace('\', '\\')), $p[1] }
   }
-  # the bare account name, wherever it is left (e.g. "C:\Users\<name>" spelled differently)
+  # the bare account name, wherever it is left (e.g. a home path spelled differently)
   $u = Split-Path $env:USERPROFILE -Leaf
   if ($u) { $s = $s -replace [regex]::Escape($u), '<user>' }
   return $s
@@ -223,9 +223,19 @@ public static class RlImg {
     } finally { try { $p.Kill() } catch { }; $p.WaitForExit(5000) | Out-Null }
   }
   $floor = TimeCmd $node '-e "console.log(1)"' 10
+  # node's own floor for an idle http server on loopback (what server.mjs adds on top of it)
+  $httpReady = New-Object System.Collections.Generic.List[double]; $httpWs = New-Object System.Collections.Generic.List[double]
+  for ($i = 0; $i -lt 7; $i++) {
+    $psi = New-Object Diagnostics.ProcessStartInfo $node, "-e `"require('http').createServer().listen($port,'127.0.0.1',()=>console.log('ready'))`""
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $p = [Diagnostics.Process]::Start($psi)
+    try { [void]$p.StandardOutput.ReadLine(); $t = $sw.Elapsed.TotalMilliseconds; Start-Sleep -Milliseconds 300; $p.Refresh()
+      if ($i -ge 2) { $httpReady.Add($t); $httpWs.Add($p.WorkingSet64 / 1MB) } } finally { try { $p.Kill() } catch { }; $p.WaitForExit(5000) | Out-Null }
+  }
   $R.backend = [ordered]@{ readyMs = (Stats $ready.ToArray()); rssMBAfterReady = [math]::Round(($ws | Measure-Object -Average).Average, 1)
     privateMBAfterReady = [math]::Round(($pv | Measure-Object -Average).Average, 1); rssMBAt3s = [math]::Round($ws3[0], 1)
-    nodeStartupFloor = $floor; cosmeticsJsonMB = MB ((Get-Item (Join-Path $fake 'offline\cosmetics.json') -ErrorAction SilentlyContinue).Length)
+    nodeStartupFloor = $floor; nodeIdleHttpServer = [ordered]@{ readyMs = (Stats $httpReady.ToArray()); rssMB = [math]::Round(($httpWs | Measure-Object -Average).Average, 1) }
+    cosmeticsJsonMB = MB ((Get-Item (Join-Path $fake 'offline\cosmetics.json') -ErrorAction SilentlyContinue).Length)
     note = 'node.exe server.mjs --build <scratch copy> --config <install config.json> --port <free>; ready = process creation -> "ready 127.0.0.1:PORT" line; RSS = working set 300 ms after ready' }
 
   # ---- 6. window, in the signed-in session ----
