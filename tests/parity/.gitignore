@@ -1,0 +1,7 @@
+# Real recorded sessions hold Epic data (cosmetics, textures): they go only to the private
+# Radarnite/radarnite-launcher-tests repo, never here.
+corpus/
+# comparator reports and temp dirs
+out/
+# the root .gitignore drops every config.json; the synthetic sessions' inputs are ours
+!synthetic/**/config.json
