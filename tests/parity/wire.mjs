@@ -148,8 +148,8 @@ export function wsFrame(op, payload = EMPTY, { fin = true, mask = true, key = Bu
 }
 
 // ---------- raw clients (exact bytes on the wire; no URL normalization, no header rewriting) ----------
-export function requestBytes(method, url, headers, body = EMPTY) {
-  const head = `${method} ${url} HTTP/1.1\r\n` + headers.map(([k, v]) => `${k}: ${v}\r\n`).join('') + '\r\n';
+export function requestBytes(method, url, headers, body = EMPTY, version = 'HTTP/1.1') {
+  const head = `${method} ${url} ${version}\r\n` + headers.map(([k, v]) => `${k}: ${v}\r\n`).join('') + '\r\n';
   return Buffer.concat([Buffer.from(head, 'latin1'), body]);
 }
 function connect(port) {
