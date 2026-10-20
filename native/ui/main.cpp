@@ -30,7 +30,8 @@ Gfx g_gfx;
 App* g_app = nullptr;
 ID2D1HwndRenderTarget* g_rt = nullptr;
 bool g_software = true, g_selftest = false;
-int g_paints = 0;
+int g_paints = 0, g_timers = 0;
+double g_dirtyMax = 0;   // largest WM_PAINT update rect (px^2) since the selftest reset it
 HRESULT g_lastHr = S_OK, g_createHr = S_FALSE;
 RECT g_client = {};
 double g_lastFrameMs = 0;
@@ -69,7 +70,8 @@ void paint(HWND h) {
         D2D1_RENDER_TARGET_PROPERTIES p = D2D1::RenderTargetProperties(g_software ? D2D1_RENDER_TARGET_TYPE_SOFTWARE : D2D1_RENDER_TARGET_TYPE_DEFAULT,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), (float)g_dpi, (float)g_dpi);
         g_client = r;
-        g_createHr = g_gfx.d2d->CreateHwndRenderTarget(p, D2D1::HwndRenderTargetProperties(h, D2D1::SizeU(r.right, r.bottom)), &g_rt);
+        // RETAIN_CONTENTS: partial repaints (transitions, spinner) draw over the previous frame, also on the GPU path
+        g_createHr = g_gfx.d2d->CreateHwndRenderTarget(p, D2D1::HwndRenderTargetProperties(h, D2D1::SizeU(r.right, r.bottom), D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS), &g_rt);
         if (SUCCEEDED(g_createHr)) g_app->setTarget(g_rt, (float)g_dpi);
     }
     if (g_rt) {
@@ -78,6 +80,7 @@ void paint(HWND h) {
         g_rt->BeginDraw();
         // partial updates (the spinner) only rasterize their own rect
         bool part = ps.rcPaint.right - ps.rcPaint.left < r.right || ps.rcPaint.bottom - ps.rcPaint.top < r.bottom;
+        g_dirtyMax = std::max(g_dirtyMax, (double)(ps.rcPaint.right - ps.rcPaint.left) * (ps.rcPaint.bottom - ps.rcPaint.top));
         if (part) g_rt->PushAxisAlignedClip(D2D1::RectF(ps.rcPaint.left / s, ps.rcPaint.top / s, ps.rcPaint.right / s, ps.rcPaint.bottom / s), D2D1_ANTIALIAS_MODE_ALIASED);
         g_app->paint(r.right / s, r.bottom / s);
         if (part) g_rt->PopAxisAlignedClip();
@@ -168,6 +171,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         break;
     case WM_CHAR: return 0;
     case WM_TIMER:
+        g_timers++;
         if (w == 99) { PostMessageW(h, WM_CLOSE, 0, 0); return 0; }
         g_app->timer(w);
         return 0;
@@ -180,6 +184,9 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         SetBkColor(dc, RGB(0x18, 0x1A, 0x1F));
         return (LRESULT)g_app->editBrush();
     }
+    case WM_SETTINGCHANGE:   // Windows "Show animations" (prefers-reduced-motion for the page)
+        if (w == SPI_SETCLIENTAREAANIMATION && !g_selftest) { BOOL on = TRUE; SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0); g_app->setMotion(on != FALSE); }
+        break;
     case WM_APP_SINK: g_app->drain(); return 0;
     case WM_APP_EDITKEY: g_app->editKey((int)l, (UINT)(w & 0xFFFF), (w & 0x20000) != 0, (w & 0x10000) != 0); return 0;
     case WM_CLOSE:
@@ -234,24 +241,31 @@ bool savePng(IWICBitmapSource* bmp, const std::wstring& path) {
     return ok;
 }
 
-// The live window as Windows composes it (Direct2D surface + the native EDIT controls).
-bool captureWindow(HWND h, const std::wstring& path) {
+// The live window as Windows composes it (Direct2D surface + the native EDIT controls), BGRA rows.
+bool grabWindow(HWND h, std::vector<BYTE>& px, int* w, int* hh) {
+    DwmFlush();
     RECT r; GetClientRect(h, &r);
-    int w = r.right, hh = r.bottom;
-    BITMAPINFO bi = {}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), w, -hh, 1, 32, BI_RGB };
+    *w = r.right; *hh = r.bottom;
+    BITMAPINFO bi = {}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), *w, -*hh, 1, 32, BI_RGB };
     void* bits = nullptr;
     HDC sdc = GetDC(nullptr), dc = CreateCompatibleDC(sdc);
     HBITMAP bmp = CreateDIBSection(sdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
     HGDIOBJ old = SelectObject(dc, bmp);
     BOOL ok = PrintWindow(h, dc, PW_CLIENTONLY | 2 /*PW_RENDERFULLCONTENT*/);
     SelectObject(dc, old);
-    bool saved = false;
     if (ok) {
-        for (int i = 0; i < w * hh; i++) ((BYTE*)bits)[i * 4 + 3] = 255;
-        IWICBitmap* wb = nullptr;
-        if (SUCCEEDED(g_gfx.wic->CreateBitmapFromMemory(w, hh, GUID_WICPixelFormat32bppBGRA, w * 4, w * hh * 4, (BYTE*)bits, &wb))) { saved = savePng(wb, path); wb->Release(); }
+        px.assign((BYTE*)bits, (BYTE*)bits + (size_t)*w * *hh * 4);
+        for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
     }
     DeleteObject(bmp); DeleteDC(dc); ReleaseDC(nullptr, sdc);
+    return ok != FALSE;
+}
+
+bool captureWindow(HWND h, const std::wstring& path) {
+    std::vector<BYTE> px; int w, hh;
+    if (!grabWindow(h, px, &w, &hh)) return false;
+    IWICBitmap* wb = nullptr; bool saved = false;
+    if (SUCCEEDED(g_gfx.wic->CreateBitmapFromMemory(w, hh, GUID_WICPixelFormat32bppBGRA, w * 4, (UINT)px.size(), px.data(), &wb))) { saved = savePng(wb, path); wb->Release(); }
     return saved;
 }
 
@@ -274,6 +288,8 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     g_app = new App(g_gfx, core);
     HWND h = createWindow(inst, true, 1200, 800);
     g_app->attach(h);
+    bool systemMotion = g_app->motion();
+    g_app->setMotion(true);   // the transitions run whatever "Show animations" says, so the checks below measure them
     g_app->start();
     g_app->drain();
     ShowWindow(h, SW_SHOWNOACTIVATE);
@@ -293,12 +309,59 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         }
     };
     pump(std::max(first, 0.0) + 1000);
-    double cpu0 = cpuMs(), t0 = msSinceStart(); int paints0 = g_paints;
+    // the Launch button greets ~2.5 s after the first state: the rest starts when nothing moves any more
+    double settleLimit = msSinceStart() + 6000;
+    while (g_app->animating() && msSinceStart() < settleLimit) pump(msSinceStart() + 20);
+    double settled = msSinceStart();
+    bool settledOk = !g_app->animating();
+    double cpu0 = cpuMs(), t0 = msSinceStart(); int paints0 = g_paints, timers0 = g_timers;
     pump(10000);
-    double cpu1 = cpuMs(), t1 = msSinceStart(); int idlePaints = g_paints - paints0;
+    double cpu1 = cpuMs(), t1 = msSinceStart(); int idlePaints = g_paints - paints0, idleTimers = g_timers - timers0;
     size_t priv = privateBytes();
     PROCESS_MEMORY_COUNTERS_EX pm = { sizeof pm };
     GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pm, sizeof pm);
+
+    // transitions in the live window (needs a desktop: session 0 gets no WM_PAINT)
+    std::string checks;
+    int failed = 0;
+    auto addCheck = [&](const std::string& name, bool ok) {
+        char line[400];
+        snprintf(line, sizeof line, "%s\n    {\"check\": \"%s\", \"ok\": %s}", checks.empty() ? "" : ",", name.c_str(), ok ? "true" : "false");
+        checks += line;
+        if (!ok) failed++;
+    };
+    int hoverIn = 0, hoverOut = 0, afterPaints = 0, afterTimers = 0; double dirtyPct = 0; long long partialDiff = -1;
+    if (!forced) {
+        char buf[200];
+        snprintf(buf, sizeof buf, "the greet sheen ends and the animation timer stops (%.0f ms after the start)", settled);
+        addCheck(buf, settledOk);
+        D2D1_RECT_F ar = g_app->actButtonRect();
+        float hx = (ar.left + ar.right) / 2, hy = (ar.top + ar.bottom) / 2;
+        RECT cr; GetClientRect(h, &cr);
+        int p0 = g_paints; g_dirtyMax = 0;
+        g_app->mouseMove(hx, hy); pump(msSinceStart() + 300);
+        hoverIn = g_paints - p0; p0 = g_paints;
+        g_app->mouseLeave(); pump(msSinceStart() + 300);
+        hoverOut = g_paints - p0;
+        dirtyPct = g_dirtyMax * 100.0 / std::max(1.0, (double)cr.right * cr.bottom);
+        int p1 = g_paints, k1 = g_timers;
+        pump(msSinceStart() + 500);
+        afterPaints = g_paints - p1; afterTimers = g_timers - k1;
+        snprintf(buf, sizeof buf, "hover fades the Activity button in and out (%d + %d frames)", hoverIn, hoverOut);
+        addCheck(buf, hoverIn >= 3 && hoverOut >= 3);
+        snprintf(buf, sizeof buf, "transition frames repaint only the control (largest %.2f %% of the window)", dirtyPct);
+        addCheck(buf, dirtyPct > 0 && dirtyPct < 2);
+        snprintf(buf, sizeof buf, "nothing runs once it settles (%d paints, %d timers in 500 ms)", afterPaints, afterTimers);
+        addCheck(buf, afterPaints == 0 && afterTimers == 0);
+        // what the partial repaints left on screen = a full repaint of the same state
+        std::vector<BYTE> a, b; int aw = 0, ah = 0, bw = 0, bh = 0;
+        bool ga = grabWindow(h, a, &aw, &ah);
+        InvalidateRect(h, nullptr, FALSE); UpdateWindow(h);
+        bool gb = grabWindow(h, b, &bw, &bh);
+        if (ga && gb && aw == bw && ah == bh) { partialDiff = 0; for (size_t i = 0; i < a.size(); i += 4) if (memcmp(&a[i], &b[i], 3)) partialDiff++; }
+        snprintf(buf, sizeof buf, "partial repaints leave the same pixels as a full repaint (%lld px differ)", partialDiff);
+        addCheck(buf, partialDiff == 0);
+    } else addCheck("transition checks skipped: no desktop (session 0)", true);
     bool live = captureWindow(h, dir + L"\\00-live-window-01.png");
     DestroyWindow(h);
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
@@ -308,7 +371,6 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     // 2) every scenario rendered offscreen (WIC bitmap, same drawing code, texts of the EDIT fields drawn by Direct2D)
     int n; const MockScenario* sc = mockScenarios(&n);
     std::string items;
-    int failed = 0;
     for (int i = 0; i < n; i++) {
         double ts = msSinceStart();
         Core* c = createMockCore(sc[i].id);
@@ -343,7 +405,6 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     }
 
     // 3) interactions on an offscreen window state (scenario 20: the bots form)
-    std::string checks;
     {
         Core* c = createMockCore(L"20-match-server-bots-form");
         App* app = new App(g_gfx, c);
@@ -352,12 +413,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         if (SUCCEEDED(g_gfx.wic->CreateBitmap(1200, 800, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp)) &&
             SUCCEEDED(g_gfx.d2d->CreateWicBitmapRenderTarget(bmp, D2D1::RenderTargetProperties(), &rt))) {
             app->setTarget(rt, 96.f);
-            for (auto& r : app->selfCheck(1200, 800)) {
-                char line[400];
-                snprintf(line, sizeof line, "%s\n    {\"check\": \"%s\", \"ok\": %s}", checks.empty() ? "" : ",", json(r.first).c_str(), r.second ? "true" : "false");
-                checks += line;
-                if (!r.second) failed++;
-            }
+            for (auto& r : app->selfCheck(1200, 800)) addCheck(json(r.first), r.second);
             app->setTarget(nullptr, 96.f);
         }
         release(rt); release(bmp);
@@ -371,10 +427,11 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     FILE* f = _wfopen((dir + L"\\selftest.json").c_str(), L"wb");
     if (!f) return 1;
     fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
-               "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"exeBytes\": %lu,\n"
+               "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"idleTimers\": %d,\n  \"exeBytes\": %lu,\n"
+               "  \"systemMotion\": %s,\n  \"animSettledMs\": %.0f,\n  \"hoverFrames\": [%d, %d],\n  \"hoverDirtyMaxPct\": %.2f,\n  \"afterTransition\": {\"paints\": %d, \"timers\": %d},\n  \"partialVsFullDiffPx\": %lld,\n"
                "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"failed\": %d,\n  \"scenarios\": [%s\n  ],\n  \"interactions\": [%s\n  ]\n}\n",
-            first, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints,
-            fa.nFileSizeLow, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
+            first, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints, idleTimers,
+            fa.nFileSizeLow, systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
             live ? "true" : "false", forced ? "true" : "false", (unsigned long)g_lastHr, (unsigned long)g_createHr, g_client.right, g_client.bottom, g_lastFrameMs, session, failed, items.c_str(), checks.c_str());
     fclose(f);
     return failed ? 1 : 0;

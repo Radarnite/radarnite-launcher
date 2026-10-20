@@ -1,7 +1,9 @@
 // The launcher window's content: state from the core (api.h), layout + drawing with Direct2D (one immediate-mode
 // pass that also records hit rects and the focus order), mouse/keyboard input and the native EDIT fields.
-// Repaints only on events: input, core messages, the spinner while a launch runs, toast expiry.
+// Repaints only on events: input, core messages, the spinner while a launch runs, toast expiry, and the page's
+// transitions (anim.h) while they move, each repainting only its own rect.
 #pragma once
+#include "anim.h"
 #include "api.h"
 #include "gfx.h"
 #include <deque>
@@ -47,6 +49,12 @@ public:
     HBRUSH editBrush() const { return editBrush_; }
     void openActivity(bool open);
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
+    // Transitions on/off (Windows "Show animations"; off without a window, so offscreen renders are the rest state)
+    void setMotion(bool on);
+    bool motion() const { return anim_.motion; }
+    bool animating() const { return anim_.running(); }
+    int animTicks = 0;                          // animation timer ticks (selftest)
+    D2D1_RECT_F actButtonRect() const;          // selftest: where the Activity button is (hover check)
 
     // Selftest: drives the window through clicks and keys on the current target and checks the state after each
     // step. Returns { name, ok } pairs. Needs a render target (setTarget) and a scenario with the match server.
@@ -65,19 +73,28 @@ private:
     struct Event { int type; State state; Session session; LogLine log; std::wstring text; Level level; };
     struct Hit { int id; D2D1_RECT_F r; int flags; float radius; D2D1_RECT_F clip; };
     struct LogEntry { std::wstring ts, text, lower; int lvl; bool key; int wrapCols = 0, lines = 1; };
-    struct Toast { std::wstring text; Level level; ULONGLONG until; };
+    struct Toast { std::wstring text; Level level; ULONGLONG until; uint32_t seq; };
     struct EditBox { HWND hwnd = nullptr; int id = 0; D2D1_RECT_F r{}; bool show = false; D2D1_RECT_F clip{}; HFONT font = nullptr; Font f; int textH = 16;
                      RECT applied{}; bool shown = false; bool clipped = false; };
 
     void invalidate();
+    void dirty(D2D1_RECT_F r);             // repaint only r (client DIPs)
+    void animate();                        // animation timer on while something moves, off at rest
+    void greet();                          // the Launch button's sheen, twice (page: greet())
+    void setToastTimer();
+    // Values of the transitions for this frame (r in the current drawing coordinates; rest value while measuring)
+    float fx(uint32_t key, float target, D2D1_RECT_F r, float ms = T1, Curve c = Curve::Css);
+    uint32_t fxc(uint32_t key, uint32_t target, D2D1_RECT_F r, float ms = T1, Curve c = Curve::Css);
+    float tw(uint32_t key, float rest, D2D1_RECT_F r);
     void apply(Event& e);
     void addLog(const LogLine& l);
     void toast(const std::wstring& text, Level level);
     void setConfig(uint32_t fields, const Config& v);
-    void select(const std::wstring& name);
+    void select(const std::wstring& name, bool click = false);
     void activate(int id);
     void moveFocus(int dir);
     void setFocus(int id, bool keyboard);
+    void setHover(int id);
     void ensureVisible(int id);
     void syncEdits();
     void layoutEdits();
@@ -97,6 +114,7 @@ private:
     void dot(float cx, float cy, float d, uint32_t c);
     void icon(Icon i, float x, float y, float size, uint32_t c, float a = 1.f);
     void spinner(float x, float y, float size);
+    void skeleton(int i, D2D1_RECT_F r);
     void shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha);
     float textW(const std::wstring& s, const Font& f, float tracking = 0);
     bool text(const std::wstring& s, const Font& f, float x, float top, float w, float lh, uint32_t c, int align = 0, float tracking = 0, float a = 1.f);
@@ -125,8 +143,14 @@ private:
     ID2D1SolidColorBrush* brush2_ = nullptr;
     ID2D1Bitmap* logo_ = nullptr;
     ID2D1BitmapBrush* logoBrush_ = nullptr;
+    ID2D1LinearGradientBrush* sheen_ = nullptr;     // .play::after
+    ID2D1LinearGradientBrush* shimmer_ = nullptr;   // .sk while loading
+    Anim anim_;
+    bool animTimer_ = false;
+    uint32_t toastSeq_ = 0;
+    std::vector<D2D1_RECT_F> toastRects_;
     bool measuring_ = false, noHit_ = false, inContent_ = false;
-    std::vector<D2D1_RECT_F> overlays_, overlaysPrev_;   // popup/toast rects that hide the EDIT controls
+    std::vector<D2D1_RECT_F> overlays_;   // popup/toast rects of this frame (they hide the EDIT controls)
     D2D1_RECT_F contentClip_{};
     float dpi_ = 96, scale_ = 1;
     float alpha_ = 1;

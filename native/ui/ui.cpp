@@ -14,7 +14,10 @@ enum : int {
     ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
-const UINT_PTR T_SPIN = 1, T_TOAST = 2;
+const UINT_PTR T_SPIN = 1, T_TOAST = 2, T_ANIM = 3;
+// animation keys: kind | control id
+const uint32_t K_HOVER = 1u << 16, K_COLOR = 2u << 16, K_PRESS = 3u << 16, K_SWITCH = 4u << 16, K_TOAST = 5u << 16,
+               K_SHEEN = 6u << 16, K_GREET = 7u << 16, K_SHIMMER = 8u << 16;
 const float TB = 40, LB = 72;
 const size_t MAXLOG = 3000;
 const float LOG_LH = 19.2f;   // 12px * 1.6
@@ -76,6 +79,8 @@ bool inside(D2D1_RECT_F r, float x, float y) { return x >= r.left && x < r.right
 bool overlaps(D2D1_RECT_F a, D2D1_RECT_F b) { return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom; }
 D2D1_RECT_F inter(D2D1_RECT_F a, D2D1_RECT_F b) { return { std::max(a.left, b.left), std::max(a.top, b.top), std::min(a.right, b.right), std::min(a.bottom, b.bottom) }; }
 D2D1_RECT_F rc(float x, float y, float w, float h) { return { x, y, x + w, y + h }; }
+D2D1_RECT_F grow(D2D1_RECT_F r, float d) { return r.right > r.left ? D2D1_RECT_F{ r.left - d, r.top - d, r.right + d, r.bottom + d } : r; }   // empty stays empty
+bool systemMotion() { BOOL on = TRUE; SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0); return on != FALSE; }
 
 // Greedy wrap of a log message for a monospace column count (white-space: pre-wrap; word-break: break-word).
 template <class F> int wrap(const std::wstring& s, int cols, F&& line) {
@@ -124,6 +129,7 @@ LRESULT CALLBACK editProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD
 // ================================================================================================ lifetime
 App::App(Gfx& g, Core* core) : g_(g), core_(core) {
     InitializeCriticalSection(&cs_);
+    anim_.motion = false;   // offscreen renders show the rest state (the page's tests run with reduced motion)
     edits_[0].id = ID_NAME; edits_[0].f = { Face::UI, 13, 500, false };
     edits_[1].id = ID_BOTS; edits_[1].f = { Face::UI, 13, 600, false };
     edits_[2].id = ID_SEARCH; edits_[2].f = { Face::UI, 12, 400, false };
@@ -141,6 +147,7 @@ App::~App() {
 
 void App::attach(HWND hwnd) {
     hwnd_ = hwnd;
+    anim_.motion = systemMotion();
     editBrush_ = CreateSolidBrush(RGB(0x18, 0x1A, 0x1F));
     createEdits();
 }
@@ -149,13 +156,69 @@ void App::start() { core_->ready(this); }
 
 void App::invalidate() { if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE); }
 
+void App::dirty(D2D1_RECT_F r) {
+    if (!hwnd_ || r.right <= r.left || r.bottom <= r.top) return;
+    RECT px = { (LONG)floorf(r.left * scale_) - 2, (LONG)floorf(r.top * scale_) - 2, (LONG)ceilf(r.right * scale_) + 2, (LONG)ceilf(r.bottom * scale_) + 2 };
+    InvalidateRect(hwnd_, &px, FALSE);
+}
+
+void App::animate() {
+    if (!hwnd_) return;
+    bool run = anim_.running();
+    if (run == animTimer_) return;
+    animTimer_ = run;
+    if (run) SetTimer(hwnd_, T_ANIM, USER_TIMER_MINIMUM, nullptr); else KillTimer(hwnd_, T_ANIM);
+}
+
+void App::setMotion(bool on) {
+    if (anim_.motion == on) return;
+    anim_.clear();
+    anim_.motion = on;
+    animate();
+    invalidate();
+}
+
+D2D1_RECT_F App::actButtonRect() const { return rectOf(ID_ACT); }
+
+float App::fx(uint32_t key, float target, D2D1_RECT_F r, float ms, Curve c) {
+    if (measuring_) return target;
+    r.top += oy_; r.bottom += oy_;
+    return anim_.fx(key, target, r, ms, c);
+}
+uint32_t App::fxc(uint32_t key, uint32_t target, D2D1_RECT_F r, float ms, Curve c) {
+    if (measuring_) return target;
+    r.top += oy_; r.bottom += oy_;
+    return anim_.fxColor(key, target, r, ms, c);
+}
+float App::tw(uint32_t key, float rest, D2D1_RECT_F r) {
+    if (measuring_) return rest;
+    r.top += oy_; r.bottom += oy_;
+    return anim_.get(key, rest, r);
+}
+
+// .play.greet: the sheen crosses the Launch button twice, 0.3 s after the build list loads, a build is clicked or a
+// session ends (nothing runs at rest)
+void App::greet() {
+    anim_.to(K_GREET, -1.2f, 1.2f, 1100, Curve::Ui, grow(rectOf(ID_PLAY), 1), 300, 2);
+    animate();
+}
+
 void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
-    release(logoBrush_); release(logo_); release(brush2_); release(brush_);
+    release(shimmer_); release(sheen_); release(logoBrush_); release(logo_); release(brush2_); release(brush_);
     rt_ = rt;
     dpi_ = dpi; scale_ = dpi / 96.f;
     if (!rt_) return;
     rt_->CreateSolidColorBrush(rgb(C::text), &brush_);
     rt_->CreateSolidColorBrush(rgb(C::text), &brush2_);
+    // .play::after: linear-gradient(105deg, transparent 30%, rgba(16,17,20,.10) 46%, rgba(16,17,20,.16) 50%, .10 54%, transparent 70%)
+    const D2D1_GRADIENT_STOP sheen[] = { { .30f, rgb(C::bg, 0) }, { .46f, rgb(C::bg, .10f) }, { .50f, rgb(C::bg, .16f) }, { .54f, rgb(C::bg, .10f) }, { .70f, rgb(C::bg, 0) } };
+    // .sk: linear-gradient(90deg, bg2 25%, surface 50%, bg2 75%) on an 800px tile repeated across the element
+    const D2D1_GRADIENT_STOP sk[] = { { 0, rgb(C::bg2) }, { .25f, rgb(C::bg2) }, { .5f, rgb(C::surface) }, { .75f, rgb(C::bg2) }, { 1, rgb(C::bg2) } };
+    ID2D1GradientStopCollection* gs = nullptr;
+    if (SUCCEEDED(rt_->CreateGradientStopCollection(sheen, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs))) rt_->CreateLinearGradientBrush({}, gs, &sheen_);
+    release(gs);
+    if (SUCCEEDED(rt_->CreateGradientStopCollection(sk, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gs))) rt_->CreateLinearGradientBrush({}, gs, &shimmer_);
+    release(gs);
     if (g_.logo && g_.wic) {
         IWICBitmapScaler* sc = nullptr;
         UINT px = (UINT)lroundf(20 * scale_);
@@ -211,8 +274,11 @@ void App::drain() {
 void App::apply(Event& e) {
     switch (e.type) {
     case 0: {
+        bool first = !loaded_;
         st_ = std::move(e.state);
         loaded_ = st_.loaded;
+        if (loaded_) for (uint32_t i = 0; i < 5; i++) anim_.stop(K_SHIMMER | i);
+        if (first && loaded_) greet();
         if (st_.hasSession) se_ = st_.session;
         auto have = [&](const std::wstring& n) { if (n.empty()) return false; for (auto& b : st_.builds) if (b.name == n) return true; return false; };
         if (!have(selected_)) {
@@ -228,6 +294,7 @@ void App::apply(Event& e) {
         SessionState was = se_.state;
         se_ = e.session;
         if (se_.state == SessionState::Error && was != SessionState::Error) { toast(se_.message.empty() ? L"Launch failed" : se_.message, Level::Bad); openActivity(true); }
+        if (se_.state == SessionState::Idle && was != SessionState::Idle) greet();
         updateSpinTimer();
         break;
     }
@@ -254,9 +321,21 @@ void App::addLog(const LogLine& l) {
 }
 
 void App::toast(const std::wstring& text, Level level) {
-    toasts_.push_back({ text, level, GetTickCount64() + 4500 });
-    if (hwnd_) SetTimer(hwnd_, T_TOAST, 250, nullptr);
+    uint32_t seq = ++toastSeq_;
+    toasts_.push_back({ text, level, GetTickCount64() + 4500, seq });
+    anim_.to(K_TOAST | (seq & 0xFFFF), 0, 1, T2, Curve::Ui);   // @keyframes tin: opacity 0, translateY(6px)
+    animate();
+    setToastTimer();
     invalidate();
+}
+
+// one shot at the next expiry (toasts live 4.5 s)
+void App::setToastTimer() {
+    if (!hwnd_) return;
+    if (toasts_.empty()) { KillTimer(hwnd_, T_TOAST); return; }
+    ULONGLONG next = toasts_[0].until, now = GetTickCount64();
+    for (auto& t : toasts_) next = std::min(next, t.until);
+    SetTimer(hwnd_, T_TOAST, (UINT)std::max<ULONGLONG>(USER_TIMER_MINIMUM, next > now ? next - now : 0), nullptr);
 }
 
 void App::timer(UINT_PTR id) {
@@ -272,8 +351,14 @@ void App::timer(UINT_PTR id) {
         ULONGLONG now = GetTickCount64();
         size_t n = toasts_.size();
         toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(), [&](const Toast& t) { return t.until <= now; }), toasts_.end());
-        if (toasts_.empty()) KillTimer(hwnd_, T_TOAST);
-        if (n != toasts_.size()) invalidate();
+        if (n != toasts_.size()) for (auto& r : toastRects_) dirty(r);
+        setToastTimer();
+        return;
+    }
+    if (id == T_ANIM) {
+        animTicks++;
+        anim_.tick([&](D2D1_RECT_F r) { dirty(r); });
+        animate();
     }
 }
 
@@ -312,8 +397,10 @@ void App::setConfig(uint32_t fields, const Config& v) {
     invalidate();
 }
 
-void App::select(const std::wstring& name) {
-    if (busy() || name == selected_) return;
+void App::select(const std::wstring& name, bool click) {
+    if (busy()) return;
+    if (click) greet();   // the page greets on every click on a build, also the selected one
+    if (name == selected_) return;
     selected_ = name;
     core_->command(Command::Select, name);
     core_->setUiPref(L"lastBuild", name);
@@ -392,7 +479,7 @@ void App::layoutEdits() {
         bool show = e.show;
         D2D1_RECT_F vis = inter(e.r, e.clip);
         if (vis.right - vis.left < 4 || vis.bottom - vis.top < 4) show = false;
-        for (auto& o : overlaysPrev_) if (overlaps(o, e.r)) show = false;
+        for (auto& o : overlays_) if (overlaps(o, e.r)) show = false;
         if (!show) {
             if (e.shown) { if (GetFocus() == e.hwnd) SetFocus(hwnd_); ShowWindow(e.hwnd, SW_HIDE); e.shown = false; }
             continue;
@@ -483,6 +570,22 @@ void App::spinner(float x, float y, float size) {
         rt_->DrawGeometry(pg, br(C::white), 2);
     }
     release(k); release(pg);
+}
+
+// .sk loading placeholder: an 800px gradient tile; while loading its shimmer moves it -400..400px in 1.4 s (linear)
+void App::skeleton(int i, D2D1_RECT_F r) {
+    if (measuring_) return;
+    float p = 0;
+    if (anim_.motion) {
+        uint32_t key = K_SHIMMER | (uint32_t)i;
+        if (!anim_.running(key)) anim_.to(key, -400, 400, 1400, Curve::Linear, {}, 0, 0);
+        p = tw(key, 0, r);
+    }
+    if (!shimmer_) { fill(r, C::surface, 0.55f, 8); return; }
+    shimmer_->SetStartPoint(D2D1::Point2F(r.left + p, 0));
+    shimmer_->SetEndPoint(D2D1::Point2F(r.left + p + 800, 0));
+    shimmer_->SetOpacity(alpha_);
+    rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 8, 8), shimmer_);
 }
 
 // box-shadow approximation: stacked translucent rounded rects
@@ -576,11 +679,13 @@ float App::button(int id, float x, float y, const wchar_t* label, Icon ic, bool 
     float tw = label ? textW(label, f) : 0;
     float w = iconOnly ? h : pad * 2 + 2 + (hasIcon ? 16 + 8 : 0) + tw;
     if (measure) return w;
-    bool hov = hover_ == id || (id == ID_ADD && menu_ == 1) || (id == ID_BUILDMENU && menu_ == 2);
+    bool hov = hover_ == id;
     D2D1_RECT_F r = rc(x, y, w, h);
     uint32_t col;
-    if (ghost) { box(r, 8, C::hover, hov ? 1.f : 0.f, C::hover, 0); col = hov ? C::text : C::muted; }
-    else { box(r, 8, hov ? C::hover : C::surface, 1, hov ? C::l2 : C::line); col = C::text; }
+    // .btn: background and border-color 120 ms (the ghost's text color has no transition)
+    float hv = fx(K_HOVER | id, hov ? 1.f : 0.f, r);
+    if (ghost) { box(r, 8, C::hover, hv, C::hover, 0); col = hov ? C::text : C::muted; }
+    else { box(r, 8, mix(C::surface, C::hover, hv), 1, mix(C::line, C::l2, hv)); col = C::text; }
     if (hasIcon) icon(ic, iconOnly ? x + (w - 16) / 2 : x + 1 + pad, y + (h - 16) / 2, 16, col);
     if (label && !iconOnly && text(label, f, x + 1 + pad + (hasIcon ? 24 : 0), y, tw + 1, h, col)) issues.push_back(std::wstring(L"clipped btn: ") + label);
     hit(id, r, F_FOCUS | F_HAND, 8);
@@ -600,8 +705,9 @@ void App::drawScrollbar(int id, float x, float y, float h, float scroll, float t
 void App::paint(float W, float H) {
     if (!rt_) return;
     W_ = W; H_ = H;
-    hits_.clear(); issues.clear(); spinRects_.clear();
-    overlaysPrev_ = overlays_; overlays_.clear();
+    hits_.clear(); issues.clear(); spinRects_.clear(); toastRects_.clear();
+    overlays_.clear();
+    anim_.frame();
     for (auto& e : edits_) e.show = false;
     base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0; alpha_ = 1;
     clip_ = { -1e9f, -1e9f, 1e9f, 1e9f };
@@ -653,9 +759,9 @@ void App::paint(float W, float H) {
             rt_->PopAxisAlignedClip();
         }
     }
-    layoutEdits();
-    if (overlays_.size() != overlaysPrev_.size() || (!overlays_.empty() && memcmp(overlays_.data(), overlaysPrev_.data(), overlays_.size() * sizeof(D2D1_RECT_F)))) invalidate();
+    layoutEdits();   // hides an EDIT under this frame's menu/toast; Windows then repaints the area it uncovers
     if (pendingEnsure_) { pendingEnsure_ = false; ensureVisible(focus_); }
+    animate();
 }
 
 void App::drawTitle(float W) {
@@ -670,7 +776,7 @@ void App::drawTitle(float W) {
     float x = 16 + 20 + 8;
     float w1 = textW(L"Radarnite ", f, -0.13f);
     text(L"Radarnite", f, x, 0, w1, TB - 1, tc, 0, -0.13f);
-    text(L"Launcher", f, x + w1, 0, 100, TB - 1, active_ ? C::muted : C::dim, 0, -0.13f);
+    text(L"Launcher", f, x + w1, 0, 100, TB - 1, C::muted, 0, -0.13f);   // .mark span b keeps its colour when inactive
     x += w1 + textW(L"Launcher", f, -0.13f) + 12;
     if (W > 900 && loaded_ && !st_.builds.empty()) {
         bool fw = true; for (auto& b : st_.builds) if (b.firewall != L"OK") fw = false;
@@ -682,9 +788,11 @@ void App::drawTitle(float W) {
     for (int i = 0; i < 3; i++) {
         int id = ID_MIN + i;
         D2D1_RECT_F r = rc(bx + 46 * i, 0, 46, TB - 1);
-        bool hov = hover_ == id;
-        if (hov) fill(r, i == 2 ? C::closeRed : C::hover);
-        uint32_t c = hov ? (i == 2 ? C::white : C::text) : active_ ? C::muted : C::dim;
+        bool hov = hover_ == id, x = i == 2;
+        // .wc button: background and color 120 ms; inactive window: dim, except the close button's hover
+        float hv = fx(K_HOVER | id, hov ? 1.f : 0.f, r);
+        if (hv > 0) fill(r, x ? C::closeRed : C::hover, hv);
+        uint32_t c = fxc(K_COLOR | id, hov && x ? C::white : !active_ ? C::dim : hov ? C::text : C::muted, r);
         icon(ics[i], r.left + 18, (TB - 1 - 10) / 2, 10, c);
         hit(id, r, F_FOCUS | F_HAND | F_RING_IN, 0);
     }
@@ -706,7 +814,7 @@ void App::drawRail(float x, float y, float w, float h) {
     clip_ = { x, y + 48, x + iw, ft };
     rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
     if (!loaded_) {
-        for (int i = 0; i < 3; i++) { fill(rc(lx, ly + 2, lw, 52), C::surface, 0.55f, 8); ly += 56; }
+        for (int i = 0; i < 3; i++) { skeleton(i, rc(lx, ly + 2, lw, 52)); ly += 56; }
     } else if (st_.builds.empty()) {
         float th = rich(L"No builds yet.\nAdd a downloaded zip or a folder with **+**.", Font{ Face::UI, 12.5f, 400, false }, 0, 0, lw - 32 - 2, 18.125f, C::muted, C::text, 1, false);
         D2D1_RECT_F r = rc(lx, ly + 8, lw, 40 + th + 2);
@@ -725,8 +833,9 @@ void App::drawRail(float x, float y, float w, float h) {
             int id = ID_BUILD0 + (int)i;
             float ih = tiny ? 49.f : 10 + 20 + 2 + 17.4f + 10;
             D2D1_RECT_F r = rc(lx, ly, lw, ih);
-            bool on = bd.name == selected_, hov = hover_ == id;
-            if (on) fill(r, C::surface, 1, 8); else if (hov) fill(r, C::bg2, 1, 8);
+            bool on = bd.name == selected_;
+            float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);   // .bi: background 120 ms (selection is instant)
+            if (on) fill(r, C::surface, 1, 8); else if (hv > 0) fill(r, C::bg2, hv, 8);
             uint32_t dc = clsColor(level(bd));
             if (tiny) {
                 text(bd.version, Font{ Face::Display, 15, 900, true }, lx + 4, ly + 10, lw - 8, 15, C::text, 1, -0.15f);
@@ -760,8 +869,8 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
     const Config& c = st_.config;
 
     if (!loaded_) {   // skeleton while the host loads
-        fill(rc(x, y, cw, 110), C::surface, 0.55f, 8); y += 110 + gap;
-        fill(rc(x, y, cw, 220), C::surface, 0.55f, 8); y += 220;
+        skeleton(3, rc(x, y, cw, 110)); y += 110 + gap;
+        skeleton(4, rc(x, y, cw, 220)); y += 220;
         return y + pb;
     }
     const Build* b = sel();
@@ -891,7 +1000,8 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
             EditBox& e = edits_[0];
             bool foc = hwnd_ && GetFocus() == e.hwnd;
             bool hov = hover_ == ID_NAME;
-            box(rc(ix, fy, colW, 34), 8, C::bg2, 1, foc ? C::muted : hov ? C::l2 : C::line);
+            // .field .in: border-color 120 ms on hover and focus
+            box(rc(ix, fy, colW, 34), 8, C::bg2, 1, fxc(K_COLOR | ID_NAME, foc ? C::muted : hov ? C::l2 : C::line, rc(ix, fy, colW, 34)));
             D2D1_RECT_F inner = { ix + 13, fy + 1, ix + colW - 13, fy + 33 };
             if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
             if (!e.show || measuring_) text(c.displayName, Font{ Face::UI, 13, 500, false }, inner.left, fy, inner.right - inner.left, 34, C::text);
@@ -947,8 +1057,10 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
                     text(t.label, Font{ Face::UI, 13, 400, false }, tx, ty, tcw - 44, 18.85f, C::ink2);
                     rich(t.sub, sf, tx, ty + 18.85f, tcw - 44, 16.675f, C::dim, C::dim);
                     float sx = tx + tcw - 32, sy = yy + (rowH - 18) / 2;
-                    fill(rc(sx, sy, 32, 18), t.on ? C::ok : C::l2, 1, 9);
-                    dot(sx + 3 + 6 + (t.on ? 14 : 0), sy + 9, 12, C::white);
+                    // .sw: background and the knob's transform 180 ms var(--ease)
+                    float v = fx(K_SWITCH | id, t.on ? 1.f : 0.f, rc(sx, sy, 32, 18), T2, Curve::Ui);
+                    fill(rc(sx, sy, 32, 18), mix(C::l2, C::ok, v), 1, 9);
+                    dot(sx + 3 + 6 + 14 * v, sy + 9, 12, C::white);
                     hit(id, rc(tx, yy, tcw, rowH), F_FOCUS | F_HAND, 4);
                 }
                 yy += rowH;
@@ -1017,7 +1129,7 @@ void App::drawActivity(float x, float y, float w, float h) {
     if (sx > fx + 8) {
         EditBox& e = edits_[2];
         bool foc = hwnd_ && GetFocus() == e.hwnd;
-        box(rc(sx, hy + 1, sw, 28), 8, C::bg2, 1, foc ? C::muted : hover_ == ID_SEARCH ? C::l2 : C::line);
+        box(rc(sx, hy + 1, sw, 28), 8, C::bg2, 1, foc ? C::muted : C::line);   // .search: no hover style, no transition
         D2D1_RECT_F inner = { sx + 11, hy + 2, sx + sw - 11, hy + 28 };
         e.r = inner; e.clip = clip_; e.show = hwnd_ != nullptr;
         if (!e.show) {
@@ -1103,18 +1215,38 @@ void App::drawBar(float x, float y, float w) {
     float ptw = textW(pl, pf, stopStyle ? 0 : -0.24f);
     float minW = stopStyle ? 150.f : (W_ <= 720 ? 140.f : 196.f);
     float pw = std::max(minW, 24 + 18 + 10 + ptw + 24 + (stopStyle ? 2 : 0));
-    D2D1_RECT_F pr = rc(x + w - 24 - pw, y + 10, pw, 52);
+    D2D1_RECT_F pr = rc(x + w - 24 - pw, y + 10, pw, 52), area = grow(pr, 4);
     bool phov = hover_ == ID_PLAY && !disabled;
-    uint32_t pc;
-    if (stopStyle) { box(pr, 12, phov ? C::hover : C::surface, 1, C::line, disabled ? 0.f : 1.f); pc = disabled ? C::dim : C::text; }
-    else if (disabled) { fill(pr, C::surface, 1, 12); pc = C::dim; }
-    else {
-        if (phov && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect({ pr.left - 1.5f, pr.top - 1.5f, pr.right + 1.5f, pr.bottom + 1.5f }, 13.5f, 13.5f), br(C::white, 0.16f), 3);
-        fill(pr, C::white, 1, 12); pc = C::bg;
+    // .play: background 120 ms; box-shadow ring 120 ms on hover (Stop too); :active scale(.985) 120 ms var(--ease).
+    // The text colour, the Stop border and the width change at once, like the page.
+    uint32_t bg = fxc(K_COLOR | ID_PLAY, disabled ? C::surface : stopStyle ? (phov ? C::hover : C::surface) : C::white, area);
+    float ring = fx(K_HOVER | ID_PLAY, phov ? 1.f : 0.f, area);
+    float press = fx(K_PRESS | ID_PLAY, press_ == ID_PLAY && !disabled ? 1.f : 0.f, area, T1, Curve::Ui);
+    D2D1_MATRIX_3X2_F saved = base_;
+    if (press > 0) {
+        float k = 1 - 0.015f * press;
+        base_ = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2)) * base_;
+        rt_->SetTransform(base_);
     }
+    if (ring > 0 && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, 1.5f), 13.5f, 13.5f), br(C::white, 0.16f * ring), 3);
+    if (stopStyle) box(pr, 12, bg, 1, C::line); else fill(pr, bg, 1, 12);
+    // .play::after sheen (greet wins over hover, like the later CSS rule); out of the button at rest
+    float sh = anim_.running(K_GREET) ? tw(K_GREET, -1.2f, area) : anim_.running(K_SHEEN) ? tw(K_SHEEN, -1.2f, area) : -1.2f;
+    if (sh > -1.2f && sh < 1.2f && sheen_ && !measuring_) {
+        float bw = pr.right - pr.left, bh = pr.bottom - pr.top;
+        const float dx = 0.9659258f, dy = 0.2588190f;   // 105deg: (sin a, -cos a)
+        float len = bw * dx + bh * dy, gx = (pr.left + pr.right) / 2 + sh * bw, gy = (pr.top + pr.bottom) / 2;
+        sheen_->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
+        sheen_->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
+        sheen_->SetOpacity(alpha_);
+        rt_->FillRoundedRectangle(D2D1::RoundedRect(pr, 12, 12), sheen_);
+    }
+    uint32_t pc = disabled ? C::dim : stopStyle ? C::text : C::bg;
     float cx = pr.left + (pw - (18 + 10 + ptw)) / 2;
     icon(stopStyle ? Icon::X : Icon::Play, cx, y + 10 + 17, 18, pc);
     if (text(pl, pf, cx + 28, y + 10, ptw + 2, 52, pc, 0, stopStyle ? 0 : -0.24f)) issues.push_back(L"clipped play");
+    base_ = saved;
+    rt_->SetTransform(base_);
 
     // activity toggle
     Font af{ Face::UI, 12.5f, 600, false };
@@ -1123,9 +1255,9 @@ void App::drawBar(float x, float y, float w) {
     float bw = std::max(18.f, 10 + textW(bn, Font{ Face::UI, 11, 400, false }));
     float aw = 12 + 16 + 8 + textW(L"Activity", af) + 8 + bw + 12 + 2;
     D2D1_RECT_F ar = rc(pr.left - 16 - aw, y + 19, aw, 34);
-    bool ahov = hover_ == ID_ACT || actOpen_;
-    box(ar, 8, C::surface, ahov ? 1.f : 0.f, C::line);
-    uint32_t ac = ahov ? C::text : C::muted;
+    float av = fx(K_HOVER | ID_ACT, hover_ == ID_ACT || actOpen_ ? 1.f : 0.f, ar);   // .act: background and color 120 ms
+    box(ar, 8, C::surface, av, C::line);
+    uint32_t ac = mix(C::muted, C::text, av);
     icon(Icon::Log, ar.left + 13, y + 19 + 9, 16, ac);
     text(L"Activity", af, ar.left + 13 + 24, y + 19, 80, 34, ac);
     float bx = ar.right - 13 - bw;
@@ -1227,12 +1359,19 @@ void App::drawToasts(float W, float H) {
         float th = rich(t.text, f, 0, 0, tw, 18.125f, C::text, C::text, 0, false);
         float w = 32 + 2 + 8 + 12 + tw, h = 20 + 2 + std::max(th, 8.f);
         D2D1_RECT_F r = rc(W - 24 - w, bottom - h, w, h);
-        overlays_.push_back(r);
+        overlays_.push_back({ r.left, r.top, r.right, r.bottom + 6 });   // the whole slide, so it stays put while it moves
+        D2D1_RECT_F area = { r.left - 16, r.top - 16, r.right + 16, r.bottom + 6 + 12 + 16 };   // + shadow
+        toastRects_.push_back(area);
+        // @keyframes tin: from opacity 0, translateY(6px); 180 ms var(--ease)
+        float a = this->tw(K_TOAST | (t.seq & 0xFFFF), 1, area);
+        r.top += 6 * (1 - a); r.bottom += 6 * (1 - a);
+        alpha_ = a;
         shadow(r, 12, 30, 12, 0.45f);
         box(r, 12, C::surface, 1, C::line);
         uint32_t dc = t.level == Level::Ok ? C::ok : t.level == Level::Warn ? C::warn : t.level == Level::Bad ? C::bad : C::dim;
         dot(r.left + 17 + 4, r.top + h / 2, 8, dc);
         rich(t.text, f, r.left + 17 + 8 + 12, r.top + 11, tw, 18.125f, C::text, C::text);
+        alpha_ = 1;
         hit(ID_TOAST, r, 0, 12);
         bottom -= h + 8;
     }
@@ -1277,10 +1416,22 @@ void App::mouseMove(float x, float y) {
     }
     const Hit* h = findHit(x, y);
     int id = h ? h->id : 0;
-    if (id != hover_) { hover_ = id; invalidate(); }
+    if (id != hover_) setHover(id);
 }
 
-void App::mouseLeave() { if (hover_) { hover_ = 0; invalidate(); } }
+void App::mouseLeave() { if (hover_) setHover(0); }
+
+// Only the two controls change: repaint their rects (4 DIPs more for the Launch button's ring); their transitions
+// start when they are drawn (fx) and the animation timer repaints the same rects until they settle.
+void App::setHover(int id) {
+    int old = hover_;
+    hover_ = id;
+    dirty(grow(rectOf(old), 4));
+    dirty(grow(rectOf(id), 4));
+    const Hit* p = hitById(ID_PLAY);
+    if (id == ID_PLAY && p && !(p->flags & F_DISABLED)) { anim_.to(K_SHEEN, -1.2f, 1.2f, 700, Curve::Ui, grow(p->r, 4)); animate(); }   // .play:hover::after
+    else if (old == ID_PLAY) anim_.stop(K_SHEEN);
+}
 
 void App::mouseDown(float x, float y) {
     focusVisible_ = false;
@@ -1353,7 +1504,7 @@ void App::wheel(float x, float y, float delta) {
 
 void App::activate(int id) {
     const std::wstring& b = selected_;
-    if (id >= ID_BUILD0) { int i = id - ID_BUILD0; if (i < (int)st_.builds.size()) select(st_.builds[i].name); return; }
+    if (id >= ID_BUILD0) { int i = id - ID_BUILD0; if (i < (int)st_.builds.size()) select(st_.builds[i].name, true); return; }
     if (id >= ID_MENU0) {
         int n; const MenuItem* it = menuItems(menu_, &n);
         int i = id - ID_MENU0;
