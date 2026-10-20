@@ -27,6 +27,9 @@ struct Release {
     std::wstring tag, installerUrl, sha256Url, digest, notes;
 };
 Release check();
+// The digest in a .sha256 asset: the first white-space separated token that starts with 64 hex digits, lower-cased
+// ("" = none).
+std::wstring sha256Token(const std::wstring& text);
 // Download, verify, start the installer. true = it was started (the launcher must exit so NSIS can replace it).
 bool downloadVerifyRun(const Release& r);
 

@@ -47,8 +47,9 @@ bool lessOrEqual(const Version& a, const Version& b) {
 
 bool isHex(wchar_t c) { return (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f') || (c >= L'A' && c <= L'F'); }
 
-// The first white-space separated token that starts with 64 hex digits (the .sha256 file format).
-std::wstring first64Hex(const std::wstring& s) {
+} // namespace
+
+std::wstring sha256Token(const std::wstring& s) {
     size_t i = 0;
     while (i < s.size()) {
         while (i < s.size() && isWhite(s[i])) i++;
@@ -66,6 +67,8 @@ std::wstring first64Hex(const std::wstring& s) {
     }
     return L"";
 }
+
+namespace {
 
 std::wstring lower(std::wstring s) { for (auto& c : s) c = (wchar_t)towlower(c); return s; }
 
@@ -151,7 +154,7 @@ bool downloadVerifyRun(const Release& r) {
     std::wstring want;
     if (!r.sha256Url.empty()) {
         net::Response s = net::get(r.sha256Url, kUa, nullptr, kTimeout);
-        if (s.ok()) want = first64Hex(widen(s.body));
+        if (s.ok()) want = sha256Token(widen(s.body));
         else log(L"sha256 asset download failed: " + s.error);
     }
     if (want.empty() && istarts(r.digest, L"sha256:")) want = lower(trim(r.digest.substr(7)));

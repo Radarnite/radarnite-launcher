@@ -35,7 +35,8 @@ Test switches (environment): `RADARNITE_LAUNCHER_DIR` (another launcher folder: 
    code when `handled`. The installer's `--set-builds-folder` and the elevated `--firewall` go through it.
 2. `--play <build>` → `rn::createCore(build)`; otherwise `rn::createCore(nullptr)` instead of `createMockCore(nullptr)`.
    The mock stays for `--scenario` and `--selftest-ui`.
-3. Single instance stays in WinMain (2.2.1 mutex and event); a launch that loses the mutex may call
+3. Single instance stays in WinMain (2.2.1 mutex and event) and, as in 2.2.1, only for the plain window: the console
+   verbs, `--play` and `--selftest-ui` never take the mutex. A launch that loses it may call
    `rn::core::ForwardToRunningInstance()`.
 
 In `build.rsp`: `../core/out/librncore.a` after `app.res`, and `-lwinhttp -lbcrypt -loleaut32 -ladvapi32`. Build the

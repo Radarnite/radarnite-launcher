@@ -114,6 +114,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     BuildInfo sessionBuild;
     std::set<std::wstring> skippedSeen;
     std::mutex scanM;                  // one PushState at a time
+    std::mutex launchM;                // one launch at a time, held until its game exits (2.x ran the prelude on the UI thread)
 
     void async(std::function<void(std::shared_ptr<Ctx>)> f) {
         auto self = shared_from_this();
@@ -246,6 +247,10 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     }
 
     void launch(const BuildInfo& b) {
+        // a second Launch (double click, Enter held) before the state below turns "launching" must not start a second
+        // session and backend on the same port
+        std::unique_lock<std::mutex> one(launchM, std::try_to_lock);
+        if (!one.owns_lock()) return;
         {
             std::lock_guard<std::mutex> g(m);
             if (state == L"launching" || state == L"running") return;

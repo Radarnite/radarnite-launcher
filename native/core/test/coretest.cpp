@@ -3,11 +3,15 @@
 //                                      launch <build> (ends in the session Error of launch_stub.cpp), stop
 //   coretest.exe addzip <zip>         builddata::addZip into the builds folder
 //   coretest.exe addfolder <dir>      builddata::addFolder into the builds folder
+//   coretest.exe fetch <url> <file>   net::download (redirects, streamed SHA-256) + update::sha256Token of the file
+//   coretest.exe sha <file>           net::sha256 of a file's bytes
 // Like RadarniteLauncher.exe, it runs rn::cli::run() first (the core re-runs its own exe for "--firewall").
 #include "../buildinfo.h"
 #include "../builddata.h"
 #include "../cli.h"
 #include "../core.h"
+#include "../net.h"
+#include "../update.h"
 #include "../util.h"
 #include <objbase.h>
 #include <shellapi.h>
@@ -69,6 +73,7 @@ int coreFlow(const std::wstring& build) {
     core->command(Command::Refresh, L"");
     waitFor([&] { return sink.states > before; }, 15000);
     core->command(Command::Launch, L"");   // the selected build
+    core->command(Command::Launch, L"");   // a double click: must not start a second session
     waitFor([&] { return sink.sessionState == (int)SessionState::Error || sink.sessionState == (int)SessionState::Running; }, 60000);
     core->command(Command::Stop, L"");
     waitFor([&] { return sink.sessionState == (int)SessionState::Idle; }, 30000);
@@ -92,7 +97,17 @@ int main() {
     if (mode == L"core") rc = coreFlow(arg);
     else if (mode == L"addzip") { rc = builddata::addZip(arg, log, &b) ? 0 : 1; if (!rc) out(L"added " + b.name() + L" " + b.version + L" at " + b.dir); }
     else if (mode == L"addfolder") { rc = builddata::addFolder(arg, log, &b) ? 0 : 1; if (!rc) out(L"added " + b.name() + L" " + b.version + L" at " + b.dir); }
-    else { err(L"usage: coretest core <build> | addzip <zip> | addfolder <dir>"); rc = 2; }
+    else if (mode == L"fetch" && argc > 3) {
+        std::wstring sha, error;
+        rc = net::download(arg, L"radarnite-launcher", 60000, argv[3], &sha, &error) ? 0 : 1;
+        std::string text;
+        readFile(argv[3], &text);
+        out(rc ? L"download failed: " + error : fmt(L"downloaded %d bytes, sha256 %ls, token %ls", (int)text.size(), sha.c_str(), update::sha256Token(widen(text)).c_str()));
+    } else if (mode == L"sha") {
+        std::string data;
+        rc = readFile(arg, &data) ? 0 : 1;
+        out(L"sha256 " + net::sha256(data.data(), data.size()));
+    } else { err(L"usage: coretest core <build> | addzip <zip> | addfolder <dir> | fetch <url> <file> | sha <file>"); rc = 2; }
     LocalFree(argv);
     return rc;
 }
