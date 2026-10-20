@@ -23,6 +23,7 @@ struct BuildInfo {
     // e.g. 3.6-CL-4019403\Fortnite\FortniteGame, keeps the outer name; dir is where FortniteGame is).
     std::wstring name() const;
     bool hasEosAntiCheat() const;
+    bool usesIoStore() const;   // any .utoc in FortniteGame\Content\Paks (UE 4.26+/UE5 containers)
     std::pair<Support, std::wstring> lobby() const;
     std::pair<Support, std::wstring> match() const;
 

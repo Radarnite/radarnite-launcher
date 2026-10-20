@@ -52,6 +52,7 @@ std::wstring ioError(DWORD code, const std::wstring& path);   // the .NET IOExce
 
 // ---- time (local clock)
 std::wstring nowIso();                                 // DateTime.Now.ToString("O")
+std::wstring isoLocal(const FILETIME& utc);            // a file time as local DateTime.ToString("O")
 std::wstring nowTime(const wchar_t* pattern);          // "HH:mm:ss", "yyyyMMddHHmmss" ... (y M d H m s only)
 
 // ---- console: Console.WriteLine (UTF-16 to a console, UTF-8 to a pipe/file, nothing when there is no stdout)

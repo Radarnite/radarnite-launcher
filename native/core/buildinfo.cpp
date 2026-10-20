@@ -14,6 +14,17 @@ std::wstring BuildInfo::name() const { return fileName(folder.empty() ? dir : fo
 
 bool BuildInfo::hasEosAntiCheat() const { return fileExists(join(paths::win64(dir), L"FortniteClient-Win64-Shipping_EAC_EOS.exe")); }
 
+bool BuildInfo::usesIoStore() const {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW(join(dir, L"FortniteGame\\Content\\Paks\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    bool found = false;
+    do found = !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && iends(fd.cFileName, L".utoc");
+    while (!found && FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
+}
+
 // Lobby (backend + redirect): the curl hook and the classic -noeac launch exist up to Chapter 4 (UE 5.1); from 24.x
 // (EOS anticheat, EOS login) the method does not apply.
 std::pair<Support, std::wstring> BuildInfo::lobby() const {

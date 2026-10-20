@@ -305,9 +305,8 @@ std::wstring ioError(DWORD code, const std::wstring& path) {
 }
 
 // ------------------------------------------------------------------------------------------------ time
-static void localNow(SYSTEMTIME* st, uint64_t* ticks, int* biasMin) {
-    FILETIME utc, loc;
-    GetSystemTimePreciseAsFileTime(&utc);
+static void localAt(const FILETIME& utc, SYSTEMTIME* st, uint64_t* ticks, int* biasMin) {
+    FILETIME loc;
     FileTimeToLocalFileTime(&utc, &loc);
     ULARGE_INTEGER u, l;
     u.LowPart = utc.dwLowDateTime; u.HighPart = utc.dwHighDateTime;
@@ -317,12 +316,24 @@ static void localNow(SYSTEMTIME* st, uint64_t* ticks, int* biasMin) {
     if (biasMin) *biasMin = (int)(((int64_t)l.QuadPart - (int64_t)u.QuadPart) / 600000000ll);
 }
 
-std::wstring nowIso() {
+static void localNow(SYSTEMTIME* st, uint64_t* ticks, int* biasMin) {
+    FILETIME utc;
+    GetSystemTimePreciseAsFileTime(&utc);
+    localAt(utc, st, ticks, biasMin);
+}
+
+std::wstring isoLocal(const FILETIME& utc) {
     SYSTEMTIME st; uint64_t t; int b;
-    localNow(&st, &t, &b);
+    localAt(utc, &st, &t, &b);
     int a = b < 0 ? -b : b;
     return fmt(L"%04d-%02d-%02dT%02d:%02d:%02d.%07llu%lc%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
                (unsigned long long)t, b < 0 ? L'-' : L'+', a / 60, a % 60);
+}
+
+std::wstring nowIso() {
+    FILETIME utc;
+    GetSystemTimePreciseAsFileTime(&utc);
+    return isoLocal(utc);
 }
 
 std::wstring nowTime(const wchar_t* p) {
