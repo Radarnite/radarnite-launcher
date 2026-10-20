@@ -13,7 +13,7 @@ backend_cargo := 'export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"; cd ~/a
 
 # Mirror backend-rs/ to the Mac work folder (target/ and out/ stay where they are)
 backend-sync:
-    rsync -a --delete --exclude target --exclude out {{backend_src}}/ mac:{{backend_mac}}/backend-rs/
+    rsync -a --delete --exclude '/target*' --exclude /out {{backend_src}}/ mac:{{backend_mac}}/backend-rs/
 
 # Release builds: out/radarnite-backend.exe (x86_64-pc-windows-gnu) and out/radarnite-backend-linux-aarch64
 backend-build: (_backend-wait-cpu "mac") backend-sync
@@ -47,11 +47,13 @@ backend-smoke-linux:
 # readiness, memory, idle CPU, sockets, routes, matchmaker, XMPP, and both answers compared. Nothing under
 # S:\FortniteBuilds is touched. cosmetics = a local cosmetics.json copied there for a realistic athena profile.
 # The CPU check runs inside the shared PC lock, right before the job starts.
-backend-smoke-pc cosmetics="":
+# build_pc = a build folder on the PC whose offline cosmetics files are copied instead (read only, Fortnite closed).
+backend-smoke-pc cosmetics="" build_pc="":
     flock {{backend_lock}} bash -c 'set -e; just -f {{backend_src}}/justfile _backend-wait-cpu windows; \
       ssh -o BatchMode=yes windows "if not exist {{backend_pc}} mkdir {{backend_pc}}"; \
       scp -q {{backend_src}}/out/radarnite-backend.exe {{backend_src}}/tools/smoke-pc.ps1 {{backend_src}}/../backend/server.mjs "windows:S:/rl-backend-test/"; \
       c=""; if [ -n "{{cosmetics}}" ]; then scp -q "{{cosmetics}}" "windows:S:/rl-backend-test/cosmetics.json"; c="-Cosmetics {{backend_pc}}\cosmetics.json"; fi; \
+      if [ -n "{{build_pc}}" ]; then c="$c -BuildPc {{build_pc}}"; fi; \
       ssh -o BatchMode=yes windows "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{backend_pc}}\smoke-pc.ps1 -Dir {{backend_pc}} $c"'
 
 # Remove the work folders on the Mac and the PC

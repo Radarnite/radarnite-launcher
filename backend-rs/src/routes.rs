@@ -450,9 +450,9 @@ fn cloud_put(a: &App, q: &Req) -> JsResult<Resp> {
 fn keychain(a: &App, _q: &Req) -> JsResult<Resp> {
     let k = read_json(&a.off.join("keychain.json")).unwrap_or_else(|| json!([]));
     let mut out = js::spread(Some(&k), "readJson(path.join(OFF, 'keychain.json'), [])")?;
-    let ck = js::get(&a.custom, "keychain");
-    if js::truthy(ck.as_ref()) {
-        out.extend(js::spread(ck.as_ref(), "customCosmetics.keychain")?);
+    let ck = a.cos.keychain.as_ref();
+    if js::truthy(ck) {
+        out.extend(js::spread(ck, "customCosmetics.keychain")?);
     }
     j(200, Value::Array(out))
 }
@@ -483,8 +483,8 @@ fn ui_file(a: &App, q: &Req) -> JsResult<Resp> {
 pub fn table() -> Vec<Route> {
     vec![
         on("GET", "/offline/health", |a, _| {
-            j(200, json!({ "ok": true, "accountId": a.account_id, "displayName": a.display_name, "cosmetics": a.cos_items.len(),
-                "build": js::basename(&a.build), "source": a.cos_source }))
+            j(200, json!({ "ok": true, "accountId": a.account_id, "displayName": a.display_name, "cosmetics": a.cos.count,
+                "build": js::basename(&a.build), "source": a.cos.source }))
         }),
         // accounts
         on("POST", "/account/api/oauth/token", |a, q| {
@@ -577,7 +577,7 @@ pub fn table() -> Vec<Route> {
         on("POST", "/fortnite/api/game/v2/profile/:id/:kind/:command", |a, q| {
             let body = q.body_json();
             let pid = q.param("profileId").filter(|s| !s.is_empty()).unwrap_or_else(|| "athena".into());
-            j(200, mcp::mcp(a, &q.m[3], &pid, &body, &q.info)?)
+            Ok(Resp::Json(200, mcp::mcp(a, &q.m[3], &pid, &body, &q.info)?))
         }),
         // store / economy (nothing to buy: everything is owned)
         on("GET", "/fortnite/api/storefront/v2/catalog", |_, _| {

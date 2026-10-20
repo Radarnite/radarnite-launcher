@@ -4,9 +4,12 @@
 # Nothing under S:\FortniteBuilds is read or run (the game may be open): Node is the portable one in fp-tools and
 # server.mjs / cosmetics.json are copies placed in -Dir by the justfile recipe.
 # -Cosmetics <cosmetics.json>: a big list for a realistic athena profile (default: one item).
+# -BuildPc <build folder>: its offline\cosmetics.json and custom-cosmetics.json are copied (read only, and only while
+# Fortnite is closed) instead, e.g. S:\FortniteBuilds\14.30 with its ~90 MB custom-cosmetics.json.
 param(
   [string]$Dir = 'S:\rl-backend-test',
   [string]$Cosmetics = '',
+  [string]$BuildPc = '',
   [string]$Node = "$env:LOCALAPPDATA\fp-tools\node\node.exe",
   [string]$ServerMjs = ''
 )
@@ -16,7 +19,7 @@ Add-Type -AssemblyName System.Net.Http
 $acc = '0123456789abcdef0123456789abcdef'
 $ua = 'Fortnite/++Fortnite+Release-17.50-CL-17388565 Windows/10.0.19045.1.256.64bit'
 $exe = Join-Path $Dir 'radarnite-backend.exe'
-$report = [ordered]@{ exeBytes = (Get-Item $exe).Length }
+$report = [ordered]@{ exeBytes = (Get-Item $exe).Length; buildPc = $BuildPc }
 $started = @()
 
 # processes left by an earlier run of this script (only ours: their command line points into -Dir)
@@ -33,7 +36,11 @@ function New-Build($name) {
   $off = Join-Path $root 'build\offline'
   New-Item -ItemType Directory -Force (Join-Path $off 'hotfix') | Out-Null
   [IO.File]::WriteAllText((Join-Path $root 'config.json'), "{`"displayName`":`"Smoke`",`"accountId`":`"$acc`",`"_help`":`"x`"}")
-  if ($Cosmetics -and (Test-Path $Cosmetics)) { Copy-Item $Cosmetics (Join-Path $off 'cosmetics.json') }
+  if ($BuildPc) {
+    if (Get-Process FortniteClient-Win64-Shipping -ErrorAction SilentlyContinue) { throw 'Fortnite is running: the build folder is not read' }
+    foreach ($f in 'cosmetics.json', 'custom-cosmetics.json') { if (Test-Path "$BuildPc\offline\$f") { Copy-Item "$BuildPc\offline\$f" (Join-Path $off $f) } }
+  }
+  elseif ($Cosmetics -and (Test-Path $Cosmetics)) { Copy-Item $Cosmetics (Join-Path $off 'cosmetics.json') }
   else { [IO.File]::WriteAllText((Join-Path $off 'cosmetics.json'), '{"source":"smoke","items":[{"templateId":"AthenaCharacter:CID_A_085_Athena_Commando_F_Hardwood_K7ZZ1","variants":[{"channel":"Material","active":"Mat1","owned":["Mat1","Mat2"]}]}]}') }
   foreach ($f in 'b.ini', 'A.ini', 'DefaultEngine.ini') { [IO.File]::WriteAllText((Join-Path $off "hotfix\$f"), "[$f]") }
   return $root

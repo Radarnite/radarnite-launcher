@@ -9,6 +9,10 @@ description = "Radarnite Launcher offline backend: a 1:1 port of backend/server.
 name = "radarnite-backend"
 path = "src/main.rs"
 
+[features]
+# stderr timings of the startup phases, for measurements only
+startup-trace = []
+
 [dependencies]
 tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros", "io-util"] }
 hyper = { version = "1", default-features = false, features = ["server", "http1"] }

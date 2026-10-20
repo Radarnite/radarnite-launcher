@@ -104,12 +104,8 @@ pub struct App {
     pub display_name: String,
     pub server_id: String,
     pub no_match: bool,
-    /// cosmetics.items (custom items merged): (templateId, lower-case id)
-    pub cos_items: Vec<(String, String)>,
-    /// `cosmetics.source || 'none'`
-    pub cos_source: Value,
-    pub custom: Value,
-    pub variants_of: HashMap<String, Value>,
+    /// what is kept of cosmetics.json and custom-cosmetics.json
+    pub cos: crate::cosmetics::Cosmetics,
     pub hotfix: Vec<(String, String)>,
     pub state: RefCell<Obj>,
     pub tokens: RefCell<HashMap<String, String>>,
@@ -123,8 +119,11 @@ pub struct App {
 /// readJson: parsed file (one leading BOM ignored), None on any error.
 pub fn read_json(f: &Path) -> Option<Value> {
     let b = std::fs::read(f).ok()?;
+    crate::trace::mark("  read");
     let s = String::from_utf8_lossy(&b);
-    js::parse(s.strip_prefix('\u{feff}').unwrap_or(&s))
+    let v = js::parse(s.strip_prefix('\u{feff}').unwrap_or(&s));
+    crate::trace::mark("  parsed");
+    v
 }
 
 /// fs.readdirSync: Node sorts the names on Unix (libuv scandir) and keeps the file system's order on Windows.
@@ -187,8 +186,10 @@ impl App {
         }
         let off = Path::new(&build).join("offline");
         std::fs::create_dir_all(&off).map_err(|e| crash(fs_error(&e, "mkdir", &off)))?;
+        crate::trace::mark("args + mkdir");
 
         let config = read_json(Path::new(&config_path)).unwrap_or_else(|| json!({}));
+        crate::trace::mark("config");
         let cfg_port = js::prop(&config, "port").map_err(crash)?;
         let port_v = match arg("--port") {
             Some(v) => v.map(Value::String),
@@ -203,69 +204,7 @@ impl App {
         let dn = js::prop(&config, "displayName").map_err(crash)?;
         let display_name = js::slice_utf16(&js::to_string(Some(&js::or(dn, json!("OfflinePlayer")))), 32);
 
-        let cosmetics = match read_json(&off.join("cosmetics.json")).unwrap_or_else(|| json!({ "items": [] })) {
-            Value::Object(m) => m,
-            Value::Array(_) => Obj::new(),
-            Value::Null => return Err(crash(type_error("Cannot read properties of null (reading 'items')"))),
-            other => {
-                return Err(crash(type_error(format!(
-                    "Cannot create property 'items' on {} '{}'",
-                    js::type_name(&other),
-                    js::to_string(Some(&other))
-                ))))
-            }
-        };
-        let custom = read_json(&off.join("custom-cosmetics.json")).unwrap_or_else(|| json!({ "items": [], "keychain": [] }));
-        let mut items = js::nullish_or(cosmetics.get("items").cloned(), json!([]));
-        // own cosmetics (custom-cosmetics.json) on top of the build's list, once per templateId
-        let citems = js::prop(&custom, "items").map_err(crash)?;
-        let list = if js::truthy(citems.as_ref()) { js::spread(citems.as_ref(), "customCosmetics.items").map_err(crash)? } else { vec![] };
-        for it in list {
-            let tid = js::opt_chain(Some(&it), "templateId");
-            if !js::truthy(tid.as_ref()) {
-                continue;
-            }
-            let Value::Array(arr) = &mut items else {
-                return Err(crash(type_error("cosmetics.items.some is not a function")));
-            };
-            let mut found = false;
-            for c in arr.iter() {
-                let ct = js::prop(c, "templateId").map_err(crash)?;
-                let cl = js::lower(ct.as_ref(), "c.templateId").map_err(crash)?;
-                if cl == js::lower(tid.as_ref(), "it.templateId").map_err(crash)? {
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                let mut o = Obj::new();
-                o.insert("variants".into(), json!([]));
-                js::spread_into(&mut o, &it);
-                arr.push(Value::Object(o));
-            }
-        }
-        let mut cos_items = Vec::new();
-        let mut variants_of = HashMap::new();
-        match items {
-            Value::Array(arr) => {
-                for mut it in arr {
-                    let tid = js::prop(&it, "templateId").map_err(crash)?;
-                    let id = js::lower(tid.as_ref(), "it.templateId").map_err(crash)?;
-                    // the item is not needed afterwards: its variants are moved, not copied
-                    let variants = match &mut it {
-                        Value::Object(o) => o.shift_remove("variants"),
-                        _ => None,
-                    };
-                    variants_of.insert(id.clone(), js::or(variants, json!([])));
-                    cos_items.push((tid.and_then(|t| t.as_str().map(String::from)).unwrap_or_default(), id));
-                }
-            }
-            v if !js::truthy(Some(&v)) => {}
-            Value::String(_) => return Err(crash(type_error("Cannot read properties of undefined (reading 'toLowerCase')"))),
-            _ => return Err(crash(type_error("cosmetics.items is not iterable"))),
-        }
-        let cos_source = js::or(cosmetics.get("source").cloned(), json!("none"));
-
+        let cos = crate::cosmetics::load(&off, &crate::mcp::DEFAULTS).map_err(crash)?;
         let state_v = read_json(&off.join("state.json")).unwrap_or_else(|| json!({}));
         let mut state = match state_v {
             Value::Object(m) => m,
@@ -293,6 +232,7 @@ impl App {
             }
         }
 
+        crate::trace::mark("state");
         let mut app = App {
             build,
             off,
@@ -301,10 +241,7 @@ impl App {
             account_id,
             display_name,
             no_match: args.iter().any(|a| a == "--no-match"),
-            cos_items,
-            cos_source,
-            custom,
-            variants_of,
+            cos,
             hotfix: Vec::new(),
             state: RefCell::new(state),
             tokens: RefCell::new(HashMap::new()),
@@ -314,7 +251,9 @@ impl App {
             unknown: RefCell::new(HashSet::new()),
             routes: routes::table(),
         };
+        crate::trace::mark("routes");
         app.load_hotfix();
+        crate::trace::mark("hotfix");
         if !(port.fract() == 0.0 && (0.0..=65535.0).contains(&port)) {
             return Err((
                 1,
