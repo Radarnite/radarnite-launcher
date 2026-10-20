@@ -150,7 +150,7 @@ selftest-pc *args: _exe
     jq -e '.failed == 0' native/ui/selftest/selftest.json >/dev/null
 alias run-pc := selftest-pc
 
-# The real core in the window on the PC: hidden desktop, scans the builds folder, PNG, WM_CLOSE; 2.2.1 measured alongside
+# The real core in the window on the PC: hidden desktop, scans the builds folder, WM_CLOSE + PNG; 2.2.1 measured alongside
 smoke-pc: _ref-setup _exe
     #!/usr/bin/env bash
     set -euo pipefail
@@ -163,8 +163,9 @@ smoke-pc: _ref-setup _exe
     ssh -o BatchMode=yes windows 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\smoke\window-smoke.ps1 -Dir {{pc_dir}}\smoke -Ref {{pc_dir}}\core\rlcoretest-ref -Bench {{pc_dir}}\smoke\session-bench.ps1' > /dev/null
     mkdir -p dist/smoke
     scp -q 'windows:{{pc_fwd}}/smoke/out/smoke.json' 'windows:{{pc_fwd}}/smoke/out/window-3.0*.png' dist/smoke/
-    jq '{error, windowVisibleMs: .session.windowVisibleMs, windowClass: .session.windowClass, capture: .session.capture, captureRetry: .session.captureRetry, closedByWmClose: .session.closedByWmClose, v30: .session.mainWindow, v221: .ref221.mainWindow, v221selftests: [.ref221.selftests[]?.pageReadyMs], postState}' dist/smoke/smoke.json
-    jq -e '(.error == null) and (.session.error == null) and .session.closedByWmClose and (.session.windowClass == "RadarniteLauncher3")' dist/smoke/smoke.json >/dev/null
+    jq '{error, windowVisibleMs: .session.windowVisibleMs, windowClass: .session.windowClass, snapshot: .session.snapshot, closedByWmClose: .session.closedByWmClose, v30: .session.mainWindow, v221: .ref221.mainWindow, v221selftests: [.ref221.selftests[]?.pageReadyMs], postState}' dist/smoke/smoke.json
+    jq -e '(.error == null) and (.session.error == null) and .session.closedByWmClose and (.session.windowClass == "RadarniteLauncher3")
+      and ((.session.snapshot // "") | split(" ") | length == 3 and (.[2] | tonumber) >= 100)' dist/smoke/smoke.json >/dev/null
 
 # Backend ready / RSS on a scratch copy of 14.30's offline data (baseline/measure-backend.ps1): Rust, then 2.2.1's Node
 backend-measure-pc: _ref-setup

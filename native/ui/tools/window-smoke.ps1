@@ -9,8 +9,9 @@
   2. In the signed-in session, on a separate Win32 desktop that is never shown: RadarniteLauncher.exe --new-instance
      (no single-instance mutex, so a launcher already open is never signalled). The core scans <Builds> and checks
      for updates; nothing is launched or stopped. Measured like the 2.2.1 baseline: process creation -> window
-     visible, private bytes of the process tree at 10 s, CPU time of the tree from 10 s to 20 s. Then a PNG of the
-     live window (PrintWindow, client area) with its pixel spread, and WM_CLOSE: the window must exit by itself.
+     visible, private bytes of the process tree at 10 s, CPU time of the tree from 10 s to 20 s. Then WM_CLOSE: the
+     window renders its current frame to a PNG (--snapshot; no screen capture sees Direct2D on a desktop DWM does not
+     show) and must exit by itself. The PNG's pixel spread and colour count tell a real frame from a blank one.
   3. With -Ref and -Bench: session-bench.ps1 on the extracted 2.2.1 (its --selftest-ui runs and its main window on
      its own hidden desktop), so both are measured under the same load.
   Every process started here is killed by exact path at the end (other RadarniteLauncher.exe processes, e.g. an
@@ -18,7 +19,7 @@
   before. Results: <Dir>\out\smoke.json, <Dir>\out\window-3.0.png, <Dir>\out\window.json (2.2.1).
 #>
 param([string]$Dir = 'S:\rl-integ-test\smoke', [string]$Ref = '', [string]$Bench = '', [string]$Builds = 'S:\FortniteBuilds',
-      [switch]$InSession, [int64]$CaptureHwnd = 0)
+      [switch]$InSession)
 $ErrorActionPreference = 'Stop'
 $app = Join-Path $Dir 'app'
 $exe = Join-Path $app 'RadarniteLauncher.exe'
@@ -37,7 +38,6 @@ public static class RlSmoke {
     public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
     public short wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError; }
   [StructLayout(LayoutKind.Sequential)] public struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
-  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr CreateDesktopW(string n, IntPtr d, IntPtr m, int f, uint a, IntPtr s);
   [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr h);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateProcessW(string a, StringBuilder c, IntPtr p, IntPtr t, bool i, uint f, IntPtr e, string d, ref STARTUPINFO s, out PROCESS_INFORMATION pi);
@@ -48,8 +48,6 @@ public static class RlSmoke {
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
-  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
-  [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
   [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
   public static int Start(string cmd, string cwd, string desktop) { var si = new STARTUPINFO(); si.cb = Marshal.SizeOf(si); si.lpDesktop = desktop; PROCESS_INFORMATION pi;
     if (!CreateProcessW(null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, cwd, ref si, out pi)) throw new System.ComponentModel.Win32Exception();
@@ -60,27 +58,15 @@ public static class RlSmoke {
     return found; }
   public static string ClassName(IntPtr h) { var s = new StringBuilder(256); GetClassNameW(h, s, 256); return s.ToString(); }
   public static string Title(IntPtr h) { var s = new StringBuilder(256); GetWindowTextW(h, s, 256); return s.ToString(); }
-  // PNG of the client area as Windows composes it; returns "WxH stddev distinctColours" (stddev of luminance on a grid)
-  public static string Capture(IntPtr h, string png) {
-    RECT r; GetClientRect(h, out r); int w = r.Right - r.Left, ht = r.Bottom - r.Top; if (w <= 0 || ht <= 0) return "empty client";
-    using (var bmp = new Bitmap(w, ht, PixelFormat.Format32bppArgb)) {
-      bool ok; using (var g = Graphics.FromImage(bmp)) { IntPtr dc = g.GetHdc(); ok = PrintWindow(h, dc, 1 | 2); g.ReleaseHdc(dc); }
-      if (!ok) return "PrintWindow failed";
-      bmp.Save(png, ImageFormat.Png);
-      double sum = 0, sq = 0; int n = 0; var colours = new System.Collections.Generic.HashSet<int>();
+  // "WxH stddev distinctColours" of a PNG (stddev of luminance on a 4 px grid)
+  public static string Stats(string png) {
+    using (var bmp = new Bitmap(png)) {
+      int w = bmp.Width, ht = bmp.Height; double sum = 0, sq = 0; int n = 0; var colours = new System.Collections.Generic.HashSet<int>();
       for (int y = 0; y < ht; y += 4) for (int x = 0; x < w; x += 4) { var c = bmp.GetPixel(x, y); double l = 0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B; sum += l; sq += l * l; n++; if (colours.Count < 5000) colours.Add(c.ToArgb()); }
       double mean = sum / n; return w + "x" + ht + " " + Math.Sqrt(Math.Max(0, sq / n - mean * mean)).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " " + colours.Count;
     } }
 }
 '@
-}
-
-# a process started on the hidden desktop: capture the window from there (when the session desktop got a flat image)
-if ($CaptureHwnd) {
-  LoadTypes
-  $r = try { [RlSmoke]::Capture([IntPtr]$CaptureHwnd, (Join-Path $out 'window-3.0-desk.png')) } catch { "error $($_.Exception.Message)" }
-  Set-Content (Join-Path $out 'capture.txt') $r -Encoding ASCII
-  exit 0
 }
 
 if ($InSession) {
@@ -107,7 +93,8 @@ if ($InSession) {
     $deskName = "rl-smoke-$PID"
     $desk = [RlSmoke]::CreateDesktopW($deskName, [IntPtr]::Zero, [IntPtr]::Zero, 0, 0x10000000, [IntPtr]::Zero)
     if ($desk -eq [IntPtr]::Zero) { throw "CreateDesktop failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
-    $id = [RlSmoke]::Start("`"$exe`" --new-instance", $app, "WinSta0\$deskName")
+    $png = Join-Path $out 'window-3.0.png'; Remove-Item $png -ErrorAction SilentlyContinue
+    $id = [RlSmoke]::Start("`"$exe`" --new-instance --snapshot `"$png`"", $app, "WinSta0\$deskName")
     $start = [Diagnostics.Process]::GetProcessById($id).StartTime.ToUniversalTime()
     $h = [IntPtr]::Zero; $sw = [Diagnostics.Stopwatch]::StartNew()
     while ($sw.Elapsed.TotalSeconds -lt 30) {
@@ -130,26 +117,15 @@ if ($InSession) {
       treePrivateMBAt10s = [math]::Round((($s10 | Measure-Object priv -Sum).Sum) / 1MB, 1)
       treeWorkingSetMBAt10s = [math]::Round((($s10 | Measure-Object ws -Sum).Sum) / 1MB, 1)
       idleWindowMs = [math]::Round($wall); idleCpuMs = [math]::Round($cpuDelta, 1); idleCpuPctOfOneCore = [math]::Round($cpuDelta / $wall * 100, 3) }
-    # the live window, captured from here (another desktop) and, if that comes out flat, from a process on its desktop
-    $png = Join-Path $out 'window-3.0.png'
-    $res.capture = [RlSmoke]::Capture($h, $png)
-    $res.captureFrom = 'session desktop'
-    $parts = "$($res.capture)".Split(' ')
-    if ($parts.Count -ne 3 -or [double]$parts[1] -lt 3) {
-      $cap = Join-Path $out 'capture.txt'; Remove-Item $cap -ErrorAction SilentlyContinue
-      $cid = [RlSmoke]::Start("powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PSCommandPath`" -CaptureHwnd $([int64]$h) -Dir `"$Dir`"", $Dir, "WinSta0\$deskName")
-      $sw = [Diagnostics.Stopwatch]::StartNew(); while (-not (Test-Path $cap) -and $sw.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 200 }
-      $res.captureRetry = if (Test-Path $cap) { (Get-Content $cap -Raw).Trim() } else { 'no answer' }
-      $res.captureFrom = 'its own desktop'
-      try { Stop-Process -Id $cid -Force -ErrorAction Stop } catch { }
-    }
-    # close it like the user does: WM_CLOSE, then the core's destructor and the message loop must end the process
+    # close it like the user does: WM_CLOSE (the window first renders its frame to the PNG), then the core's destructor
+    # and the message loop must end the process
     $sw = [Diagnostics.Stopwatch]::StartNew()
     [void][RlSmoke]::PostMessageW($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
     while ($sw.Elapsed.TotalSeconds -lt 10 -and (Get-Process -Id $id -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 50 }
     $res.closedByWmClose = -not (Get-Process -Id $id -ErrorAction SilentlyContinue)
     $res.closeMs = $sw.ElapsedMilliseconds
     $res.childrenLeft = @(Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $id } | ForEach-Object { $_.Name })
+    $res.snapshot = if (Test-Path $png) { [RlSmoke]::Stats($png) } else { 'no PNG' }
   } catch { $res.error = "$($_.Exception.Message) @ $($_.InvocationInfo.ScriptLineNumber)" }
   finally {
     if ($id) { foreach ($c in (Tree $id)) { try { Stop-Process -Id $c.ProcessId -Force -ErrorAction Stop } catch { } } }

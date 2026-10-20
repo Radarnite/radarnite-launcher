@@ -8,7 +8,9 @@
 //                                                 every scenario rendered to <dir>\<id>.png (WIC) + <dir>\selftest.json;
 //                                                 exit 0 when all ok
 //   options: --render hw (Direct2D on the GPU instead of its software rasterizer), --exit-after <ms>,
-//            --new-instance (developer: open the window even if one is already open)
+//            --new-instance (developer: open the window even if one is already open),
+//            --snapshot <png> (tests: the frame rendered offscreen to a PNG when the window is asked to close; the native
+//            EDIT fields are not in it; for a window on a desktop DWM does not show, where no capture sees Direct2D)
 //
 // The window is single-instance per Windows session like 2.2.1 (launcher/Program.cs SingleInstance, same mutex and
 // event names, so 2.x and 3.0 share them): starting it again brings the open window to the front and exits. The
@@ -48,6 +50,8 @@ double g_firstFrameMs = -1;
 double g_tGfx = 0, g_tWindow = 0, g_tTarget = 0;   // first-frame breakdown (ms since the process started)
 const UINT WM_APP_SHOW = WM_APP + 16;   // another launch asked the open window to come to the front
 int g_showRequests = 0;
+std::wstring g_snapshot;   // --snapshot <png>
+bool snapshot(HWND h, const std::wstring& path);
 
 // ------------------------------------------------------------------------------------------------ single instance
 // One main window per Windows session, as 2.2.1 does it: every copy of the launcher (installed or a dev tree) shares a
@@ -254,6 +258,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (!g_selftest && g_app->sessionRunning() &&
             MessageBoxW(h, L"Fortnite is running. Closing Radarnite Launcher stops the game and the local servers.", L"Radarnite Launcher",
                         MB_OKCANCEL | MB_ICONWARNING) != IDOK) return 0;
+        if (!g_snapshot.empty()) snapshot(h, g_snapshot);
         DestroyWindow(h);
         return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
@@ -320,6 +325,25 @@ bool grabWindow(HWND h, std::vector<BYTE>& px, int* w, int* hh) {
     }
     DeleteObject(bmp); DeleteDC(dc); ReleaseDC(nullptr, sdc);
     return ok != FALSE;
+}
+
+// The window's current frame drawn by App::paint into a WIC bitmap (client size, window DPI) and saved as PNG.
+bool snapshot(HWND h, const std::wstring& path) {
+    RECT r; GetClientRect(h, &r);
+    IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
+    bool ok = r.right > 0 && r.bottom > 0 &&
+              SUCCEEDED(g_gfx.wic->CreateBitmap(r.right, r.bottom, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp)) &&
+              SUCCEEDED(g_gfx.d2d->CreateWicBitmapRenderTarget(bmp, D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                  D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), (float)g_dpi, (float)g_dpi), &rt));
+    if (ok) {
+        float s = g_dpi / 96.f;
+        g_app->setTarget(rt, (float)g_dpi);
+        rt->BeginDraw(); g_app->paint(r.right / s, r.bottom / s); ok = SUCCEEDED(rt->EndDraw());
+        g_app->setTarget(g_rt, (float)g_dpi);   // back to the window's own target
+        ok = ok && savePng(bmp, path);
+    }
+    release(rt); release(bmp);
+    return ok;
 }
 
 bool captureWindow(HWND h, const std::wstring& path) {
@@ -555,6 +579,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--scenario" && i + 1 < argc) scenario = argv[++i];
         else if (a == L"--render" && i + 1 < argc) g_software = std::wstring(argv[++i]) != L"hw";
         else if (a == L"--exit-after" && i + 1 < argc) exitAfter = _wtoi(argv[++i]);
+        else if (a == L"--snapshot" && i + 1 < argc) g_snapshot = argv[++i];
         else if (a == L"--new-instance") newInstance = true;
         else if (a == L"--selftest-single-instance" && i + 1 < argc) { probe = true; probeSuffix = argv[++i]; }   // selftest only
     }
