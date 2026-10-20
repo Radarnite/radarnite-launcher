@@ -26,10 +26,8 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 
 ## Releasing
 
-The version lives only in `launcher/FnOffline.csproj` (`<Version>`). Bump it, then run `tools/build-release.ps1`
-on Windows (it reads that version, builds the launcher, assembles the installer and writes the `.sha256`). Publish
-the resulting `RadarniteLauncherSetup-<version>.exe` and its `.sha256` as a GitHub release here, tagged `v<version>`:
-every installed launcher checks this repo on start and offers the update.
+GitHub Actions builds, tests and publishes every push: `main` as the latest release (every installed launcher
+updates), any other branch as a prerelease. Versions and assets: see `INSTALL.md`.
 
 ## License
 
