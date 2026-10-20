@@ -2,6 +2,7 @@
 //! mutated in the same order as the JS so a request that throws half way leaves the same in-memory state.
 
 use crate::app::{App, Info, SINCE};
+use crate::cosmetics::AthenaKey;
 use crate::js::{self, type_error, JsResult, Obj};
 use serde_json::{json, Value};
 
@@ -52,7 +53,7 @@ fn picks_of(st: &Obj, id: &str) -> Option<Value> {
 /// stylesOf(id): the importer's list (channel, default option, owned options) with what the player picked on top;
 /// a saved list never hides channels the importer knows
 pub fn styles_of(app: &App, st: &Obj, id: &str) -> JsResult<Value> {
-    let mut out = js::or(app.variants_of.get(id).cloned(), json!([]));
+    let mut out = app.cos.variants.get(id).and_then(|t| js::parse(t)).unwrap_or_else(|| json!([]));
     let picks = picks_of(st, id);
     if !js::truthy(picks.as_ref()) {
         return Ok(out);
@@ -252,33 +253,21 @@ fn set_slot(
     Ok(())
 }
 
-fn athena(app: &App, st: &Obj, info: &Info) -> JsResult<Value> {
-    let mut items = Obj::new();
-    let favorites = st.get("favorites");
-    for (tid, id) in &app.cos_items {
-        let variants = styles_of(app, st, id)?;
-        let fav = favorites.and_then(|f| js::get(f, id));
-        // built by hand: json! would copy the variants through serde
-        let mut attrs = Obj::with_capacity(7);
-        attrs.insert("max_level_bonus".into(), Value::from(0));
-        attrs.insert("level".into(), Value::from(1));
-        attrs.insert("item_seen".into(), Value::Bool(true));
-        attrs.insert("xp".into(), Value::from(0));
-        attrs.insert("variants".into(), variants);
-        attrs.insert("favorite".into(), Value::Bool(js::truthy(fav.as_ref())));
-        attrs.insert("rnd_sel_cnt".into(), Value::from(0));
-        let mut item = Obj::with_capacity(3);
-        item.insert("templateId".into(), Value::String(tid.clone()));
-        item.insert("attributes".into(), Value::Object(attrs));
-        item.insert("quantity".into(), Value::from(1));
-        js::set(&mut items, id, Value::Object(item));
+/// stylesOf(id) as JSON: the stored text as is unless the player picked styles for the item
+fn styles_json(app: &App, st: &Obj, id: &str) -> JsResult<Option<String>> {
+    if js::truthy(picks_of(st, id).as_ref()) {
+        return Ok(Some(js::stringify(&styles_of(app, st, id)?)));
     }
-    for (_, d) in DEFAULTS {
-        let k = d.to_lowercase();
-        if items.get(&k).map_or(true, Value::is_null) {
-            js::set(&mut items, &k, json!({ "templateId": d, "attributes": { "item_seen": true, "variants": [], "favorite": false }, "quantity": 1 }));
-        }
-    }
+    Ok(None)
+}
+
+fn athena_rvn(st: &Obj) -> Value {
+    js::or(st.get("rvn").and_then(|r| js::get(r, "athena")), json!(1))
+}
+
+/// The athena profile as JSON text appended to out, written item by item (the items object of a full build is >1 MB:
+/// no Value tree and no intermediate copies)
+fn athena_json(out: &mut String, app: &App, st: &Obj, info: &Info) -> JsResult<()> {
     let mut locker = Obj::new();
     for (slot, _) in SLOT_COUNTS {
         let sv = js::opt_chain(st.get("slotVariants"), slot);
@@ -292,11 +281,18 @@ fn athena(app: &App, st: &Obj, info: &Info) -> JsResult<Value> {
     js::put_opt(&mut attrs, "locker_name", st.get("lockerName").cloned());
     attrs.insert("item_seen".into(), json!(true));
     attrs.insert("favorite".into(), json!(false));
-    js::set(&mut items, "sandbox_loadout", json!({ "templateId": "CosmeticLocker:cosmeticlocker_athena", "attributes": attrs, "quantity": 1 }));
+    let sandbox = json!({ "templateId": "CosmeticLocker:cosmeticlocker_athena", "attributes": attrs, "quantity": 1 });
 
+    // everything that can throw comes before the first byte is written
+    let mut styles: Vec<Option<String>> = Vec::new();
+    for k in &app.cos.athena_keys {
+        if let AthenaKey::Cosmetic(id, _) = k {
+            styles.push(styles_json(app, st, id)?);
+        }
+    }
     let s = js::num(info.season);
     let fav = |slot: &str| js::or(slot_items(st, slot).into_iter().next(), json!(""));
-    let rvn = js::or(st.get("rvn").and_then(|r| js::get(r, "athena")), json!(1));
+    let rvn = athena_rvn(st);
     let mut a = js::obj(json!({
         "use_random_loadout": false, "past_seasons": [], "season_match_boost": 0, "loadouts": ["sandbox_loadout"], "mfa_reward_claimed": true,
         "rested_xp_overflow": 0, "last_xp_interaction": js::now_iso(), "quest_manager": { "dailyLoginInterval": js::now_iso(), "dailyQuestRerolls": 1 },
@@ -316,13 +312,51 @@ fn athena(app: &App, st: &Obj, info: &Info) -> JsResult<Value> {
         "favorite_mapmarker": "", "party_assist_quest": "", "pinned_quest": "", "inventory_limit_bonus": 0, "daily_rewards": {},
         "competitive_identity": {}, "season_update": 0, "alien_style_points": 0,
     })));
-    let mut p = js::obj(json!({ "_id": app.account_id, "created": SINCE, "updated": js::now_iso(), "rvn": rvn, "wipeNumber": 1,
-        "accountId": app.account_id, "profileId": "athena", "version": "offline", "commandRevision": rvn }));
-    p.insert("items".into(), Value::Object(items));
+    let head = json!({ "_id": app.account_id, "created": SINCE, "updated": js::now_iso(), "rvn": rvn, "wipeNumber": 1,
+        "accountId": app.account_id, "profileId": "athena", "version": "offline", "commandRevision": rvn });
     let mut stats = Obj::with_capacity(1);
     stats.insert("attributes".into(), Value::Object(a));
-    p.insert("stats".into(), Value::Object(stats));
-    Ok(Value::Object(p))
+    let head = js::stringify(&head);
+    // {...head, items, stats}
+    out.reserve(app.cos.athena_keys.len() * 220 + 8192);
+    out.push_str(&head[..head.len() - 1]);
+    out.push_str(",\"items\":{");
+    let favorites = st.get("favorites");
+    let mut styles = styles.into_iter();
+    for (n, k) in app.cos.athena_keys.iter().enumerate() {
+        if n > 0 {
+            out.push(',');
+        }
+        match k {
+            AthenaKey::Cosmetic(id, tid) => {
+                js::push_quoted(out, id);
+                out.push_str(":{\"templateId\":");
+                js::push_quoted(out, tid);
+                out.push_str(",\"attributes\":{\"max_level_bonus\":0,\"level\":1,\"item_seen\":true,\"xp\":0,\"variants\":");
+                match styles.next().flatten() {
+                    Some(v) => out.push_str(&v),
+                    None => out.push_str(app.cos.variants.get(id).map_or("[]", |t| t)),
+                }
+                let fav = favorites.and_then(|f| js::get(f, id));
+                out.push_str(if js::truthy(fav.as_ref()) { ",\"favorite\":true" } else { ",\"favorite\":false" });
+                out.push_str(",\"rnd_sel_cnt\":0},\"quantity\":1}");
+            }
+            AthenaKey::Default(t) => {
+                js::push_quoted(out, &t.to_lowercase());
+                out.push_str(":{\"templateId\":");
+                js::push_quoted(out, t);
+                out.push_str(",\"attributes\":{\"item_seen\":true,\"variants\":[],\"favorite\":false},\"quantity\":1}");
+            }
+            AthenaKey::Sandbox => {
+                out.push_str("\"sandbox_loadout\":");
+                out.push_str(&js::stringify(&sandbox));
+            }
+        }
+    }
+    out.push_str("},\"stats\":");
+    out.push_str(&js::stringify_obj(&stats));
+    out.push('}');
+    Ok(())
 }
 
 fn common_core(app: &App, st: &Obj) -> Value {
@@ -360,16 +394,20 @@ fn empty_profile(app: &App, st: &Obj, profile_id: &str) -> JsResult<Value> {
     Ok(Value::Object(base))
 }
 
-fn profile_for(app: &App, st: &Obj, id: &str, info: &Info) -> JsResult<Value> {
-    match id {
-        "athena" => athena(app, st, info),
-        "common_core" => Ok(common_core(app, st)),
-        _ => empty_profile(app, st, id),
+/// `"key":value` into an object being written (an undefined value leaves the key out, like JSON.stringify)
+fn field(out: &mut String, key: &str, v: Option<&Value>) {
+    if let Some(v) = v {
+        if !out.ends_with('{') {
+            out.push(',');
+        }
+        js::push_quoted(out, key);
+        out.push(':');
+        out.push_str(&js::stringify(v));
     }
 }
 
-/// mcp(command, profileId, body, info): apply the command, then answer the whole profile
-pub fn mcp(app: &App, command: &str, profile_id: &str, body: &Value, info: &Info) -> JsResult<Value> {
+/// mcp(command, profileId, body, info): apply the command, then answer the whole profile (JSON text)
+pub fn mcp(app: &App, command: &str, profile_id: &str, body: &Value, info: &Info) -> JsResult<String> {
     let mut guard = app.state.borrow_mut();
     let st: &mut Obj = &mut guard;
     let mut changed = false;
@@ -438,20 +476,30 @@ pub fn mcp(app: &App, command: &str, profile_id: &str, body: &Value, info: &Info
         }
         app.save_state(st);
     }
-    let profile = profile_for(app, st, profile_id, info)?;
-    let rvn = profile.get("rvn").cloned();
-    let cmd = profile.get("commandRevision").cloned();
-    let mut r = Obj::new();
-    js::put_opt(&mut r, "profileRevision", rvn.clone());
-    r.insert("profileId".into(), json!(profile_id));
-    js::put_opt(&mut r, "profileChangesBaseRevision", rvn);
-    let mut change = Obj::with_capacity(2);
-    change.insert("changeType".into(), json!("fullProfileUpdate"));
-    change.insert("profile".into(), profile);
-    r.insert("profileChanges".into(), Value::Array(vec![Value::Object(change)]));
-    js::put_opt(&mut r, "profileCommandRevision", cmd);
-    r.insert("serverTime".into(), json!(js::now_iso()));
-    r.insert("multiUpdate".into(), json!([]));
-    r.insert("responseVersion".into(), json!(1));
-    Ok(Value::Object(r))
+    // profileFor(profileId): athena is written straight into the answer, the small profiles are built first
+    let (rvn, cmd, small) = if profile_id == "athena" {
+        let r = athena_rvn(st);
+        (Some(r.clone()), Some(r), None)
+    } else {
+        let p = if profile_id == "common_core" { common_core(app, st) } else { empty_profile(app, st, profile_id)? };
+        (p.get("rvn").cloned(), p.get("commandRevision").cloned(), Some(js::stringify(&p)))
+    };
+    let mut out = String::with_capacity(small.as_ref().map_or(0, |s| s.len()) + 320);
+    out.push('{');
+    field(&mut out, "profileRevision", rvn.as_ref());
+    field(&mut out, "profileId", Some(&json!(profile_id)));
+    field(&mut out, "profileChangesBaseRevision", rvn.as_ref());
+    if !out.ends_with('{') {
+        out.push(',');
+    }
+    out.push_str("\"profileChanges\":[{\"changeType\":\"fullProfileUpdate\",\"profile\":");
+    match small {
+        Some(p) => out.push_str(&p),
+        None => athena_json(&mut out, app, st, info)?,
+    }
+    out.push_str("}]");
+    field(&mut out, "profileCommandRevision", cmd.as_ref());
+    field(&mut out, "serverTime", Some(&json!(js::now_iso())));
+    out.push_str(",\"multiUpdate\":[],\"responseVersion\":1}");
+    Ok(out)
 }

@@ -435,13 +435,13 @@ pub fn obj(v: Value) -> Obj {
 /// JSON.parse (None on a syntax error), with V8's key order and double-precision numbers.
 pub fn parse(s: &str) -> Option<Value> {
     let mut v = serde_json::from_str::<Value>(s).ok()?;
-    normalize(&mut v);
+    normalize_value(&mut v);
     Some(v)
 }
 
 /// In place: integers beyond 2^53 become doubles, and objects with array-index keys get V8's order (index keys first,
 /// ascending). Objects without such keys are left as they are (no copy).
-fn normalize(v: &mut Value) {
+pub fn normalize_value(v: &mut Value) {
     match v {
         Value::Number(n) => {
             let big = match (n.as_i64(), n.as_u64()) {
@@ -453,9 +453,9 @@ fn normalize(v: &mut Value) {
                 *v = Number::from_f64(n.as_f64().unwrap_or(0.0)).map(Value::Number).unwrap_or(Value::Null);
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(normalize),
+        Value::Array(a) => a.iter_mut().for_each(normalize_value),
         Value::Object(m) => {
-            m.values_mut().for_each(normalize);
+            m.values_mut().for_each(normalize_value);
             if m.keys().any(|k| is_index_key(k)) {
                 let old = std::mem::take(m);
                 let (mut idx, rest): (Vec<(String, Value)>, Vec<(String, Value)>) = old.into_iter().partition(|(k, _)| is_index_key(k));
@@ -489,6 +489,30 @@ fn stringify_any<T: serde::Serialize + ?Sized>(v: &T) -> String {
 /// JSON.stringify
 pub fn stringify(v: &Value) -> String {
     stringify_any(v)
+}
+
+/// A JSON string literal as JSON.stringify writes it
+pub fn push_quoted(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => {
+                const H: &[u8; 16] = b"0123456789abcdef";
+                out.push_str("\\u00");
+                out.push(H[(c as usize) >> 4] as char);
+                out.push(H[(c as usize) & 15] as char);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 pub fn stringify_obj(o: &Obj) -> String {
@@ -912,6 +936,15 @@ mod tests {
         set(&mut o, "y", json!(9));
         set(&mut o, "x", json!(7));
         assert_eq!(stringify_obj(&o), r#"{"3":0,"5":2,"x":7,"y":9}"#);
+    }
+
+    #[test]
+    fn push_quoted_matches_stringify() {
+        for s in ["", "a\"b\\c\n\r\t\u{8}\u{c}\u{1}\u{1f}\u{7f}é😀\u{2028}/"] {
+            let mut out = String::new();
+            push_quoted(&mut out, s);
+            assert_eq!(out, stringify(&Value::String(s.into())));
+        }
     }
 
     #[test]

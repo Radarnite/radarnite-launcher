@@ -10,9 +10,11 @@
 #![recursion_limit = "512"]
 
 mod app;
+mod cosmetics;
 mod js;
 mod mcp;
 mod routes;
+mod trace;
 mod ws;
 
 use app::App;
@@ -31,14 +33,18 @@ use std::rc::Rc;
 use std::time::Duration;
 
 fn main() {
+    trace::start();
     let args: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
     let app = match App::start(&args) {
         Ok(a) => a,
         Err((code, msg)) => {
+            trace::mark("exit");
+            trace::flush();
             eprintln!("{}", msg);
             std::process::exit(code);
         }
     };
+    trace::mark("app ready");
     // a panicking route answers 500 (routes::dispatch catches it); nothing goes to stderr
     std::panic::set_hook(Box::new(|_| {}));
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
@@ -48,6 +54,7 @@ fn main() {
             std::process::exit(1);
         }
     };
+    trace::mark("runtime built");
     let local = tokio::task::LocalSet::new();
     local.block_on(&rt, serve(Rc::new(app)));
 }
@@ -65,7 +72,10 @@ fn listen_error(e: &io::Error, port: u16) -> String {
 async fn serve(app: Rc<App>) {
     let port = app.port as u16;
     let listener = match tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await {
-        Ok(l) => l,
+        Ok(l) => {
+            trace::mark("bound");
+            l
+        }
         Err(e) => {
             let m = listen_error(&e, port);
             app.log(&format!("server error {}", m));
@@ -78,9 +88,12 @@ async fn serve(app: Rc<App>) {
         port,
         app.display_name,
         app.account_id,
-        app.cos_items.len()
+        app.cos.count
     ));
+    trace::mark("logged");
     println!("ready 127.0.0.1:{}", port);
+    trace::mark("ready printed");
+    trace::flush();
     loop {
         let stream = match listener.accept().await {
             Ok((s, _)) => s,

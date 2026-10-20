@@ -13,7 +13,7 @@ backend_cargo := 'export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"; cd ~/a
 
 # Mirror backend-rs/ to the Mac work folder (target/ and out/ stay where they are)
 backend-sync:
-    rsync -a --delete --exclude target --exclude out {{backend_src}}/ mac:{{backend_mac}}/backend-rs/
+    rsync -a --delete --exclude '/target*' --exclude /out {{backend_src}}/ mac:{{backend_mac}}/backend-rs/
 
 # Release builds: out/radarnite-backend.exe (x86_64-pc-windows-gnu) and out/radarnite-backend-linux-aarch64
 backend-build: (_backend-wait-cpu "mac") backend-sync
