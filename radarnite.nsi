@@ -72,6 +72,7 @@ Var BuildsDir
 !define MUI_FINISHPAGE_SHOWREADME ""
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Create a desktop shortcut"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION DesktopShortcut
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -112,8 +113,19 @@ Function PickDrive
   Push $0
 FunctionEnd
 
+; The desktop shortcut is the installer's only when it made it (DesktopShortcut=1): one the user already has (it may
+; point somewhere else) is neither overwritten by default nor deleted by the uninstaller.
 Function DesktopShortcut
   CreateShortCut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  WriteRegDWORD HKCU "${APP_KEY}" "DesktopShortcut" 1
+FunctionEnd
+
+Function FinishShow
+  ReadRegDWORD $0 HKCU "${APP_KEY}" "DesktopShortcut"
+  ${If} ${FileExists} "$DESKTOP\${APP}.lnk"
+  ${AndIf} $0 != 1
+    SendMessage $mui.FinishPage.ShowReadme ${BM_SETCHECK} ${BST_UNCHECKED} 0
+  ${EndIf}
 FunctionEnd
 
 ; A folder that cannot go (a file in it is in use) is reported and left for the next update; the install goes on.
@@ -195,18 +207,21 @@ Section "Radarnite Launcher" SecMain
   SectionIn RO
   Call CheckRunning
   SetOutPath "$INSTDIR"
-  ; Upgrading from 2.x: its .NET runtime, WebView2 page and profile, Node and server.mjs go. Wildcards catch the
-  ; runtime files of other 2.x versions; 3.x has no dll in the program folder root (tools/release.sh enforces it).
-  !insertmacro Remove2xLeftovers
-  Delete "$INSTDIR\*.dll"
-  Delete "$INSTDIR\*.deps.json"
-  Delete "$INSTDIR\*.runtimeconfig.json"
+  ; Only over an existing Radarnite Launcher (2.x or 3.x): a folder picked by hand that holds other files is never
+  ; cleaned. Upgrading from 2.x: its .NET runtime, WebView2 page and profile, Node and server.mjs go. Wildcards catch
+  ; the runtime files of other 2.x versions; 3.x has no dll in the program folder root (tools/release.sh enforces it).
   ; Program folders are fully replaced on every install (so a file removed between versions cannot linger); only
   ; config.json (name, account, settings), the logs and the builds, which live elsewhere, stay.
-  !insertmacro TolerantRMDir "$INSTDIR\tools"
-  !insertmacro TolerantRMDir "$INSTDIR\gameserver"
-  !insertmacro TolerantRMDir "$INSTDIR\redirect"
-  !insertmacro TolerantRMDir "$INSTDIR\patches"
+  ${If} ${FileExists} "$INSTDIR\${EXE}"
+    !insertmacro Remove2xLeftovers
+    Delete "$INSTDIR\*.dll"
+    Delete "$INSTDIR\*.deps.json"
+    Delete "$INSTDIR\*.runtimeconfig.json"
+    !insertmacro TolerantRMDir "$INSTDIR\tools"
+    !insertmacro TolerantRMDir "$INSTDIR\gameserver"
+    !insertmacro TolerantRMDir "$INSTDIR\redirect"
+    !insertmacro TolerantRMDir "$INSTDIR\patches"
+  ${EndIf}
   ClearErrors
   File /r "${SRC}/app/*.*"
 
@@ -243,7 +258,11 @@ Section "Uninstall"
   ExecShellWait "runas" "$INSTDIR\${EXE}" "--firewall-remove" SW_HIDE
 
   Delete "$SMPROGRAMS\${APP}.lnk"
-  Delete "$DESKTOP\${APP}.lnk"
+  ReadRegDWORD $0 HKCU "${APP_KEY}" "DesktopShortcut"
+  ${If} $0 == 1
+    Delete "$DESKTOP\${APP}.lnk"
+    DeleteRegValue HKCU "${APP_KEY}" "DesktopShortcut"
+  ${EndIf}
   RMDir /r "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegValue HKCU "${APP_KEY}" "InstallDir"

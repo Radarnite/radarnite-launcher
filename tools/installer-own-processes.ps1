@@ -7,10 +7,11 @@
 $ErrorActionPreference = 'Stop'
 $dir = $env:RN_INSTDIR.TrimEnd('\') + '\'
 $profileDir = $dir + 'webview2-radarnite'
-$self = $PID
+# never this script nor the installer/uninstaller that started it (an uninstaller run with _?= lives in the folder)
+$self = @($PID, (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId)
 function Own {
     @(Get-CimInstance Win32_Process | Where-Object {
-        $_.ProcessId -ne $self -and (
+        $self -notcontains $_.ProcessId -and (
         ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) -or
         ($_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -and $_.CommandLine.IndexOf($profileDir, [StringComparison]::OrdinalIgnoreCase) -ge 0)) })
 }

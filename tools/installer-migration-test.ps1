@@ -9,7 +9,7 @@
   3. Checks: only that install's processes were closed; the folder holds exactly the 3.x files (<Expected>, relative
      paths) plus config.json, the logs, the uninstaller and the locked file; config.json and update.log unchanged;
      InstallDir, BuildsFolder and the uninstall key kept, DisplayVersion updated; the silent uninstaller removes the
-     uninstall key (skipped when the user has a "Radarnite Launcher" desktop shortcut it would delete).
+     uninstall key in place (_?=) without waiting on itself, and leaves a desktop shortcut it did not create.
   Refuses to run when a Radarnite Launcher install, its registry keys or shortcuts exist; removes exactly what it
   created. Results: <Root>\out\migration.json.
 #>
@@ -150,13 +150,21 @@ try {
   $R.displayVersion = $un.DisplayVersion
   $checks.displayVersionUpdated = $un.DisplayVersion -ne $R.oldVersion
   $checks.startMenuLnk = Test-Path $smLnk
-  if ($pre.desktopLnk) { $R.uninstall = 'skipped: a Radarnite Launcher desktop shortcut exists and the uninstaller would delete it' }
-  else {
-    $u = Start-Process -FilePath (Join-Path $inst 'Uninstall Radarnite Launcher.exe') -ArgumentList "/S _?=$inst" -Wait -PassThru
-    $left = @(Get-ChildItem $inst -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($inst.Length + 1) })
-    $R.uninstall = [ordered]@{ exit = $u.ExitCode; filesLeft = $left }
-    $checks.uninstallRemovesFilesAndKey = ($u.ExitCode -eq 0) -and -not (Test-Path $uninstKey) -and (@($left | Where-Object { $_ -ne 'Uninstall Radarnite Launcher.exe' }).Count -eq 0)
-    $checks.uninstallKeepsBuildsFolder = [bool](Get-ItemProperty $appSub -ErrorAction SilentlyContinue).BuildsFolder
+  # the 3.x uninstaller, run in place (_?=) like a Sandbox test: it must not close itself, must keep BuildsFolder and
+  # must leave a desktop shortcut it did not create (backed up first and put back if it went anyway)
+  $lnkBak = Join-Path $Root 'desktop-lnk.bak'
+  if ($pre.desktopLnk) { Copy-Item $deskLnk $lnkBak -Force; $lnkHash = (Get-FileHash $deskLnk -Algorithm SHA256).Hash }
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $u = Start-Process -FilePath (Join-Path $inst 'Uninstall Radarnite Launcher.exe') -ArgumentList "/S _?=$inst" -Wait -PassThru
+  $left = @(Get-ChildItem $inst -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($inst.Length + 1) })
+  $R.uninstall = [ordered]@{ exit = $u.ExitCode; ms = $sw.ElapsedMilliseconds; filesLeft = $left }
+  $checks.uninstallRemovesFilesAndKey = ($u.ExitCode -eq 0) -and -not (Test-Path $uninstKey) -and (@($left | Where-Object { $_ -ne 'Uninstall Radarnite Launcher.exe' }).Count -eq 0)
+  $checks.uninstallDidNotWaitOnItself = $sw.ElapsedMilliseconds -lt 12000
+  $checks.uninstallKeepsBuildsFolder = [bool](Get-ItemProperty $appSub -ErrorAction SilentlyContinue).BuildsFolder
+  if ($pre.desktopLnk) {
+    $checks.userDesktopShortcutKept = (Test-Path $deskLnk) -and ((Get-FileHash $deskLnk -Algorithm SHA256).Hash -eq $lnkHash)
+    if (-not (Test-Path $deskLnk)) { Copy-Item $lnkBak $deskLnk -Force; $R.desktopLnkRestored = $true }
+    Remove-Item $lnkBak -Force -ErrorAction SilentlyContinue
   }
 } catch {
   $R.error = "$($_.Exception.Message) @ line $($_.InvocationInfo.ScriptLineNumber)"
