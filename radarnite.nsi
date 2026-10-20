@@ -132,9 +132,14 @@ Section "Radarnite Launcher" SecMain
   SectionIn RO
   Call CheckRunning
   SetOutPath "$INSTDIR"
-  ; Program files are replaced on every install; config.json (name, account, settings) and the builds stay.
+  ; Program folders are fully replaced on every install (so a file removed between versions cannot linger); only
+  ; config.json (name, account, settings) and the builds, which live elsewhere, stay.
   RMDir /r "$INSTDIR\ui"
   RMDir /r "$INSTDIR\tools"
+  RMDir /r "$INSTDIR\gameserver"
+  RMDir /r "$INSTDIR\backend"
+  RMDir /r "$INSTDIR\redirect"
+  RMDir /r "$INSTDIR\patches"
   File /r "${SRC}\app\*.*"
   File "${SRC}\radarnite.ico"
 

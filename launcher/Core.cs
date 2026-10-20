@@ -329,7 +329,7 @@ public static class Firewall
         foreach (var name in stale) { try { pol.Rules.Remove(name); } catch { } }
         foreach (var exe in programs)
         {
-            var rel = Paths.IsUnder(exe, Paths.LauncherDir) ? Path.Combine("launcher", Path.GetRelativePath(Paths.LauncherDir, exe)) : Path.GetRelativePath(Paths.Root, exe);
+            var rel = Paths.IsUnder(exe, Paths.LauncherDir) ? Path.Combine(Path.GetFileName(Paths.LauncherDir), Path.GetRelativePath(Paths.LauncherDir, exe)) : Path.GetRelativePath(Paths.Root, exe);
             foreach (var (dir, tag) in new[] { (OUT, "outbound"), (IN, "inbound") })
             {
                 var name = $"FN Offline - {rel} ({tag})";
