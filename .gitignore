@@ -1,0 +1,23 @@
+# Build output
+**/bin/
+**/obj/
+**/Release/
+**/Debug/
+**/x64/
+*.user
+
+# Binaries (this is a source repo; the installer ships as a GitHub release asset)
+*.exe
+*.dll
+*.pdb
+*.lib
+*.obj
+*.exp
+*.ilk
+
+# Release artifacts
+RadarniteLauncherSetup-*.exe
+*.sha256
+
+# Per-user launcher settings
+config.json
