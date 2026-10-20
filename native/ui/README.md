@@ -1,7 +1,8 @@
 # Radarnite Launcher native UI
 
 Win32 + Direct2D/DirectWrite window of Radarnite Launcher 3.0, replacing the WebView2 page (`launcher/ui/index.html`).
-Runs against a mock core until `native/core` implements `api.h`.
+Linked with the real core (`native/core`, `api.h`) into `RadarniteLauncher.exe`; a mock core stays for `--scenario`
+and `--selftest-ui`.
 
 - Custom title bar (drag, double-click maximize, Snap, resize edges) and dark DWM frame, per-monitor DPI v2
 - Builds rail, build details with the four status cells, notices, modes card and settings form
@@ -15,6 +16,7 @@ Runs against a mock core until `native/core` implements `api.h`.
 - `--selftest-ui [dir]`: first frame, RAM and CPU at rest, transition checks in the live window, every scenario of
   `tests/ui-scenarios.mjs` (plus 4 native ones) to PNG, keyboard and mouse checks
 
-Build and test from the dev box: `just build` (Mac, or the PC when the Mac is busy) and
-`flock /tmp/rn-launcher-pc.lock just check-pc` (selftest on the PC, results in `selftest/`, then the same scenarios
-rendered by Chromium and compared: `selftest/compare.json`, crops in `out/compare/`).
+Build and test from the dev box: `just build-mac` (the core, then this window; `just build` adds the backend, and falls
+back to the PC when the Mac is busy), `just check-pc` (selftest on the PC, results in `selftest/`, then the same
+scenarios rendered by Chromium and compared: `selftest/compare.json`, crops in `out/compare/`) and `just smoke-pc`
+(the real core in the window on a hidden desktop, next to 2.2.1: `tools/window-smoke.ps1`).

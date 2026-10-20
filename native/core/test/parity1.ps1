@@ -1,12 +1,13 @@
 # Parity 1: 2.2.1 (extracted, never installed) vs rn-core-cli.exe on the real builds folder, read-only commands only.
 # Both use the same launcher folder (RADARNITE_LAUNCHER_DIR for the core). Also times --check like measure-2x.ps1.
-param([string]$Dir = 'S:\rl-core-test', [int]$Runs = 20, [string]$Build = '14.30')
+# -Exe: another core exe instead of <Dir>\rn-core-cli.exe, e.g. the full RadarniteLauncher.exe (window + core).
+param([string]$Dir = 'S:\rl-core-test', [int]$Runs = 20, [string]$Build = '14.30', [string]$Exe = '')
 $ErrorActionPreference = 'Stop'
 $t = $Dir
 $ref = Join-Path $t 'rlcoretest-ref'
 if (-not (Test-Path $ref)) { Move-Item (Join-Path $t 'ref\x') $ref; Remove-Item (Join-Path $t 'ref') -Recurse -Force -ErrorAction SilentlyContinue }
 $old = Join-Path $ref 'RadarniteLauncher.exe'
-$new = Join-Path $t 'rn-core-cli.exe'
+$new = if ($Exe) { $Exe } else { Join-Path $t 'rn-core-cli.exe' }
 $outDir = Join-Path $t 'out'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 

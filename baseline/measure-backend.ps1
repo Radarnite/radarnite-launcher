@@ -1,6 +1,7 @@
 <#
   measure-backend.ps1 - backend start-up cost split by the build's offline data (see README.md).
     powershell -NoProfile -ExecutionPolicy Bypass -File measure-backend.ps1 -Node <node.exe> -Server <server.mjs>
+    powershell -NoProfile -ExecutionPolicy Bypass -File measure-backend.ps1 -Node <radarnite-backend.exe>   (3.0: no -Server)
   Runs `node server.mjs --build <scratch> --config <scratch config> --port <free>` against three scratch copies of
   <Builds>\<Build>\offline: full (cosmetics.json, custom-cosmetics.json, state.json), without custom-cosmetics.json,
   and empty. Ready = process creation -> "ready 127.0.0.1:PORT"; RSS / private = 300 ms after ready. Never touches
@@ -14,7 +15,9 @@ $cfg = Join-Path $Root 'backend-config.json'
 Set-Content $cfg '{ "displayName": "Baseline", "port": 3551 }' -Encoding ASCII
 $variants = [ordered]@{ full = @('cosmetics.json', 'custom-cosmetics.json', 'state.json'); noCustomCosmetics = @('cosmetics.json', 'state.json'); empty = @() }
 $l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $l.Start(); $port = $l.LocalEndpoint.Port; $l.Stop()
-$res = [ordered]@{ nodeVersion = (& $Node --version); server = (Get-FileHash $Server -Algorithm SHA256).Hash.ToLower() }
+$res = if ($Server) { [ordered]@{ nodeVersion = (& $Node --version); server = (Get-FileHash $Server -Algorithm SHA256).Hash.ToLower() } }
+       else { [ordered]@{ exe = (Split-Path $Node -Leaf); exeBytes = (Get-Item $Node).Length } }
+$lead = if ($Server) { "`"$Server`" " } else { '' }
 foreach ($v in $variants.Keys) {
   $b = Join-Path $Root "backend-$v\$Build"
   Remove-Item -Recurse -Force (Split-Path $b) -ErrorAction SilentlyContinue
@@ -23,7 +26,7 @@ foreach ($v in $variants.Keys) {
   foreach ($f in $variants[$v]) { $s = Join-Path $src $f; if (Test-Path $s) { Copy-Item $s (Join-Path $b "offline\$f"); $bytes += (Get-Item $s).Length } }
   $ready = @(); $rss = @(); $priv = @()
   for ($i = 0; $i -lt $Runs + 2; $i++) {
-    $psi = New-Object Diagnostics.ProcessStartInfo $Node, "`"$Server`" --build `"$b`" --config `"$cfg`" --port $port"
+    $psi = New-Object Diagnostics.ProcessStartInfo $Node, "${lead}--build `"$b`" --config `"$cfg`" --port $port"
     $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
     $sw = [Diagnostics.Stopwatch]::StartNew(); $p = [Diagnostics.Process]::Start($psi)
     try {

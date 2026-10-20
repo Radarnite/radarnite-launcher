@@ -21,3 +21,6 @@ RadarniteLauncherSetup-*.exe
 
 # Per-user launcher settings
 config.json
+
+# Local release candidates and test results (just release, just test-pc)
+/dist/

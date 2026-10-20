@@ -1,7 +1,8 @@
 # Parity 3: the GUI-subsystem build (RadarniteLauncher-linktest.exe = native/ui + librncore.a, no console like 2.x)
 # against 2.2.1; config escaping over every BMP code point; rn::Core through the test harness; add from zip/folder.
 # Scratch folders only; ref config.json and firewall restored; real group only counted.
-param([string]$Dir = 'S:\rl-core-test')
+# -GuiOnly: stop after the GUI-subsystem sections (no harness, firewall or fake root: those need parity2.ps1 first).
+param([string]$Dir = 'S:\rl-core-test', [switch]$GuiOnly)
 $ErrorActionPreference = 'Stop'
 $t = $Dir
 $ref = Join-Path $t 'rlcoretest-ref'
@@ -82,6 +83,7 @@ try {
   }
   "  config $(if (Same $res.old.cfg $res.gui.cfg) { 'SAME' } else { 'DIFF' }); stdout $(if (Same $res.old.out $res.gui.out) { 'SAME' } else { 'DIFF' }): " + (($res.gui.out | ForEach-Object { '{0:x2}' -f $_ }) -join ' ')
   [IO.File]::WriteAllBytes($cfgPath, $backup)
+  if ($GuiOnly) { return }
 
   '== rn::Core through api.h (coretest.exe core): root = fakeroot, temp firewall group, port 39551'
   $realBefore = GroupCount 'FN Offline Builds'
