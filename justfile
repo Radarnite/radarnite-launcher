@@ -2,6 +2,8 @@
 # Builds run on the Mac (ssh `mac`, zig c++ -> x86_64-windows-gnu); the PC (ssh `windows`) only runs the test binaries.
 # No machine starts anything above 70 % CPU: the recipes wait (up to 10 min) and then give up.
 # RN_WIN_LANE: optional queue wrapper for PC jobs (a script taking the cmd.exe line as its argument, e.g. tools/win.sh).
+# PC jobs share one lock with the other agents: run them as `flock /tmp/rn-launcher-pc.lock just run-pc` (or check-pc,
+# compare-pc). `just build` takes that lock itself when it falls back to the PC, so do not wrap it.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -12,7 +14,7 @@ pc_dir := 'S:\native-ui-test'
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    if just _cpu-ok mac; then just build-mac; else echo "Mac busy or away: building on the PC" >&2; just build-pc; fi
+    if just _cpu-ok mac; then just build-mac; else echo "Mac busy or away: building on the PC" >&2; flock /tmp/rn-launcher-pc.lock just build-pc; fi
 
 # Build native/ui/out/RadarniteUI.exe on the Mac
 build-mac: (_wait-cpu "mac")
@@ -50,6 +52,22 @@ run-pc-ssh *args: (_wait-cpu "windows")
     scp -q native/ui/out/RadarniteUI.exe 'windows:{{pc_dir}}\RadarniteUI.exe'
     ${RN_WIN_LANE:-ssh -o BatchMode=yes windows} 'cd /d {{pc_dir}} && start "" /wait RadarniteUI.exe --selftest-ui {{pc_dir}}\out-ssh {{args}} & type out-ssh\selftest.json'
 
+# The page renders stay on the PC between runs: `just compare-pc -Fresh` renders them again.
+# Render the page scenarios with Chromium on the PC and compare them with the last native selftest (`just run-pc`)
+compare-pc *args: (_wait-cpu "windows")
+    ssh -o BatchMode=yes windows 'if not exist {{pc_dir}}\page mkdir {{pc_dir}}\page'
+    tar -c launcher/ui tests/ui-scenarios.mjs native/ui/tools/page-extra.mjs native/ui/tools/compare.mjs native/ui/tools/pw-scrollbars.cjs | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\page'
+    scp -q native/ui/tools/compare-pc.ps1 'windows:{{pc_dir}}\compare-pc.ps1'
+    ${RN_WIN_LANE:-ssh -o BatchMode=yes windows} 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\compare-pc.ps1 -Dir {{pc_dir}} {{args}}'
+    rm -rf native/ui/out/compare
+    mkdir -p native/ui/out/compare
+    scp -q 'windows:S:/native-ui-test/cmp/*' native/ui/out/compare/
+
+# Native selftest, then the comparison with the page (one PC job: `flock /tmp/rn-launcher-pc.lock just check-pc`)
+check-pc:
+    just run-pc
+    just compare-pc
+
 # Remove the temporary folders on the Mac and the PC
 clean-remote:
     ssh -o BatchMode=yes mac 'rm -rf ~/{{mac_dir}}'
@@ -59,7 +77,10 @@ clean-remote:
 _cpu-ok host:
     #!/usr/bin/env bash
     set -uo pipefail
-    if [ "{{host}}" = mac ]; then
+    m=$([ "{{host}}" = mac ] && echo mac || echo windows)
+    cpu=$(machine-load get "$m" 2>/dev/null | jq -r 'if .up then (.cpu | floor) else empty end' 2>/dev/null) || cpu=""
+    if [ -n "$cpu" ]; then :
+    elif [ "{{host}}" = mac ]; then
       cpu=$(ssh -o BatchMode=yes -o ConnectTimeout=5 mac "top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -1" 2>/dev/null | sed -E 's/.* ([0-9.]+)% idle.*/\1/' | awk '{printf "%d", 100-$1}')
     else
       cpu=$(ssh -o BatchMode=yes -o ConnectTimeout=5 windows 'powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average"' 2>/dev/null | tr -dc '0-9')
