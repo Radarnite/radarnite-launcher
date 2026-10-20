@@ -80,7 +80,7 @@ release version="3.0.0-rc.1": build
     just _sync-mac   # the exes in out/ are the ones shipped, wherever they were built
     just _wait-cpu windows
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
-    mac sh 'p=~/{{mac_dir}}-payload; for f in redirect/fnredirect.dll gameserver/radarnite-server.dll patches/fnpakpatch.dll tools/sigfit-installed.ps1 tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done'
+    mac sh 'p=~/{{mac_dir}}-payload; for f in redirect/fnredirect.dll gameserver/radarnite-server.dll tools/sigfit-installed.ps1 tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done; ls "$p"/patches/fnpakpatch.dll* >/dev/null || { echo "payload: no pak patch in patches/" >&2; exit 1; }'
     just _wait-cpu mac
     mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --backend backend-rs/out/radarnite-backend.exe --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
     mkdir -p dist
