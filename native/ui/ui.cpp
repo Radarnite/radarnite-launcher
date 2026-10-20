@@ -1459,7 +1459,7 @@ std::wstring App::tooltip(int id) const {
     case ID_MAX: return maximized_ ? L"Restore down" : L"Maximize";
     case ID_CLOSE: return L"Close";
     case ID_ADD: return L"Add build";
-    case ID_ROOT: return st_.builds.empty() ? L"Change the builds folder" : L"Builds folder: " + st_.root + L" (click to change)";   // as renderRail leaves it
+    case ID_ROOT: return st_.root.empty() ? L"Change the builds folder" : L"Builds folder: " + st_.root + L" (click to change)";
     case ID_BUILDMENU: return L"Build actions";
     case ID_GRIP: return L"Drag to resize";
     case ID_COPY: return L"Copy activity";
@@ -1869,6 +1869,25 @@ std::vector<std::pair<std::wstring, bool>> App::liveCheck() {
     editKey(ID_SEARCH, VK_ESCAPE, false, false);
     check(L"typing in the search EDIT filters, Escape clears it", typed && q_.empty() && GetWindowTextLengthW(e.hwnd) == 0);
     openActivity(false); UpdateWindow(hwnd_);
+    // the tooltip control itself: one tool, moved onto the hovered status cell with its text
+    D2D1_RECT_F cell = rectOf(ID_CELL0 + 1);
+    mouseMove((cell.left + cell.right) / 2, (cell.top + cell.bottom) / 2);
+    bool tipOk = false;
+    if (tip_) {
+        wchar_t buf[1024] = L"";
+        TTTOOLINFOW ti = { sizeof ti };
+        ti.hwnd = hwnd_; ti.uId = 1; ti.lpszText = buf;
+        int tools = (int)SendMessageW(tip_, TTM_GETTOOLCOUNT, 0, 0);
+        bool info = SendMessageW(tip_, TTM_GETTOOLINFOW, 0, (LPARAM)&ti) != 0;
+        RECT got = ti.rect;
+        buf[0] = 0; ti.lpszText = buf;
+        SendMessageW(tip_, TTM_GETTEXTW, 1024, (LPARAM)&ti);
+        D2D1_RECT_F v = inter(cell, hitById(ID_CELL0 + 1)->clip);
+        RECT want = { lroundf(v.left * scale_), lroundf(v.top * scale_), lroundf(v.right * scale_), lroundf(v.bottom * scale_) };
+        tipOk = tools == 1 && info && !memcmp(&got, &want, sizeof got) && got.right > got.left && tooltip(ID_CELL0 + 1) == buf && buf[0];
+    }
+    check(L"hovering a status cell moves the tooltip onto it with the cell's reason", tipOk);
+    mouseLeave();
     return out;
 }
 
