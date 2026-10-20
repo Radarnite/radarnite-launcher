@@ -248,6 +248,7 @@ bool Gfx::init(HINSTANCE inst) {
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), &fo, (void**)&d2d))) return false;
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory5), (IUnknown**)&dw))) return false;
     loadFonts(inst);   // without the embedded fonts the system UI font is used
+    if (SUCCEEDED(dw->CreateTypography(&tnum))) tnum->AddFontFeature({ DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, 1 });
     if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
         const void* data; DWORD size;
         IWICStream* s = nullptr; IWICBitmapDecoder* dec = nullptr; IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* cv = nullptr;
@@ -268,7 +269,7 @@ void Gfx::shutdown() {
     for (auto& v : icons_) for (auto& p : v) release(p.geo);
     icons_.clear();
     for (auto& r : strokes_) for (auto& s : r) release(s);
-    release(logo); release(fonts_); release(wic); release(dw); release(d2d);
+    release(tnum); release(logo); release(fonts_); release(wic); release(dw); release(d2d);
     if (gdiFont_) RemoveFontMemResourceEx(gdiFont_);
 }
 

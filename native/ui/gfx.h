@@ -30,6 +30,7 @@ struct Font {
     float size = 13;
     int weight = 400;
     bool italic = false;
+    bool tnum = false;   // font-variant-numeric: tabular-nums
 };
 
 enum class Icon {
@@ -45,6 +46,7 @@ public:
     ID2D1Factory* d2d = nullptr;
     IDWriteFactory5* dw = nullptr;
     IWICImagingFactory* wic = nullptr;
+    IDWriteTypography* tnum = nullptr;   // OpenType tnum, for Font::tnum
 
     IDWriteTextFormat* format(const Font& f);
     // Line box metrics of a font (CSS "normal" content area): ascent and ascent+descent in DIPs.

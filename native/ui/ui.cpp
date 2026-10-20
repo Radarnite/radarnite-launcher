@@ -98,8 +98,10 @@ template <class F> int wrap(const std::wstring& s, int cols, F&& line) {
             size_t hy = std::wstring::npos;
             for (size_t k = a + cols; k > a; k--) {
                 if (s[k] == L' ') { brk = k; break; }
-                // break after a hyphen between letters/digits, not before a number ("rvn=-1")
+                // break after a hyphen between letters/digits, not before a number ("rvn=-1"); after ? or ! before a
+                // letter ("QueryProfile?|profileId", UAX #14 EX), like Chromium
                 if (hy == std::wstring::npos && k <= a + cols && s[k - 1] == L'-' && k >= 2 && iswalnum(s[k - 2]) && !iswdigit(s[k])) hy = k;
+                if (hy == std::wstring::npos && k <= a + cols && (s[k - 1] == L'?' || s[k - 1] == L'!') && iswalpha(s[k])) hy = k;
             }
             if (hy != std::wstring::npos && (brk == std::wstring::npos || hy > brk)) { line(a, hy - a); n++; a = hy; }
             else if (brk != std::wstring::npos) { line(a, brk - a); n++; a = brk + 1; }
@@ -588,14 +590,22 @@ void App::skeleton(int i, D2D1_RECT_F r) {
     rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 8, 8), shimmer_);
 }
 
-// box-shadow approximation: stacked translucent rounded rects
+// box-shadow: 0 oy blur rgba(0,0,0,alpha). CSS blurs the offset box with a Gaussian of sigma = blur / 2, so at a
+// distance d outside it the shadow is alpha * erfc(d / (sigma * sqrt 2)) / 2. Stacked rounded rects, outermost first,
+// each with the alpha that brings the accumulated coverage to that profile at the middle of its band.
 void App::shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha) {
-    if (measuring_) return;
-    const int n = 8;
-    for (int i = n; i >= 1; i--) {
-        float e = blur * i / n * 0.5f;
+    if (measuring_ || blur <= 0) return;
+    float sigma = blur / 2, step = std::max(1.f, sigma / 6);
+    auto target = [&](float d) { return alpha * 0.5f * erfcf(d / (sigma * 1.41421356f)); };
+    float covered = 0;
+    for (float e = 3 * sigma; e > -2 * sigma; e -= step) {
+        float want = target(e - step / 2);
+        float a = covered >= 1 ? 0 : 1 - (1 - want) / (1 - covered);
+        covered = want;
+        if (a <= 0.001f) continue;
         D2D1_RECT_F s = { r.left - e, r.top + oy - e, r.right + e, r.bottom + oy + e };
-        fill(s, 0x000000, alpha / n * 0.9f, radius + e);
+        if (s.right - s.left < 1 || s.bottom - s.top < 1) break;
+        fill(s, 0x000000, a, std::max(0.f, radius + e));
     }
 }
 
@@ -603,6 +613,7 @@ float App::textW(const std::wstring& s, const Font& f, float tracking) {
     if (s.empty()) return 0;
     IDWriteTextLayout* l = nullptr; float w = 0;
     if (SUCCEEDED(g_.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), g_.format(f), 10000, 1000, &l))) {
+        if (f.tnum && g_.tnum) l->SetTypography(g_.tnum, { 0, (UINT32)s.size() });
         if (tracking != 0) { IDWriteTextLayout1* l1 = nullptr; if (SUCCEEDED(l->QueryInterface(__uuidof(IDWriteTextLayout1), (void**)&l1))) { l1->SetCharacterSpacing(0, tracking, 0, { 0, (UINT32)s.size() }); l1->Release(); } }
         DWRITE_TEXT_METRICS m; if (SUCCEEDED(l->GetMetrics(&m))) w = m.widthIncludingTrailingWhitespace;
         l->Release();
@@ -617,6 +628,7 @@ bool App::text(const std::wstring& s, const Font& f, float x, float top, float w
     IDWriteTextFormat* tf = g_.format(f);
     IDWriteTextLayout* l = nullptr;
     if (!tf || FAILED(g_.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), tf, w, lh * 4, &l))) return false;
+    if (f.tnum && g_.tnum) l->SetTypography(g_.tnum, { 0, (UINT32)s.size() });
     if (tracking != 0) { IDWriteTextLayout1* l1 = nullptr; if (SUCCEEDED(l->QueryInterface(__uuidof(IDWriteTextLayout1), (void**)&l1))) { l1->SetCharacterSpacing(0, tracking, 0, { 0, (UINT32)s.size() }); l1->Release(); } }
     DWRITE_TEXT_METRICS m{}; l->GetMetrics(&m);
     bool cut = m.widthIncludingTrailingWhitespace > w + 0.5f;
@@ -895,7 +907,7 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
     float yy = y + vlh + 8;
     text(season(b->major, b->minor), Font{ Face::UI, 15, 600, false }, x, yy, leftW, 21.75f, C::text); yy += 21.75f + 2;
     text(fmt(L"CL %u · Unreal Engine %ls · %ls", b->cl, b->engine.c_str(), (b->dir.empty() ? b->name : b->dir).c_str()),
-         Font{ Face::UI, 12, 400, false }, x, yy, leftW, 17.4f, C::dim);
+         Font{ Face::UI, 12, 400, false, true }, x, yy, leftW, 17.4f, C::dim);   // .meta: tabular-nums
     yy += 17.4f;
     button(ID_BUILDMENU, x + cw - bw, y, L"Build", Icon::More, true, false, false);
     if (menu_ == 2) menuAnchor_ = rc(x + cw - bw, y + oy_, bw, 28);
@@ -917,11 +929,12 @@ float App::drawContent(float x0, float y0, float avail, float viewH) {
     for (int i = 0; i < 4; i++) {
         int col = i % cols, row = i / cols;
         float cx = x + 1 + col * cellW, cy = y + 1 + row * (cellH + 1);
-        if (col > 0) vline(cx, cy, cy + cellH, C::line2);
+        float iw = cellW - 32;
+        if (col > 0) { vline(cx, cy, cy + cellH, C::line2); cx += 1; iw -= 1; }   // .cell+.cell border-left is inside the cell
         if (row > 0 && col == 0) hline(x + 1, x + cw - 1, cy - 1, C::line2);
         icon(cells[i].ic, cx + 16, cy + 12 + (17.4f - 16) / 2, 16, C::muted);
-        text(cells[i].k, Font{ Face::UI, 12, 400, false }, cx + 16 + 22, cy + 12, cellW - 32 - 22, 17.4f, C::muted);
-        text(cells[i].v, Font{ Face::UI, 13, 600, false }, cx + 16, cy + 12 + 17.4f + 2, cellW - 32, 18.85f, clsColor(cells[i].cls));
+        text(cells[i].k, Font{ Face::UI, 12, 400, false }, cx + 16 + 22, cy + 12, iw - 22, 17.4f, C::muted);
+        text(cells[i].v, Font{ Face::UI, 13, 600, false }, cx + 16, cy + 12 + 17.4f + 2, iw, 18.85f, clsColor(cells[i].cls));
     }
     y += stripH;
 
@@ -1104,10 +1117,10 @@ void App::drawActivity(float x, float y, float w, float h) {
     int n[3] = { (int)logs_.size(), 0, 0 };
     for (auto& l : logs_) { if (l.lvl == 1) n[1]++; else if (l.lvl == 2) n[2]++; }
     const wchar_t* fl[3] = { L"All", L"Warnings", L"Errors" };
-    Font ff{ Face::UI, 12, 500, false };
+    Font ff{ Face::UI, 12, 500, false }, fn{ Face::UI, 12, 500, false, true };   // .fseg .n: tabular-nums
     float segW = 2 + 2 + 2 * 2;
     float bwid[3];
-    for (int i = 0; i < 3; i++) { bwid[i] = 20 + textW(fl[i], ff) + 6 + textW(std::to_wstring(n[i]), ff); segW += bwid[i]; }
+    for (int i = 0; i < 3; i++) { bwid[i] = 20 + textW(fl[i], ff) + 6 + textW(std::to_wstring(n[i]), fn); segW += bwid[i]; }
     box(rc(hx, hy, segW, 30), 8, C::bg2, 1, C::line2);
     float fx = hx + 1 + 2;
     for (int i = 0; i < 3; i++) {
@@ -1116,7 +1129,7 @@ void App::drawActivity(float x, float y, float w, float h) {
         if (on) fill(rc(fx, hy + 3, bwid[i], 24), C::hover, 1, 6);
         uint32_t col = on || hover_ == id ? C::text : C::muted;
         text(fl[i], ff, fx + 10, hy + 3, bwid[i], 24, col);
-        text(std::to_wstring(n[i]), ff, fx + 10 + textW(fl[i], ff) + 6, hy + 3, 60, 24, C::dim);
+        text(std::to_wstring(n[i]), fn, fx + 10 + textW(fl[i], ff) + 6, hy + 3, 60, 24, C::dim);
         hit(id, rc(fx, hy + 3, bwid[i], 24), F_FOCUS | F_HAND, 6);
         fx += bwid[i] + 2;
     }
@@ -1204,6 +1217,7 @@ void App::drawActivity(float x, float y, float w, float h) {
 void App::drawBar(float x, float y, float w) {
     fill({ x, y, x + w, y + LB }, C::bg);
     hline(x, x + w, y, C::line2);
+    y += 0.5f;   // the page centres the bar's content in its content box, under the 1px border-top: centre at 36.5
     const Build* b = sel();
     const Config& c = st_.config;
     bool isBusy = busy();
@@ -1252,7 +1266,8 @@ void App::drawBar(float x, float y, float w) {
     Font af{ Face::UI, 12.5f, 600, false };
     int badgeN = unseen_ ? unseen_ : (int)logs_.size();
     std::wstring bn = std::to_wstring(badgeN);
-    float bw = std::max(18.f, 10 + textW(bn, Font{ Face::UI, 11, 400, false }));
+    Font badge{ Face::UI, 11, 400, false, true };   // .badge: tabular-nums
+    float bw = std::max(18.f, 10 + textW(bn, badge));
     float aw = 12 + 16 + 8 + textW(L"Activity", af) + 8 + bw + 12 + 2;
     D2D1_RECT_F ar = rc(pr.left - 16 - aw, y + 19, aw, 34);
     float av = fx(K_HOVER | ID_ACT, hover_ == ID_ACT || actOpen_ ? 1.f : 0.f, ar);   // .act: background and color 120 ms
@@ -1264,7 +1279,7 @@ void App::drawBar(float x, float y, float w) {
     uint32_t bbg = unseen_ && unseenLevel_ == 2 ? C::bad : unseen_ && unseenLevel_ == 1 ? C::warn : C::surface2;
     uint32_t bfg = unseen_ && unseenLevel_ == 2 ? C::white : unseen_ && unseenLevel_ == 1 ? 0x111111 : C::ink2;
     fill(rc(bx, y + 27, bw, 18), bbg, 1, 9);
-    text(bn, Font{ Face::UI, 11, 400, false }, bx, y + 27, bw, 18, bfg, 1);
+    text(bn, badge, bx, y + 27, bw, 18, bfg, 1);
     hit(ID_ACT, ar, F_FOCUS | F_HAND, 8);
     hit(ID_PLAY, pr, F_FOCUS | F_HAND | (disabled ? F_DISABLED : 0), 12);   // after Activity, like the page
 
@@ -1326,7 +1341,7 @@ void App::drawMenu() {
     for (int i = 0; i < n; i++) {
         if (it[i].sep) { h += 9; continue; }
         h += 34;
-        cw = std::max(cw, 10 + 16 + 10 + textW(it[i].text, f) + (it[i].small ? 16 + textW(it[i].small, sf) : 0) + 10);
+        cw = std::max(cw, 10 + 16 + 10 + textW(it[i].text, f) + (it[i].small ? 10 + 16 + textW(it[i].small, sf) : 0) + 10);   // the 10px gap is also before <small>
     }
     float w = std::max(240.f, cw + 8 + 2);
     float right = menuAnchor_.right, left = std::max(4.f, right - w);
@@ -1360,7 +1375,7 @@ void App::drawToasts(float W, float H) {
         float w = 32 + 2 + 8 + 12 + tw, h = 20 + 2 + std::max(th, 8.f);
         D2D1_RECT_F r = rc(W - 24 - w, bottom - h, w, h);
         overlays_.push_back({ r.left, r.top, r.right, r.bottom + 6 });   // the whole slide, so it stays put while it moves
-        D2D1_RECT_F area = { r.left - 16, r.top - 16, r.right + 16, r.bottom + 6 + 12 + 16 };   // + shadow
+        D2D1_RECT_F area = { r.left - 46, r.top - 34, r.right + 46, r.bottom + 6 + 12 + 46 };   // + shadow (3 sigma)
         toastRects_.push_back(area);
         // @keyframes tin: from opacity 0, translateY(6px); 180 ms var(--ease)
         float a = this->tw(K_TOAST | (t.seq & 0xFFFF), 1, area);
