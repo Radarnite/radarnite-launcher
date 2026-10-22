@@ -26,12 +26,14 @@ folder and otherwise ignored; a PC with no internet is never blocked and an unve
 
 ## Releases from GitHub Actions (3.x)
 
-`.github/workflows/release.yml` builds, tests and publishes every push on `ubuntu-latest`; nothing is released by hand.
+`.github/workflows/release.yml` builds, tests and publishes every push to `main` on `ubuntu-latest`; nothing is released by hand.
+A pull request (to any branch) runs the same version, tests and installer and publishes nothing; a push to another
+branch runs nothing (one trigger per job).
 
 - Version: the last stable tag + 1 patch, or the committed `VERSION` file (X.Y.Z) when that is higher.
   `VERSION` is 3.0.0 while the last tag is v2.2.1; raise it for the next minor or major.
-- `main` -> release `vX.Y.Z`, the latest one: every installed launcher updates. Any other branch -> prerelease
-  `vX.Y.Z-<branch>.N` (`feat/3.0` -> `v3.0.0-feat-3-0.1`), never the latest: only prerelease builds offer it.
+- `main` -> release `vX.Y.Z`, the latest one: every installed launcher updates. "Run workflow" on another branch ->
+  prerelease `vX.Y.Z-<branch>.N` (`feat/3.0` -> `v3.0.0-feat-3-0.1`), never the latest: only prerelease builds offer it.
 - A head commit whose message contains `[skip release]` is built and tested but not published.
 - Assets: `RadarniteLauncherSetup-<version>.exe`, its `.sha256` (2.x format) and `RadarniteLauncher-<version>.zip` (the
   program folder: no uninstaller, registry keys, shortcuts or 2.x cleanup). Notes: the commits since the last tag.

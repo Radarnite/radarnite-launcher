@@ -1,7 +1,9 @@
-# Build, test and publish Radarnite Launcher 3.x on every push; nothing is released by hand (INSTALL.md).
-#   main         -> release vX.Y.Z, made the latest release: every installed launcher updates to it
-#   other branch -> prerelease vX.Y.Z-<branch>.N, never the latest release: installed release builds (2.x and 3.x)
-#                   only read releases/latest, so they never see it; prerelease builds offer it
+# Build, test and publish Radarnite Launcher 3.x; nothing is released by hand (INSTALL.md). One trigger per job:
+#   push to main  -> release vX.Y.Z, made the latest release: every installed launcher updates to it
+#   pull request  -> CI: version, tests and installer, nothing published (any base branch, feat/3.0 included)
+#   Run workflow  -> like a push: main publishes the release; another branch a prerelease vX.Y.Z-<branch>.N, never
+#                    the latest release (installed release builds only read releases/latest; prerelease builds offer it)
+# A push to any other branch runs nothing: its PR does.
 # tools/ci-version.sh picks the version (last stable tag + 1 patch, or VERSION when higher) and writes the notes.
 # Everything builds on ubuntu-latest: zig c++ for the core and the window, cargo zigbuild for the backend, makensis
 # for the installer; the payload comes from the pinned 2.2.1 installer (tools/payload-from-release.sh).
@@ -11,15 +13,19 @@ name: release
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# one run at a time per branch, never cancelled: the version is fixed when the run starts and N must not be reused
+# one run at a time per branch (per PR for pull requests). A publishing run is never cancelled: the version is fixed
+# when it starts and N must not be reused; while one runs GitHub keeps only the newest waiting push, so back-to-back
+# merges publish the latest main once. A PR's run is replaced by its next push.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   ZIG_VERSION: 0.16.0
@@ -199,7 +205,7 @@ jobs:
   publish:
     name: Publish
     needs: [meta, test, build]
-    if: needs.meta.outputs.publish == 'true'
+    if: github.event_name != 'pull_request' && needs.meta.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

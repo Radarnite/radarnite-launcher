@@ -26,8 +26,8 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 
 ## Releasing
 
-GitHub Actions builds, tests and publishes every push: `main` as the latest release (every installed launcher
-updates), any other branch as a prerelease. Versions and assets: see `INSTALL.md`.
+GitHub Actions builds, tests and publishes every push to `main` as the latest release (every installed launcher
+updates) and checks every pull request. Versions and assets: see `INSTALL.md`.
 
 ## License
 
