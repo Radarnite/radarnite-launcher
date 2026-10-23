@@ -23,7 +23,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
-    <None Include="ui\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="ui" />
+    <None Include="ui/**/*" CopyToOutputDirectory="PreserveNewest" LinkBase="ui" />
     <None Include="radarnite.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

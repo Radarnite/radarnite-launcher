@@ -1,0 +1,168 @@
+# Build and publish Radarnite Launcher 2.x; nothing is released by hand (INSTALL.md). One trigger per job:
+#   push to main  -> release vX.Y.Z, made the latest release: every installed launcher updates to it
+#   pull request  -> CI: version and installer, nothing published
+#   Run workflow  -> like a push: main publishes the release; another branch a prerelease vX.Y.Z-<branch>.N, never
+#                    the latest release (installed launchers only read releases/latest)
+# A push to any other branch runs nothing: its PR does.
+# tools/ci-version.sh picks the version (last stable tag + 1 patch, or the csproj's <Version> when higher) and writes
+# the notes; tools/ci-build.sh builds everything on ubuntu-latest: dotnet publish (self-contained win-x64) for the
+# launcher, makensis for the installer, the payload from the pinned 2.2.1 installer (tools/payload-from-release.sh).
+# Every action is pinned to a commit SHA (its tag in a comment). Third-party actions run only in the read-only jobs:
+# the one job that can write (publish) runs gh and GitHub's download-artifact alone.
+name: release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# one run at a time per branch (per PR for pull requests). A publishing run is never cancelled: the version is fixed
+# when it starts and N must not be reused; while one runs GitHub keeps only the newest waiting push, so back-to-back
+# merges publish the latest main once. A PR's run is replaced by its next push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_VERSION: 8.0.x
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  meta:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Version, tag and release notes
+        id: v
+        run: |
+          tools/ci-version.sh --notes "$RUNNER_TEMP/notes.md" | tee "$RUNNER_TEMP/version.txt"
+          { echo '### Version'; echo '```'; cat "$RUNNER_TEMP/version.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+
+  build:
+    name: Installer
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: makensis and 7z
+        run: |
+          pkgs=(nsis)
+          command -v 7z >/dev/null || pkgs+=(p7zip-full)
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
+          echo "makensis $(makensis -VERSION), dotnet $(dotnet --version), 7z $(7z | sed -n 2p)"
+      - name: Payload from the pinned 2.2.1 installer
+        run: tools/payload-from-release.sh "$RUNNER_TEMP/payload"
+      - name: Installer, .sha256 and zip (tools/ci-build.sh, privacy gate)
+        env:
+          RN_PRIVACY_BAN: ${{ secrets.RN_PRIVACY_BAN }}
+        run: |
+          tools/ci-build.sh --version "$VERSION" --payload "$RUNNER_TEMP/payload" --out dist
+          { echo '### Installer'; echo '```'; stat -c '%10s %n' dist/*; cat "dist/RadarniteLauncherSetup-$VERSION.exe.sha256"; echo; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Publish
+    needs: [meta, build]
+    if: github.event_name != 'pull_request' && needs.meta.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.meta.outputs.version }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+    steps:
+      - name: Guards (only main publishes a release; the tag is new)
+        run: |
+          if [ "$PRERELEASE" = true ]; then
+            [[ "$VERSION" == *-* ]] || { echo "::error::prerelease $VERSION has no prerelease part"; exit 1; }
+          else
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::$GITHUB_REF must not publish the release $TAG"; exit 1; }
+            [[ "$VERSION" != *-* ]] || { echo "::error::release $VERSION has a prerelease part"; exit 1; }
+          fi
+          if out=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" 2>&1); then echo "::error::tag $TAG already exists"; exit 1; fi
+          grep -q 'HTTP 404' <<<"$out" || { echo "::error::could not check tag $TAG: $out"; exit 1; }
+          echo "LATEST_BEFORE=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: notes
+          path: notes
+      - name: Check the assets
+        run: |
+          exe="RadarniteLauncherSetup-$VERSION.exe"
+          want="$(printf '%s\n' "$exe" "$exe.sha256" "RadarniteLauncher-$VERSION.zip" | sort)"
+          got="$(find dist -mindepth 1 -printf '%P\n' | sort)"
+          [ "$got" = "$want" ] || { echo "::error::unexpected assets: ${got//$'\n'/ }"; exit 1; }
+          [ "$(cat "dist/$exe.sha256")" = "$(sha256sum "dist/$exe" | cut -d' ' -f1)  $exe" ] || { echo "::error::$exe.sha256 does not match"; exit 1; }
+      - name: Draft with the assets, then publish
+        run: |
+          if [ "$PRERELEASE" = true ]; then latest=false; else latest=true; fi
+          id=$(gh api "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f name="Radarnite Launcher $VERSION" \
+            -F body=@notes/notes.md -F draft=true -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq .id)
+          echo "DRAFT_ID=$id" >> "$GITHUB_ENV"
+          for f in dist/*; do
+            gh api -X POST "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$(basename "$f")" \
+              -H 'Content-Type: application/octet-stream' --input "$f" --jq '"uploaded \(.name) (\(.size) bytes)"'
+          done
+          gh api -X PATCH "repos/$GH_REPO/releases/$id" -F draft=false -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq '"published \(.html_url)"'
+      - name: Check what the updaters see
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/$TAG" | jq -e --argjson pre "$PRERELEASE" '.draft == false and .prerelease == $pre' >/dev/null \
+            || { echo "::error::$TAG is not published with prerelease=$PRERELEASE"; exit 1; }
+          sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          [ "$sha" = "$GITHUB_SHA" ] || { echo "::error::$TAG points at $sha, not $GITHUB_SHA"; exit 1; }
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+          if [ "$PRERELEASE" = true ]; then want="$LATEST_BEFORE"; else want="$TAG"; fi
+          [ "$latest" = "$want" ] || { echo "::error::releases/latest is $latest, expected $want"; exit 1; }
+          exe="RadarniteLauncherSetup-$VERSION.exe"; d="$RUNNER_TEMP/check"; mkdir -p "$d"
+          for f in "$exe" "$exe.sha256"; do curl -sSfL --retry 3 -o "$d/$f" "https://github.com/$GH_REPO/releases/download/$TAG/$f"; done
+          got=$(sha256sum "$d/$exe" | cut -d' ' -f1)
+          [ "$got" = "$(head -c 64 "$d/$exe.sha256")" ] || { echo "::error::downloaded $exe does not match its .sha256"; exit 1; }
+          { echo "### Published $TAG"; echo "- prerelease: $PRERELEASE, releases/latest: $latest"; echo "- $exe sha256 $got (downloaded and checked)"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove this run's draft when publishing failed
+        if: failure() && env.DRAFT_ID != ''
+        run: |
+          if [ "$(gh api "repos/$GH_REPO/releases/$DRAFT_ID" --jq .draft)" = true ]; then
+            gh api -X DELETE "repos/$GH_REPO/releases/$DRAFT_ID" && echo "deleted draft $DRAFT_ID"
+          fi

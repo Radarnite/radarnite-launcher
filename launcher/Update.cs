@@ -46,15 +46,18 @@ public static class Updater
             var j = JsonNode.Parse(await res.Content.ReadAsStringAsync())!.AsObject();
             var tag = j["tag_name"]?.GetValue<string>() ?? "";
             if (!TryParse(tag, out var ver)) { Log($"latest release tag is not a version: '{tag}'"); return null; }
-            string? installer = null, sha = null, digest = null;
+            string? installer = null, installerName = null, sha = null, digest = null;
+            var shas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var a in j["assets"]?.AsArray() ?? new JsonArray())
             {
                 var name = a!["name"]?.GetValue<string>() ?? "";
                 var url = a["browser_download_url"]?.GetValue<string>();
                 if (name.StartsWith("RadarniteLauncherSetup-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                { installer = url; digest = a["digest"]?.GetValue<string>(); }
-                else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)) sha = url;
+                { installer = url; installerName = name; digest = a["digest"]?.GetValue<string>(); }
+                else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase) && url != null) shas[name] = url;
             }
+            // the installer's own .sha256 first; any other .sha256 of the release only when the release has no such asset
+            if (installerName == null || !shas.TryGetValue(installerName + ".sha256", out sha)) sha = shas.Values.FirstOrDefault();
             if (ver <= Current) { Log($"up to date (installed {Current}, latest {ver})"); return null; }
             if (installer == null) { Log($"release {tag} has no RadarniteLauncherSetup-*.exe asset"); return null; }
             Log($"update available: {ver} > {Current}");
