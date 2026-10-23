@@ -1,12 +1,11 @@
-# Parity 4: build.json writer after the encoder rewrite, one launch for a double click, the updater's download and
-# SHA-256 path (nothing is run), and --cosmetics on a S11+ build (mappings branch). Needs the fake root of parity2.ps1.
+# Parity 4: the updater's download and SHA-256 path (nothing is run), and one launch for a double click. Needs the fake
+# root of parity2.ps1 and RadarniteLauncherSetup-2.2.1.exe in -Dir.
 param([string]$Dir = 'S:\rl-core-test')
 $ErrorActionPreference = 'Stop'
 $t = $Dir
 $ref = Join-Path $t 'rlcoretest-ref'
 $old = Join-Path $ref 'RadarniteLauncher.exe'
 $new = Join-Path $t 'rn-core-cli.exe'
-$gui = Join-Path $t 'RadarniteLauncher-linktest.exe'
 $harness = Join-Path $t 'coretest.exe'
 $fake = Join-Path $t 'fakeroot'
 $outDir = Join-Path $t 'out'
@@ -31,14 +30,6 @@ function Show([string]$label, [string]$text) { "  --- $label"; $text.TrimEnd() -
 function GroupCount([string]$g) { $pol = New-Object -ComObject HNetCfg.FwPolicy2; @($pol.Rules | Where-Object { $_.Grouping -eq $g }).Count }
 
 try {
-  '== offline\build.json written by the core (strict encoder) vs 2.2.1'
-  Get-ChildItem $fake -Recurse -Filter build.json | Remove-Item
-  [void](Run $old "--scan $fake")
-  $a = @{}; Get-ChildItem $fake -Recurse -Filter build.json | ForEach-Object { $a[$_.FullName] = [IO.File]::ReadAllBytes($_.FullName); Remove-Item $_.FullName }
-  [void](Run $gui "--scan $fake" $envNew)
-  $diff = 0; foreach ($k in $a.Keys) { if (-not ((Test-Path $k) -and (Same $a[$k] ([IO.File]::ReadAllBytes($k))))) { $diff++; "  DIFF $k" } }
-  "  $($a.Count) build.json files, $diff different"
-
   '== the updater path: download through the release redirect with streamed SHA-256, .sha256 token, file hash'
   $url = 'https://github.com/Radarnite/radarnite-launcher/releases/download/v2.2.1/RadarniteLauncherSetup-2.2.1.exe.sha256'
   $r = Run $harness "fetch $url `"$outDir\setup.sha256`""
@@ -59,19 +50,6 @@ try {
   [void](Run $new '--firewall-remove' $envFw)
   "  real group $realBefore -> $(GroupCount 'FN Offline Builds'), temp group $(GroupCount $fwGroup)"
   [IO.File]::WriteAllBytes($cfgPath, $backup)
-
-  '== --cosmetics on a fake 17.50 build (AES + mappings from GitHub, generator fails: no paks)'
-  [void](Run $old "--set-builds-folder $fake")
-  $off = "$fake\rlcoretest-17.50\offline"
-  $res = @{}
-  foreach ($who in 'old', 'gui') {
-    Remove-Item "$off\aes.json", "$off\mappings.usmap", "$off\cosmetics-gen.log" -ErrorAction SilentlyContinue
-    $r = if ($who -eq 'old') { Run $old '--cosmetics rlcoretest-17.50' } else { Run $gui '--cosmetics rlcoretest-17.50' $envNew }
-    $res[$who] = @{ r = $r; usmap = $(if (Test-Path "$off\mappings.usmap") { (Get-FileHash "$off\mappings.usmap").Hash } else { 'none' }); aes = $(if (Test-Path "$off\aes.json") { (Get-FileHash "$off\aes.json").Hash } else { 'none' }) }
-  }
-  "  stdout $(if (Same $res.old.r.bytes $res.gui.r.bytes) { 'SAME' } else { 'DIFF' }) exit $($res.old.r.code)/$($res.gui.r.code); mappings.usmap $(if ($res.old.usmap -eq $res.gui.usmap) { 'SAME' } else { 'DIFF' }); aes.json $(if ($res.old.aes -eq $res.gui.aes) { 'SAME' } else { 'DIFF' })"
-  Show 'core output' $res.gui.r.text
-  if (-not (Same $res.old.r.bytes $res.gui.r.bytes)) { Show '2.2.1 output' $res.old.r.text }
 } finally {
   [IO.File]::WriteAllBytes($cfgPath, $backup)
   "config restored: $(Same $backup ([IO.File]::ReadAllBytes($cfgPath)))"

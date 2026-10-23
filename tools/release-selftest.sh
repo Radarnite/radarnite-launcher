@@ -4,8 +4,8 @@
 #   tools/release-selftest.sh [workdir]        (ZIG=/opt/homebrew/bin/zig, MAKENSIS=..., REF_VERSION=2.2.1)
 # Checks: a clean build passes; a builder path or identity planted in an exe (UTF-8 and UTF-16LE) fails the gate;
 # user data in the payload is refused; the gate on the extracted installer catches what LZMA hides from a raw scan;
-# the .sha256 is byte-identical in format to a published 2.x asset; the real 2.x payload passes the gate; a launcher
-# without the ProductVersion --version is refused.
+# the .sha256 is byte-identical in format to a published 2.x asset; a launcher without the ProductVersion --version is
+# refused. (A release with the real 2.x payload is what every CI build makes.)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REL="$ROOT/tools/release.sh"
@@ -119,16 +119,6 @@ ref="RadarniteLauncherSetup-$REF_VERSION.exe"
 curl -sSfL -o "$ref.sha256.asset" "$base/$ref.sha256" || ko "download $ref.sha256"
 "$REL" sha256-line "$ref" > "$ref.sha256.ours"
 cmp -s "$ref.sha256.ours" "$ref.sha256.asset" && ok ".sha256 byte-identical to the $REF_VERSION release asset" || { ko ".sha256 format differs from $REF_VERSION"; od -c "$ref.sha256.ours" | tail -2; }
-
-# ---- 7. a release with the real 2.x payload (tools, gameserver, redirect, patches) passes after the scrub ----
-# raw, those third-party dlls carry their CI builders' PDB paths (/home/runner/work/...): informational only
-rm -rf ref-x && mkdir ref-x && 7z x -y -bso0 -bsp0 -oref-x "$ref" >/dev/null
-rm -rf payload-real && mkdir payload-real
-for p in tools gameserver redirect patches THIRD-PARTY-NOTICES.txt README-offline.md; do cp -R "ref-x/$p" payload-real/; done
-"$REL" privacy-scan payload-real > t7raw.log 2>&1; echo "info: raw $REF_VERSION payload: $(tail -1 t7raw.log) ($(grep -c "'/home/'" t7raw.log) of them '/home/')"
-if PAYLOAD=payload-real build --version 3.0.0-rc.2 --launcher in/RadarniteLauncher.exe --backend in/radarnite-backend.exe > t7.log 2>&1; then
-  ok "release with the real $REF_VERSION payload: $(grep '^installer:' t7.log | sed 's|.*/||')"
-else ko "release with the real $REF_VERSION payload"; grep -E 'LEAK|release:' t7.log | head -20; fi
 
 # ---- 8. the launcher's ProductVersion must be --version ----
 if NOVC= build --version 3.0.0-rc.9 --launcher in/RadarniteLauncher.exe --backend in/radarnite-backend.exe > t8.log 2>&1; then

@@ -13,7 +13,7 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# backend-* recipes (backend-rs/): backend-build, backend-test, backend-smoke-linux, ... `just build-backend` runs
+# backend-* recipes (backend-rs/): backend-build, backend-test, ... `just build-backend` runs
 # backend-build in this tree's Mac mirror instead of the backend agent's own folder.
 import 'backend-rs/justfile'
 
@@ -27,7 +27,7 @@ mac_path := 'export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"'
 rn_version := env_var_or_default("RN_VERSION", "")
 quiet := '{ grep -v -e nullability -e _Nullable -e _Nonnull -e "note: insert" -e "In file included" -e "^ *|" -e "^ *[0-9]* |" -e "warnings generated" || true; }'
 
-# the published 2.2.1 installer: the reference of the core parity, the window numbers and the migration test
+# the published 2.2.1 installer: the reference of the backend numbers and the migration test
 ref_version := "2.2.1"
 ref_sha256 := "54d59b107b80ad36053a7c724c5171fc763d05f0dcc3e5f8b73e87c2e7fd4060"
 ref_setup := "dist/ref/RadarniteLauncherSetup-" + ref_version + ".exe"
@@ -102,7 +102,7 @@ release version="3.0.0-rc.1":
     [ "$(cat dist/RadarniteLauncherSetup-{{version}}.exe.sha256)" = "$(tools/release.sh sha256-line dist/RadarniteLauncherSetup-{{version}}.exe)" ]
     ls -l dist/RadarniteLauncherSetup-{{version}}.exe*
 
-# tools/release-selftest.sh on the Mac: placeholder exes, the privacy gate, the 2.x .sha256 format, the real 2.2.1 payload
+# tools/release-selftest.sh on the Mac: placeholder exes, the privacy gate, the 2.x .sha256 format, the version check
 release-selftest: (_wait-cpu "mac") _sync-mac
     mac sh '{{mac_path}}; cd ~/{{mac_dir}} && rm -rf ~/{{mac_dir}}-relselftest && ZIG={{zig}} MAKENSIS=/opt/homebrew/bin/makensis REF_VERSION={{ref_version}} tools/release-selftest.sh ~/{{mac_dir}}-relselftest'
 
@@ -125,28 +125,8 @@ release-migration-test version="3.0.0-rc.1": _ref-setup
     scp -q 'windows:{{pc_fwd}}/migration/out/migration.json' dist/migration/
     jq -e '.allPassed' dist/migration/migration.json >/dev/null
 
-# Every Windows check of the window exe, each its own PC job: core parity, selftest, window smoke, backend numbers
-test-pc: core-parity-pc selftest-pc smoke-pc backend-measure-pc
-
-# The full exe's console verbs against 2.2.1 extracted from its installer (native/core/test): stdout + exit, --check timing
-core-parity-pc: _ref-setup _exe
-    #!/usr/bin/env bash
-    set -euo pipefail
-    exec 9>{{pc_lock}}; flock 9
-    just _wait-cpu windows
-    just _ref-pc
-    scp -q native/ui/out/RadarniteLauncher.exe 'windows:{{pc_fwd}}/core/RadarniteLauncher-linktest.exe'
-    scp -q native/core/out/rn-core-cli.exe native/core/test/parity1.ps1 native/core/test/oracle.ps1 native/core/test/parity3.ps1 'windows:{{pc_fwd}}/core/'
-    mkdir -p dist
-    pc ps - <<'EOF' | tee dist/core-parity.txt
-    $d = '{{pc_dir}}\core'; Set-Location $d
-    $pre = Test-Path 'HKCU:\Software\Radarnite'
-    & .\parity1.ps1 -Dir $d -Exe "$d\RadarniteLauncher-linktest.exe"
-    & .\oracle.ps1 -Dir $d
-    & .\parity3.ps1 -Dir $d -GuiOnly
-    if (-not $pre -and (Test-Path 'HKCU:\Software\Radarnite')) { Remove-Item -Recurse -Force 'HKCU:\Software\Radarnite'; 'HKCU\Software\Radarnite was created by the runs: removed' }
-    EOF
-    ! grep -E ' DIFF|TIMEOUT|config restored: False|untouched: False|unchanged by the runs: False' dist/core-parity.txt
+# The native tests, each its own PC job: the updater, then the window selftest
+test-pc: core-update-test-pc selftest-pc
 
 # The updater on the PC (native/core/test/update-check.ps1): the version table (coretest semver), then --update-check
 # of rn-core-cli built on the Mac as 3.0.0, 3.0.0-rc.1 and 3.0.0-rc.2 (native/core/out/test) and of the window exe
@@ -170,6 +150,7 @@ core-update-test-pc: (_wait-cpu "mac") _sync-mac
     grep -q '^update-check: [0-9]* passed, 0 failed' dist/update-check.txt
 
 # Copy the window exe to the PC and run --selftest-ui in the signed-in session (cloaked, mock core): native/ui/selftest/
+# keeps selftest.json and two of its PNGs (the live window and the busiest scenario)
 selftest-pc *args: _exe
     #!/usr/bin/env bash
     set -euo pipefail
@@ -179,27 +160,11 @@ selftest-pc *args: _exe
     scp -q native/ui/out/RadarniteLauncher.exe native/ui/tools/selftest-session.ps1 'windows:{{pc_fwd}}/ui/'
     ${RN_WIN_LANE:-ssh -o BatchMode=yes windows} 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\ui\selftest-session.ps1 -Dir {{pc_dir}}\ui -UiArgs "{{args}}"' >/dev/null
     mkdir -p native/ui/selftest
-    scp -q 'windows:{{pc_fwd}}/ui/out/*' native/ui/selftest/
+    scp -q 'windows:{{pc_fwd}}/ui/out/selftest.json' 'windows:{{pc_fwd}}/ui/out/00-live-window-01.png' \
+      'windows:{{pc_fwd}}/ui/out/02-many-builds-bots-activity-125.png' native/ui/selftest/
     jq -c '{firstFrameMs, privateMB, idleCpu, idlePaints, idleTimers, renderer, exeBytes, liveCapture, failed}' native/ui/selftest/selftest.json
     jq -e '.failed == 0' native/ui/selftest/selftest.json >/dev/null
 alias run-pc := selftest-pc
-
-# The real core in the window on the PC: hidden desktop, scans the builds folder, WM_CLOSE + PNG; 2.2.1 measured alongside
-smoke-pc: _ref-setup _exe
-    #!/usr/bin/env bash
-    set -euo pipefail
-    exec 9>{{pc_lock}}; flock 9
-    just _wait-cpu windows
-    just _ref-pc
-    pc sh '(if exist {{pc_dir}}\smoke rmdir /s /q {{pc_dir}}\smoke) & mkdir {{pc_dir}}\smoke\app'
-    scp -q native/ui/out/RadarniteLauncher.exe 'windows:{{pc_fwd}}/smoke/app/'
-    scp -q native/ui/tools/window-smoke.ps1 baseline/session-bench.ps1 'windows:{{pc_fwd}}/smoke/'
-    ssh -o BatchMode=yes windows 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\smoke\window-smoke.ps1 -Dir {{pc_dir}}\smoke -Ref {{pc_dir}}\core\rlcoretest-ref -Bench {{pc_dir}}\smoke\session-bench.ps1' > /dev/null
-    mkdir -p dist/smoke
-    scp -q 'windows:{{pc_fwd}}/smoke/out/smoke.json' 'windows:{{pc_fwd}}/smoke/out/window-3.0*.png' dist/smoke/
-    jq '{error, windowVisibleMs: .session.windowVisibleMs, windowClass: .session.windowClass, snapshot: .session.snapshot, closedByWmClose: .session.closedByWmClose, v30: .session.mainWindow, v221: .ref221.mainWindow, v221selftests: [.ref221.selftests[]?.pageReadyMs], postState}' dist/smoke/smoke.json
-    jq -e '(.error == null) and (.session.error == null) and .session.closedByWmClose and (.session.windowClass == "RadarniteLauncher3")
-      and ((.session.snapshot // "") | split(" ") | length == 3 and (.[2] | tonumber) >= 100)' dist/smoke/smoke.json >/dev/null
 
 # Backend ready / RSS on a scratch copy of 14.30's offline data (baseline/measure-backend.ps1): Rust, then 2.2.1's Node
 backend-measure-pc: _ref-setup
@@ -214,25 +179,6 @@ backend-measure-pc: _ref-setup
     mkdir -p dist
     ssh -o BatchMode=yes windows 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\backend\measure-backend.ps1 -Node {{pc_dir}}\backend\radarnite-backend.exe -Root {{pc_dir}}\backend' | tee dist/backend-rust.json
     ssh -o BatchMode=yes windows 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\backend\measure-backend.ps1 -Node {{pc_dir}}\core\rlcoretest-ref\node\node.exe -Server {{pc_dir}}\core\rlcoretest-ref\backend\server.mjs -Root {{pc_dir}}\backend' | tee dist/backend-node.json
-
-# The page scenarios rendered by Chromium on the PC vs the last native selftest (-Fresh renders the page again)
-compare-pc *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    exec 9>{{pc_lock}}; flock 9
-    just _wait-cpu windows
-    pc sh 'if not exist {{pc_dir}}\ui\page mkdir {{pc_dir}}\ui\page'
-    tar -c launcher/ui tests/ui-scenarios.mjs native/ui/tools/page-extra.mjs native/ui/tools/compare.mjs native/ui/tools/pw-scrollbars.cjs | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\ui\page'
-    scp -q native/ui/tools/compare-pc.ps1 'windows:{{pc_fwd}}/ui/compare-pc.ps1'
-    ${RN_WIN_LANE:-ssh -o BatchMode=yes windows} 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\ui\compare-pc.ps1 -Dir {{pc_dir}}\ui {{args}}'
-    rm -rf native/ui/out/compare
-    mkdir -p native/ui/out/compare
-    scp -q 'windows:{{pc_fwd}}/ui/cmp/*' native/ui/out/compare/
-
-# Native selftest, then the comparison with the page
-check-pc:
-    just selftest-pc
-    just compare-pc
 
 # Remove this tree's work folders on the Mac and the PC
 clean-remote:

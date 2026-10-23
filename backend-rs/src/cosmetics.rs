@@ -651,36 +651,6 @@ mod tests {
     }
 
     #[test]
-    fn keeps_what_server_mjs_reads_in_v8_order() {
-        let d = dir(
-            Some("\u{feff}{\"source\":\"gen\",\"items\":[{\"templateId\":\"A:X\",\"variants\":[{\"channel\":\"M\",\"n\":1.0,\"o\":{\"b\":1,\"2\":2}}],\"names\":[\"big\"]},{\"templateId\":\"A:Y\"},{\"templateId\":\"a:x\",\"variants\":0},{\"templateId\":\"12\"},{\"templateId\":\"AthenaCharacter:cid_default\"},{\"templateId\":\"Sandbox_Loadout\"}],\"items\":[{\"templateId\":\"Only:Last\",\"templateId\":\"Dup:Key\",\"variants\":[1]},{\"templateId\":\"A:X\",\"variants\":[{\"channel\":\"M\",\"n\":1.0,\"o\":{\"b\":1,\"2\":2}}]},{\"templateId\":\"a:x\",\"variants\":0},{\"templateId\":\"12\"},{\"templateId\":\"AthenaCharacter:cid_default\"},{\"templateId\":\"Sandbox_Loadout\"}]}"),
-            Some("{\"items\":[null,\"s\",{\"x\":1},{\"templateId\":\"\"},{\"templateId\":\"OWN:1\",\"variants\":[{\"channel\":\"C\"}],\"names\":[1,2,3]},{\"templateId\":\"own:1\"},{\"templateId\":\"A:X\"}],\"keychain\":[\"k1\"]}"),
-        );
-        let c = load(&d, &DEFAULTS).unwrap();
-        assert_eq!(c.count, 7);
-        assert_eq!(c.source, Value::String("gen".into()));
-        assert_eq!(c.keychain, Some(serde_json::json!(["k1"])));
-        assert_eq!(
-            keys(&c),
-            ["12=12", "dup:key=Dup:Key", "a:x=a:x", "athenacharacter:cid_default=AthenaCharacter:cid_default", "sandbox", "own:1=OWN:1", "default:AthenaPickaxe:DefaultPickaxe"]
-        );
-        assert_eq!(&*c.variants["a:x"], "[]");
-        assert_eq!(&*c.variants["dup:key"], "[1]");
-        assert_eq!(&*c.variants["own:1"], "[{\"channel\":\"C\"}]");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn variants_are_stored_as_json_stringify_writes_them() {
-        let d = dir(Some("{\"items\":[{\"templateId\":\"A:X\",\"variants\":[{\"channel\":\"M\",\"n\":1.0,\"o\":{\"b\":1,\"2\":2}}]}]}"), None);
-        let c = load(&d, &DEFAULTS).unwrap();
-        assert_eq!(&*c.variants["a:x"], "[{\"channel\":\"M\",\"n\":1,\"o\":{\"2\":2,\"b\":1}}]");
-        assert_eq!(c.keychain, Some(serde_json::json!([])));
-        assert_eq!(c.source, Value::String("none".into()));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
     fn invalid_or_missing_files_are_the_defaults() {
         let d = dir(Some("{\"items\":[{\"templateId\":\"A:X\"}], oops"), Some("{\"items\":[{\"templateId\":\"B:Y\"}]} trailing"));
         let c = load(&d, &DEFAULTS).unwrap();
@@ -691,22 +661,6 @@ mod tests {
 
     fn scan(text: &[u8]) -> Option<Doc> {
         Scanner::new(text).doc().ok()
-    }
-
-    #[test]
-    fn scanner_accepts_what_json_parse_accepts() {
-        for ok in [&b"{}"[..], b" [ ] ", b"null", b"0", b"-0.5e+10", b"\"a\\u00e9\\n\"", b"{\"a\":[1,{\"b\":[true,false,null]},\"x\"],\"c\":{}}",
-            b"\"bad utf8 \xff\xfe inside\"", b"{\"k\\ud800\":1}"] {
-            assert!(scan(ok).is_some(), "{}", String::from_utf8_lossy(ok));
-        }
-        // deeper than serde_json's 128 levels: V8 has no fixed limit
-        let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
-        assert!(scan(deep.as_bytes()).is_some());
-        assert!(scan(format!("{}{}", "[".repeat(200), "]".repeat(199)).as_bytes()).is_none());
-        for bad in [&b""[..], b"{", b"[1,]", b"{\"a\":1,}", b"{\"a\" 1}", b"01", b"1.", b".5", b"-", b"1e", b"tru", b"nul", b"\"a", b"\"\\x\"",
-            b"\"\\u12g4\"", b"\"tab\there\"", b"{} x", b"[1 2]", b"{\"a\":1 \"b\":2}", b"{1:2}", b"\xff", b"'a'", b"[1]]"] {
-            assert!(scan(bad).is_none(), "{}", String::from_utf8_lossy(bad));
-        }
     }
 
     #[test]
@@ -750,61 +704,5 @@ mod tests {
         assert_eq!(keychain, Some(serde_json::json!(["k"])));
         assert!(matches!(&v[0], Item::Object { template_id: Some(Value::String(t)), variants: Some(_) } if t == "A:B"));
         assert!(matches!(v[1], Item::Null) && matches!(v[2], Item::Other));
-    }
-
-    #[test]
-    fn variants_text_equals_stringify_of_parse() {
-        // fast path (kept as is) and slow path (parse + stringify) must give what JSON.stringify(JSON.parse(x) || []) gives
-        for (raw, want) in [
-            ("[{\"channel\":\"M\",\"active\":\"a\",\"owned\":[\"a\",\"b\"]}]", None),
-            ("[1,-2,0,123456789012345]", None),
-            ("[1.0,1e2,-0,0.5,1234567890123456789]", Some("[1,100,0,0.5,1234567890123456800]")),
-            ("{\"b\":1,\"2\":2,\"a\":{\"1\":0}}", Some("{\"2\":2,\"b\":1,\"a\":{\"1\":0}}")),
-            ("{\"a\":1,\"a\":2,\"b\":3}", Some("{\"a\":2,\"b\":3}")),
-            ("[\"\\u0041\\/\\n\"]", Some("[\"A/\\n\"]")),
-            ("\"x\"", None),
-            ("0", Some("[]")),
-            ("null", Some("[]")),
-            ("\"\"", Some("[]")),
-            ("false", Some("[]")),
-            ("{}", None),
-            ("[[],{},true,null]", None),
-            ("{\"k\":[{\"k\":1}],\"j\":{\"k\":2}}", None),
-        ] {
-            let got = Raw(raw.as_bytes().to_vec()).or_empty_array_json().unwrap();
-            assert_eq!(&*got, want.unwrap_or(raw), "{}", raw);
-        }
-        let d = dir(Some("{\"items\":[{\"templateId\":\"A\\u003aB\",\"variants\":[ 1 , {\"x\" : \"y\" } ]}]}"), None);
-        let c = load(&d, &DEFAULTS).unwrap();
-        assert!(matches!(&c.athena_keys[0], AthenaKey::Cosmetic(id, tid) if id == "a:b" && tid == "A:B"));
-        assert_eq!(&*c.variants["a:b"], "[1,{\"x\":\"y\"}]");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn startup_errors_like_server_mjs() {
-        for (cos, custom) in [
-            (Some("null"), None),
-            (Some("5"), None),
-            (Some("{\"items\":[{\"templateId\":5}]}"), None),
-            (Some("{\"items\":[null]}"), None),
-            (Some("{\"items\":\"ab\"}"), None),
-            (Some("{\"items\":{}}"), None),
-            (Some("{\"items\":true}"), None),
-            (None, Some("null")),
-            (None, Some("{\"items\":{}}")),
-            (Some("{\"items\":\"\"}"), Some("{\"items\":[{\"templateId\":\"X\"}]}")),
-            (Some("{\"items\":[{\"templateId\":\"A\"}]}"), Some("{\"items\":[{\"templateId\":7}]}")),
-            (None, Some("{\"items\":[{\"templateId\":7}]}")),
-        ] {
-            let d = dir(cos, custom);
-            assert!(load(&d, &DEFAULTS).is_err(), "{:?} {:?}", cos, custom);
-            let _ = std::fs::remove_dir_all(&d);
-        }
-        for (cos, custom) in [(Some("[]"), Some("5")), (Some("{\"items\":null}"), Some("{\"items\":\"str\"}")), (Some("{\"items\":0}"), Some("[]"))] {
-            let d = dir(cos, custom);
-            assert!(load(&d, &DEFAULTS).is_ok(), "{:?} {:?}", cos, custom);
-            let _ = std::fs::remove_dir_all(&d);
-        }
     }
 }

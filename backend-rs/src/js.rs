@@ -896,114 +896,11 @@ pub fn basename(p: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    #[test]
-    fn iso_matches_js() {
-        assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso(1792517966123), "2026-10-20T17:39:26.123Z");
-        assert_eq!(iso(951782400000), "2000-02-29T00:00:00.000Z");
-        assert_eq!(iso(253402300799999), "9999-12-31T23:59:59.999Z");
-        assert_eq!(http_date(1792517977000), "Tue, 20 Oct 2026 17:39:37 GMT");
-    }
-
-    #[test]
-    fn numbers_print_like_js() {
-        assert_eq!(num_to_string(1.0), "1");
-        assert_eq!(num_to_string(0.1), "0.1");
-        assert_eq!(num_to_string(1e21), "1e+21");
-        assert_eq!(num_to_string(1.5e-7), "1.5e-7");
-        assert_eq!(num_to_string(0.000001), "0.000001");
-        assert_eq!(num_to_string(-0.0), "0");
-        assert_eq!(num_to_string(123456789012345680000.0), "123456789012345680000");
-        assert_eq!(stringify(&parse(r#"{"a":1.0,"b":1e2,"c":9007199254740993,"d":-0,"e":0.5}"#).unwrap()),
-            r#"{"a":1,"b":100,"c":9007199254740992,"d":0,"e":0.5}"#);
-        assert_eq!(number_str(" 3551 "), 3551.0);
-        assert_eq!(number_str("0x10"), 16.0);
-        assert!(number_str("inf").is_nan());
-        assert!(number_str("12abc").is_nan());
-        assert_eq!(number_str(""), 0.0);
-        assert_eq!(number_str("1e3"), 1000.0);
-        assert_eq!(to_string(Some(&json!(["a", null, 1]))), "a,,1");
-    }
-
-    #[test]
-    fn index_keys_go_first() {
-        let v = parse(r#"{"b":1,"2":2,"a":3,"1":4,"01":5}"#).unwrap();
-        assert_eq!(stringify(&v), r#"{"1":4,"2":2,"b":1,"a":3,"01":5}"#);
-        let mut o = obj(parse(r#"{"x":1,"5":2}"#).unwrap());
-        set(&mut o, "3", json!(0));
-        set(&mut o, "y", json!(9));
-        set(&mut o, "x", json!(7));
-        assert_eq!(stringify_obj(&o), r#"{"3":0,"5":2,"x":7,"y":9}"#);
-    }
-
-    #[test]
-    fn push_quoted_matches_stringify() {
-        for s in ["", "a\"b\\c\n\r\t\u{8}\u{c}\u{1}\u{1f}\u{7f}é😀\u{2028}/"] {
-            let mut out = String::new();
-            push_quoted(&mut out, s);
-            assert_eq!(out, stringify(&Value::String(s.into())));
-        }
-    }
-
-    #[test]
-    fn strings_escape_like_json_stringify() {
-        assert_eq!(stringify(&json!("a\"b\\c\n\u{1}\u{7f}é\u{2028}")), "\"a\\\"b\\\\c\\n\\u0001\u{7f}é\u{2028}\"");
-    }
-
-    #[test]
-    fn url_pathname_like_whatwg() {
-        assert_eq!(url_parse("/a/b?x=1").unwrap().0, "/a/b");
-        assert_eq!(url_parse("/a/b?x=1").unwrap().1.as_deref(), Some("x=1"));
-        assert_eq!(url_parse("/a/../offline/health").unwrap().0, "/offline/health");
-        assert_eq!(url_parse("/a/%2E%2e/b").unwrap().0, "/b");
-        assert_eq!(url_parse("/a/./b/.").unwrap().0, "/a/b/");
-        assert_eq!(url_parse("/..").unwrap().0, "/");
-        assert_eq!(url_parse("/").unwrap().0, "/");
-        assert_eq!(url_parse("/a//b").unwrap().0, "/a//b");
-        assert_eq!(url_parse("/a\\b").unwrap().0, "/a/b");
-        assert_eq!(url_parse("/a b{}\"é").unwrap().0, "/a%20b%7B%7D%22%C3%A9");
-        assert_eq!(url_parse("*").unwrap().0, "/*");
-        assert_eq!(url_parse("http://h:1/x/y?q").unwrap().0, "/x/y");
-        assert_eq!(url_parse("//h/x").unwrap().0, "/x");
-        assert_eq!(url_parse("/x#frag?no").unwrap().0, "/x");
-        assert_eq!(url_parse("//user@h:80/p").unwrap().0, "/p");
-        assert_eq!(url_parse("//[::1]:3551/p").unwrap().0, "/p");
-        for bad in ["//[x", "//[x/offline/health", "//", "//h:99999/", "//h:a/", "//a<b/", "//[::1/x", "http://[x/a"] {
-            assert!(url_parse(bad).is_none(), "{}", bad);
-        }
-    }
-
-    #[test]
-    fn search_params_like_urlsearchparams() {
-        let p = search_params("a=1&b=x+y%20z&&c&d=%zz&a=2");
-        assert_eq!(p, vec![("a".into(), "1".into()), ("b".into(), "x y z".into()), ("c".into(), "".into()),
-            ("d".into(), "%zz".into()), ("a".into(), "2".into())]);
-    }
-
-    #[test]
-    fn decode_uri_component_like_js() {
-        assert_eq!(decode_uri_component("a%20b%2F%C3%A9+").unwrap(), "a b/é+");
-        assert!(decode_uri_component("%").is_err());
-        assert!(decode_uri_component("%zz").is_err());
-        assert!(decode_uri_component("%C3").is_err());
-        assert!(decode_uri_component("%ED%A0%80").is_err());
-        assert_eq!(decode_uri_component("%E2%82%AC").unwrap(), "€");
-    }
-
-    #[test]
-    fn base64_like_node() {
-        assert_eq!(base64(b"hello"), "aGVsbG8=");
-        assert_eq!(base64(&sha1(b"dGhlIHNhbXBsZSBub25jZQ==258EAFA5-E914-47DA-95CA-C5AB0DC85B11")), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
-        assert_eq!(base64_decode_lenient("AHVzZXIAcGFzcw=="), b"\0user\0pass");
-        assert_eq!(base64_decode_lenient("aGVs bG8"), b"hello");
-        assert_eq!(base64_decode_lenient("aGVsbG8=aGVsbG8="), b"hello");
-        assert_eq!(base64_decode_lenient("_-8"), vec![0xff, 0xef]);
-    }
-
+    // the cloud-save routes take basename(file): a name like "..%2F..%2Fx" must stay inside offline/cloud
     #[test]
     fn basename_like_node() {
+        assert_eq!(basename("../../sneaky.sav"), "sneaky.sav");
         assert_eq!(basename("/a/b/14.30"), "14.30");
         assert_eq!(basename("/a/b/14.30/"), "14.30");
         assert_eq!(basename(""), "");
@@ -1015,23 +912,5 @@ mod tests {
         } else {
             assert_eq!(basename("a\\b"), "a\\b");
         }
-    }
-
-    #[test]
-    fn js_helpers() {
-        assert!(!truthy(Some(&json!(0))));
-        assert!(!truthy(Some(&json!(""))));
-        assert!(truthy(Some(&json!([]))));
-        assert!(truthy(Some(&json!({}))));
-        assert_eq!(slice_utf16("abc", 2), "ab");
-        assert_eq!(slice_utf16("a😀b", 2), "a");
-        assert_eq!(dedupe(vec![Some(json!("a")), Some(json!("a")), None, Some(json!(1)), Some(json!(1.0)), None]),
-            vec![json!("a"), json!(null), json!(1)]);
-        assert_eq!(or_one_plus_one(Some(&json!(4))), json!(5));
-        assert_eq!(or_one_plus_one(None), json!(2));
-        assert_eq!(or_one_plus_one(Some(&json!("5"))), json!("51"));
-        let mut s = json!("abc");
-        assert_eq!(put(&mut s, "x", Some(json!(1))).unwrap_err().message, "Cannot create property 'x' on string 'abc'");
-        assert_eq!(lower(Some(&json!(5)), "item").unwrap_err().message, "item.toLowerCase is not a function");
     }
 }

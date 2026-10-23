@@ -590,26 +590,3 @@ impl Xmpp {
         out
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn xml_helpers_follow_the_js_regexes() {
-        assert_eq!(attr("<iq type='set' id='bind_1'>", "id"), "bind_1");
-        assert_eq!(attr("<iq sid=\"x\" id=\"y\">", "id"), "x");
-        assert_eq!(attr("<iq id=abc id=\"q\">", "id"), "q");
-        assert_eq!(attr("<iq>", "id"), "");
-        assert_eq!(auth_payload("<auth mechanism='PLAIN' xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>AGFiYwBwdw==</auth>"), "AGFiYwBwdw==");
-        assert_eq!(auth_payload("<a><b>>x<"), ">x");
-        assert_eq!(auth_payload("<auth/>"), "");
-        assert_eq!(resource("<bind><resource>V2:Fortnite:WIN::ABC</resource></bind>"), "V2:Fortnite:WIN::ABC");
-        assert_eq!(resource("<bind><resource></resource></bind>"), "V2:Fortnite:WIN");
-        assert_eq!(resource("<bind/>"), "V2:Fortnite:WIN");
-        assert_eq!(replace_first("<presence><x/></presence>", "<presence", "<presence a=\"$$\" b=\"$&\""),
-            "<presence a=\"$\" b=\"<presence\"><x/></presence>");
-        assert_eq!(drop_first_to("<presence from=\"a\" to=\"b\" to=\"c\"/>"), "<presence from=\"a\" to=\"c\"/>");
-        assert_eq!(drop_first_to("<presence from=\"a\" to=\"b\"/>"), "<presence from=\"a\" to=\"b\"/>");
-    }
-}

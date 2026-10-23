@@ -13,10 +13,9 @@ and `--selftest-ui`.
   toasts, loading shimmer; off with Windows "Show animations"
 - Repaints only on events and only the rects that change; nothing runs at rest. Software Direct2D rasterizer by
   default (`--render hw` for the GPU)
-- `--selftest-ui [dir]`: first frame, RAM and CPU at rest, transition checks in the live window, every scenario of
-  `tests/ui-scenarios.mjs` (plus 4 native ones) to PNG, keyboard and mouse checks
+- `--selftest-ui [dir]`: first frame, RAM and CPU at rest, transition checks in the live window, every scenario of the
+  mock core (`mock_api.cpp`: the 2.x page's scenarios plus 4 native ones) to PNG, keyboard and mouse checks
 
 Build and test from the dev box: `just build-mac` (the core, then this window; `just build` adds the backend, and falls
-back to the PC when the Mac is busy), `just check-pc` (selftest on the PC, results in `selftest/`, then the same
-scenarios rendered by Chromium and compared: `selftest/compare.json`, crops in `out/compare/`) and `just smoke-pc`
-(the real core in the window on a hidden desktop, next to 2.2.1: `tools/window-smoke.ps1`).
+back to the PC when the Mac is busy) and `just selftest-pc` (the selftest on the PC; `selftest/` keeps its
+`selftest.json` and two of its PNGs).

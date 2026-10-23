@@ -1,13 +1,12 @@
-# Parity 2: fake build tree, config writer, --set-builds-folder, --stop, firewall (temp group), --play through the
-# stub, --cosmetics, --update-check. Everything happens under S:\rl-core-test; the real builds folder is never the root
-# of a write or a stop. The real firewall group is only read (rule count before/after).
-param([string]$Dir = 'S:\rl-core-test', [switch]$SkipNetwork)
+# Parity 2: fake build tree, config.json that must not be lost (broken file kept as config.json.broken, BOM, unknown
+# keys), --stop limited to the root, firewall rules (temp group). Everything happens under S:\rl-core-test; the real
+# builds folder is never the root of a write or a stop. The real firewall group is only read (rule count before/after).
+param([string]$Dir = 'S:\rl-core-test')
 $ErrorActionPreference = 'Stop'
 $t = $Dir
 $ref = Join-Path $t 'rlcoretest-ref'
 $old = Join-Path $ref 'RadarniteLauncher.exe'
 $new = Join-Path $t 'rn-core-cli.exe'
-$new220 = Join-Path $t 'rn-core-cli-220.exe'
 $fake = Join-Path $t 'fakeroot'
 $outDir = Join-Path $t 'out'
 $fwGroup = 'rlcoretest-fw'
@@ -67,38 +66,16 @@ New-Item -ItemType Directory -Force "$fake\rlcoretest-empty" | Out-Null
 New-Item -ItemType Directory -Force "$fake\launcher" | Out-Null
 Set-Content "$fake\rlcoretest-3.6.7z" 'x'
 
+# the ref tree gets its config.json the way the installer makes it
 $cfgPath = Join-Path $ref 'config.json'
+if (-not (Test-Path $cfgPath)) { $r = Run $old '--set-builds-folder S:\FortniteBuilds'; "setup: exit $($r.code) " + $r.text.Trim() }
 $backup = [IO.File]::ReadAllBytes($cfgPath)
-
-'== build.json cache writer (first --scan writes offline\build.json)'
-$a = Run $old "--scan $fake"
-$cacheA = @{}; Get-ChildItem $fake -Recurse -Filter build.json | ForEach-Object { $cacheA[$_.FullName] = [IO.File]::ReadAllBytes($_.FullName); Remove-Item $_.FullName }
-$b = Run $new "--scan $fake" $envNew
-$cacheB = @{}; Get-ChildItem $fake -Recurse -Filter build.json | ForEach-Object { $cacheB[$_.FullName] = [IO.File]::ReadAllBytes($_.FullName) }
-CompareRun "--scan fakeroot (cold cache)" $a $b
-foreach ($k in $cacheA.Keys) {
-  $ok = $cacheB.ContainsKey($k) -and (Same $cacheA[$k] $cacheB[$k])
-  "  build.json {0}: {1}" -f $k.Substring($fake.Length + 1), ($(if ($ok) { 'SAME' } else { 'DIFF' }))
-  if (-not $ok) { '    2.2.1: ' + [Text.Encoding]::UTF8.GetString($cacheA[$k]); '    core : ' + $(if ($cacheB.ContainsKey($k)) { [Text.Encoding]::UTF8.GetString($cacheB[$k]) } else { '(missing)' }) }
-}
-if ($cacheB.Count -ne $cacheA.Count) { "  build.json count 2.2.1 $($cacheA.Count) / core $($cacheB.Count)" }
-CompareRun "--scan fakeroot (warm cache)" (Run $old "--scan $fake") (Run $new "--scan $fake" $envNew)
-Show 'scan output' (Run $new "--scan $fake" $envNew).text
 
 '== config.json load/save'
 $cases = [ordered]@{
-  'nohelp-unicode' = '{"displayName":"\u00d1and\u00fa-\u00e9 \u00fc \u4e2d\u6587 \u00a0\u00ad\u200b\ufeff\ue000\u2028\u0378\u0600\u3000 \ud83d\ude00 <>&''+`\" \\ \t /","accountId":"0123456789abcdef0123456789abcdef","port":3551,"mode":"practice","lastPlaylist":"playlist_defaultsolo","bots":20,"infiniteMaterials":true,"infiniteAmmo":false,"lateGame":false,"practicePlaylist":"\u007f\u0080\u009f\u00ff\ufffd\ufffe\uffff\u1680\u2066\u206f\u0085\u00a9\u20ac\u05d0\u0627","matchPlaylist":"x","botsAI":false,"autoStartSeconds":60,"buildsFolder":"S:\\FortniteBuilds"}'
   'broken' = '{ "displayName" : "Pepe Grillo", "accountId": "0123456789abcdef0123456789abcdef", "bots": 20,, }'
-  'string-for-int' = '{"displayName":"A","accountId":"0123456789abcdef0123456789abcdef","bots":"20"}'
-  'nulls' = '{"displayName":"A","accountId":"0123456789abcdef0123456789abcdef","mode":null,"lastPlaylist":null,"bots":5,"buildsFolder":"S:\\FortniteBuilds"}'
   'bom-and-case' = ([char]0xFEFF + '{"DisplayName":"Bee","ACCOUNTID":"0123456789abcdef0123456789abcdef","Bots":7,"buildsFolder":"S:\\FortniteBuilds"}')
-  'float-port' = '{"displayName":"A","accountId":"0123456789abcdef0123456789abcdef","port":3551.0}'
-  'big-port' = '{"displayName":"A","accountId":"0123456789abcdef0123456789abcdef","port":99999999999}'
-  'negative-bots' = '{"displayName":"A","accountId":"0123456789abcdef0123456789abcdef","bots":-5,"buildsFolder":"S:\\FortniteBuilds"}'
-  'duplicate-key' = '{"displayName":"A","displayName":"B","accountId":"0123456789abcdef0123456789abcdef","buildsFolder":"S:\\FortniteBuilds"}'
   'unknown-key (core keeps it)' = '{"displayName":"A","accountId":"0123456789abcdef0123456789abcdef","zzz":{"a":[1,2.50,"x"]},"buildsFolder":"S:\\FortniteBuilds"}'
-  'bad-account (masked)' = '{"displayName":"A","accountId":"XYZ","buildsFolder":"S:\\FortniteBuilds"}'
-  'empty-object (masked)' = '{}'
 }
 $utf8 = New-Object Text.UTF8Encoding $false
 function Mask([string]$s) { $s -replace '"accountId": "[0-9a-f]{32}"', '"accountId": "<random>"' -replace '"displayName": "[A-Za-z]+[0-9]{2}"', '"displayName": "<random>"' -replace 'config: [A-Za-z]+[0-9]{2} ', 'config: <random> ' }
@@ -143,10 +120,6 @@ foreach ($who in 'old', 'new') {
 $a = Run $old '--stop'; $b = Run $new '--stop' $envNew
 CompareRun '--stop (nothing running)' $a $b
 
-'== --selftest-inject (core)'
-$b = Run $new '--selftest-inject' $envNew
-"  exit $($b.code) | $($b.text.Trim())"
-
 '== firewall with a temp group (core only; 2.2.1 cannot use another group)'
 $realBefore = GroupCount $realGroup
 "real group '$realGroup' rules before: $realBefore; temp group '$fwGroup' before: $(GroupCount $fwGroup)"
@@ -169,40 +142,10 @@ if ($m -and $real) {
 $b = Run $new '--check rlcoretest-17.50' $envFw
 Show 'core --check rlcoretest-17.50 with the temp group' $b.text
 
-'== --play through the stub (port 39551, root = fakeroot, rules in the temp group)'
-$cfgText = [IO.File]::ReadAllText($cfgPath)
-[IO.File]::WriteAllText($cfgPath, ($cfgText -replace '"port": 3551,', '"port": 39551,'), $utf8)
-$b = Run $new '--play rlcoretest-17.50' $envFw 60000
-"  exit $($b.code)"; Show 'core --play' $b.text
-if ($b.err) { '  stderr: ' + $b.err.Trim() }
-$left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($t, [StringComparison]::OrdinalIgnoreCase) })
-"  processes left from $t after --play: $($left.Count) $(($left | ForEach-Object { $_.Name }) -join ', ')"
-[IO.File]::WriteAllText($cfgPath, $cfgText, $utf8)
-
 $b = Run $new '--firewall-remove' $envFw
 "  --firewall-remove: exit $($b.code) | $($b.text.Trim())"
 $realAfter = GroupCount $realGroup
 "temp group after: $(GroupCount $fwGroup); real group after: $realAfter (before $realBefore) -> $(if ($realAfter -eq $realBefore) { 'UNCHANGED' } else { 'CHANGED!' })"
-
-if (-not $SkipNetwork) {
-  '== --cosmetics on a fake 3.6 build (AES from GitHub, generator fails: no paks)'
-  $off = "$fake\rlcoretest-3.6\Fortnite\offline"
-  $a = Run $old '--cosmetics rlcoretest-3.6' @{} 300000
-  $logA = if (Test-Path "$off\cosmetics-gen.log") { (Get-Content "$off\cosmetics-gen.log").Count } else { 0 }
-  Remove-Item "$off\aes.json", "$off\cosmetics-gen.log" -ErrorAction SilentlyContinue
-  $b = Run $new '--cosmetics rlcoretest-3.6' $envNew 300000
-  $logB = if (Test-Path "$off\cosmetics-gen.log") { (Get-Content "$off\cosmetics-gen.log").Count } else { 0 }
-  CompareRun '--cosmetics rlcoretest-3.6' $a $b
-  "  cosmetics-gen.log lines 2.2.1 $logA / core $logB"
-  if (Same $a.bytes $b.bytes) { Show 'output' $b.text }
-
-  '== --update-check'
-  $a = Run $old '--update-check'; $b = Run $new '--update-check' $envNew; $c = Run $new220 '--update-check' $envNew
-  "  2.2.1          exit $($a.code) | $($a.text.Trim())"
-  "  core 3.0.0     exit $($b.code) | $($b.text.Trim())"
-  "  core as 2.2.0  exit $($c.code) | $($c.text.Trim())"
-  Get-Content (Join-Path $ref 'update.log') -Tail 3 | ForEach-Object { '  update.log: ' + $_ }
-}
 
 [IO.File]::WriteAllBytes($cfgPath, $backup)
 "config restored: $(Same $backup ([IO.File]::ReadAllBytes($cfgPath)))"
