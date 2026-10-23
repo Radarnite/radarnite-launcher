@@ -3,9 +3,8 @@
 ## Repo and release
 
 - Public source + releases: https://github.com/Radarnite/radarnite-launcher (org `Radarnite`, account `justdiegocom`).
-- Latest release: https://github.com/Radarnite/radarnite-launcher/releases/tag/v2.2.0
-  - `RadarniteLauncherSetup-2.2.0.exe` (sha256 `892c84d47c0891a8353118cb3e2b3c849f943520b5e7547bbaf3afaf5d7671ab`)
-  - `RadarniteLauncherSetup-2.2.0.exe.sha256`
+- Latest release: https://github.com/Radarnite/radarnite-launcher/releases/latest, published by `.github/workflows/release.yml`
+  on every push to `main`: `RadarniteLauncherSetup-<version>.exe`, its `.sha256` and `RadarniteLauncher-<version>.zip`.
 
 ## Where it is installed
 
@@ -24,14 +23,17 @@ can replace the files. Offline-first: any network/parse/verification error is wr
 folder and otherwise ignored; a PC with no internet is never blocked and an unverified binary is never run. Code:
 `launcher/Update.cs`, wired from `launcher/Web.cs` (start + menu) and `launcher/Program.cs` (`--update-check`, MainForm).
 
-## How to cut a new release (every PC then self-updates)
+## How a release is cut (every PC then self-updates)
 
-1. Bump `<Version>` in `launcher/FnOffline.csproj` (the single source of truth; the updater reads it from the assembly).
-2. On Windows, run `tools/build-release.ps1` (reads that version, publishes the launcher self-contained + deterministic
-   with no PDB, assembles the installer, writes the `.sha256`). It fails if any staged file still carries the builder
-   name/home path or any `C:\Users\`.
-3. Publish a GitHub release tagged `v<version>` here with `RadarniteLauncherSetup-<version>.exe` and its `.sha256`.
-   Installed launchers pick it up on next start.
+Nothing by hand: merging to `main` is the release. `release.yml` picks the version (`tools/ci-version.sh`: the last
+`vX.Y.Z` tag plus one patch, or `launcher/FnOffline.csproj`'s `<Version>` when higher), builds the installer on
+`ubuntu-latest` (`tools/ci-build.sh`: `dotnet publish` self-contained win-x64, deterministic, no PDB; the payload of
+prebuilt tools from the pinned 2.2.1 installer, `tools/payload-from-release.sh`; `makensis`; the privacy gate below),
+then publishes the GitHub release `v<version>` with `RadarniteLauncherSetup-<version>.exe`, its `.sha256` and the zip,
+and checks that `releases/latest` now serves it. Pull requests build the same installer without publishing.
+`[skip release]` in the merge commit skips the release; "Run workflow" on another branch publishes a prerelease
+(`vX.Y.Z-<branch>.N`) that installed launchers never see. `tools/build-release.ps1` still builds the same installer on
+Windows from the dev tree when a new payload (tools, Node, game DLLs) has to be published and pinned.
 
 ## Privacy of the installer
 

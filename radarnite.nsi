@@ -1,5 +1,8 @@
 ; Radarnite Launcher installer (NSIS 3, Unicode). Per-user: no administrator needed to install.
-; Build: makensis -DVERSION=2.1.0 -DSRC=<staging folder> -DOUT=<setup.exe> radarnite.nsi
+; Build (tools/ci-build.sh on Linux/macOS, tools/build-release.ps1 on Windows):
+;   makensis -DVERSION=2.2.1 [-DVERSION_NUM=2.2.1] -DSRC=<staging folder> -DOUT=<setup.exe> radarnite.nsi
+;   VERSION_NUM = numeric X.Y.Z for the version resource (VERSION may carry a prerelease suffix); forward slashes in
+;   paths so the same script builds with the Windows and the Unix makensis.
 ;   <staging>\app      the launcher exactly as it is installed (RadarniteLauncher.exe, ui\, node\, backend\, redirect\,
 ;                      gameserver\, tools\, THIRD-PARTY-NOTICES.txt)
 ;   <staging>\radarnite.ico
@@ -11,7 +14,10 @@ RequestExecutionLevel user
 ManifestDPIAware true
 
 !ifndef VERSION
-  !define VERSION "2.2.0"
+  !define VERSION "2.2.1"
+!endif
+!ifndef VERSION_NUM
+  !define VERSION_NUM "${VERSION}"
 !endif
 !define APP "Radarnite Launcher"
 !define EXE "RadarniteLauncher.exe"
@@ -24,7 +30,7 @@ OutFile "${OUT}"
 InstallDir "$LOCALAPPDATA\Programs\Radarnite Launcher"
 InstallDirRegKey HKCU "${APP_KEY}" "InstallDir"
 BrandingText "${APP} ${VERSION}"
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${VERSION_NUM}.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "CompanyName" "Radarnite"
 VIAddVersionKey "FileDescription" "${APP} setup"
@@ -38,8 +44,8 @@ Var BuildsDir
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
-!define MUI_ICON "${SRC}\radarnite.ico"
-!define MUI_UNICON "${SRC}\radarnite.ico"
+!define MUI_ICON "${SRC}/radarnite.ico"
+!define MUI_UNICON "${SRC}/radarnite.ico"
 !define MUI_ABORTWARNING
 
 !define MUI_WELCOMEPAGE_TITLE "Install ${APP}"
@@ -140,8 +146,8 @@ Section "Radarnite Launcher" SecMain
   RMDir /r "$INSTDIR\backend"
   RMDir /r "$INSTDIR\redirect"
   RMDir /r "$INSTDIR\patches"
-  File /r "${SRC}\app\*.*"
-  File "${SRC}\radarnite.ico"
+  File /r "${SRC}/app/*.*"
+  File "${SRC}/radarnite.ico"
 
   ExecWait '"$INSTDIR\${EXE}" --set-builds-folder "$BuildsDir"' $0
   ${If} $0 != 0
