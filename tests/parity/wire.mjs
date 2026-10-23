@@ -1,4 +1,4 @@
-// Wire helpers shared by the parity recorder, the synthetic corpus generator and the comparator: HTTP/1.1 message
+// Wire helpers shared by the parity recorder and the comparator: HTTP/1.1 message
 // parsing on raw byte streams, WebSocket (RFC 6455) frames, raw HTTP/WebSocket clients, session files (JSONL) and the
 // route table of backend/server.mjs. Node built-ins only.
 import fs from 'node:fs';
@@ -136,15 +136,6 @@ export function frameJson(f, maxBody) {
   if (f.rsv) o.rsv = f.rsv;
   if (f.op === 8) { o.code = f.payload.length >= 2 ? f.payload.readUInt16BE(0) : null; if (f.payload.length > 2) o.reason = f.payload.subarray(2).toString('utf8'); return o; }
   return { ...o, ...encBody(f.payload, maxBody) };
-}
-export function wsFrame(op, payload = EMPTY, { fin = true, mask = true, key = Buffer.from([0x37, 0xfa, 0x21, 0x3d]) } = {}) {
-  const p = Buffer.from(Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload)));
-  const n = p.length, hl = n < 126 ? 2 : n < 65536 ? 4 : 10;
-  const h = Buffer.alloc(hl + (mask ? 4 : 0));
-  h[0] = (fin ? 0x80 : 0) | op;
-  if (n < 126) h[1] = n; else if (n < 65536) { h[1] = 126; h.writeUInt16BE(n, 2); } else { h[1] = 127; h.writeBigUInt64BE(BigInt(n), 2); }
-  if (mask) { h[1] |= 0x80; key.copy(h, hl); for (let i = 0; i < n; i++) p[i] ^= key[i & 3]; }
-  return Buffer.concat([h, p]);
 }
 
 // ---------- raw clients (exact bytes on the wire; no URL normalization, no header rewriting) ----------

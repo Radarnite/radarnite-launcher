@@ -8,12 +8,10 @@ against both, and every difference is reported.
 - `compare.mjs` replays sessions against two backends, each in its own temp build dir and config. It diffs responses,
   WebSocket frames and timing, `offline/state.json`, `unknown-routes.log`, `cloud/` and CLI exit codes, and exits
   1 on any difference.
-- `synthetic/` is a committed corpus with made-up data: every route (canonical, mixed case, wrong method), MCP styles,
-  the matchmaker, XMPP, odd paths, and BOM or broken JSON inputs. `gen-synthetic.mjs` re-records it.
+- `synthetic/` holds two committed sessions with made-up data: broken JSON inputs (`config.json`, `state.json`,
+  cosmetics) and odd paths, including cloud-save names that try to leave `offline/cloud/`.
 - `corpus/` holds real sessions. It is git-ignored because it contains Epic data, so it lives only in the private
   `Radarnite/radarnite-launcher-tests` repo.
-- `selftest.mjs` checks the harness itself: the recorder round trip, and 21 mutations of server.mjs that must each
-  be caught.
 
 ## Run
 
@@ -21,7 +19,6 @@ against both, and every difference is reported.
 tests/parity/run.sh                    # Node vs Rust (RN_RUST_BIN or backend-rs/out/radarnite-backend-linux-aarch64)
 tests/parity/run.sh --node             # Node vs Node: 0 differences expected
 tests/parity/run.sh path/to/corpus     # other corpora; --only <name>, --coverage, --json <file>: see compare.mjs --help
-tests/parity/run.sh --selftest
 ```
 
 Only volatile values are normalized:

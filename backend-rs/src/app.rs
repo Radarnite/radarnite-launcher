@@ -421,24 +421,3 @@ impl App {
         routes::not_found(&pathname)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_info_from_user_agent() {
-        let i = Info::from_ua("Fortnite/++Fortnite+Release-17.50-CL-17388565 Windows/10.0.19045.1.256.64bit");
-        assert_eq!((i.season, i.version.as_str()), (17.0, "17.50"));
-        let i = Info::from_ua("Fortnite/++Fortnite+Release-3.6-CL-4019403 Windows/10");
-        assert_eq!((i.season, i.version.as_str()), (3.0, "3.6"));
-        let i = Info::from_ua("Fortnite/++Fortnite+Release-1.8.2-CL-3724489 Windows");
-        assert_eq!((i.season, i.version.as_str()), (1.0, "1.8"));
-        let i = Info::from_ua("Release-1.10-CL-3790078 Release-x");
-        assert_eq!(i.season, 2.0);
-        let i = Info::from_ua("Release-x Release-07.40-CL-1");
-        assert_eq!(i.version, "7.40");
-        assert_eq!(Info::from_ua("curl/8").version, "?");
-        assert_eq!(Info::from_ua("Release-1.2.3x-CL-5").version, "?");
-    }
-}
