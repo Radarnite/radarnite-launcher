@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- radarnite-play.exe: the 2.x game start (launcher/Session.cs + Core.cs, compiled as they are) for the 3.0 launcher,
+       which runs it hidden inside its session job (native/core/launch.cpp). No window, no WinForms, no WebView2.
+       dotnet publish play/RadarnitePlay.csproj -c Release -o play/out  gives play/out/radarnite-play.exe alone. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>radarnite-play</AssemblyName>
+    <RootNamespace>FnOffline</RootNamespace>
+    <Product>Radarnite Launcher</Product>
+    <AssemblyTitle>Radarnite Launcher game start</AssemblyTitle>
+    <Description>Radarnite Launcher game start helper</Description>
+    <Company>Radarnite</Company>
+    <ApplicationIcon>../launcher/radarnite.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Trimmed (16 MB instead of 68 MB), but only the framework: the app's own types stay whole for the
+         reflection-based System.Text.Json of Session.cs (MatchLoop's Wanted record, PostReady's anonymous object),
+         checked in the published exe by its selftest-json switch. IL2026/IL2072 are those JSON calls and Firewall's
+         COM `dynamic`, which this exe never calls (it does no preflight). CA1416: Windows-only APIs, win-x64 only. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <NoWarn>$(NoWarn);CA1416;IL2026;IL2072</NoWarn>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../launcher/Core.cs" Link="shared/Core.cs" />
+    <Compile Include="../launcher/Session.cs" Link="shared/Session.cs" />
+  </ItemGroup>
+</Project>

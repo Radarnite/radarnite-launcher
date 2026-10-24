@@ -23,6 +23,7 @@ pc_dir := env_var_or_default("RN_PC_DIR", 'S:\rl-integ-test')
 pc_fwd := replace(pc_dir, '\', '/')
 pc_lock := "/tmp/rn-launcher-pc.lock"
 zig := "/opt/homebrew/bin/zig"
+dotnet := "~/agent-work/rn-tools/dotnet/dotnet"
 mac_path := 'export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"'
 rn_version := env_var_or_default("RN_VERSION", "")
 quiet := '{ grep -v -e nullability -e _Nullable -e _Nonnull -e "note: insert" -e "In file included" -e "^ *|" -e "^ *[0-9]* |" -e "warnings generated" || true; }'
@@ -38,6 +39,7 @@ build:
     set -euo pipefail
     if just _cpu-ok mac; then just build-mac; else echo "Mac busy or away: building the core and the window on the PC" >&2; just build-pc; fi
     just build-backend
+    just build-play
 
 # Build the core on the Mac: native/core/out/librncore.a and rn-core-cli.exe (as RN_VERSION when set)
 build-core: (_wait-cpu "mac") _sync-mac
@@ -75,6 +77,13 @@ build-pc:
     for f in core/out/librncore.a core/out/rn-core-cli.exe ui/out/RadarniteLauncher.exe; do scp -q "windows:{{pc_fwd}}/src/native/$f" "native/$f"; done
     ls -l native/core/out/librncore.a native/core/out/rn-core-cli.exe native/ui/out/RadarniteLauncher.exe
 
+# Build radarnite-play.exe on the Mac (play/: the 2.x game start; dotnet publish, self-contained single file) -> play/out
+build-play: (_wait-cpu "mac") _sync-mac
+    mac sh 'set -o pipefail; cd ~/{{mac_dir}} && rm -rf play/out && export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 && {{dotnet}} publish play/RadarnitePlay.csproj -c Release -o play/out 2>&1 | { grep -E " error |warning " || true; }; test -f play/out/radarnite-play.exe'
+    mkdir -p play/out
+    mac get {{mac_dir}}/play/out/radarnite-play.exe play/out/radarnite-play.exe
+    ls -l play/out/radarnite-play.exe
+
 # Build the backend on the Mac (backend-build: radarnite-backend.exe + the Linux aarch64 binary for `just parity`)
 build-backend: _sync-mac
     just backend_mac='{{mac_dir}}' backend_cargo='{{mac_path}}; cd ~/{{mac_dir}}/backend-rs' backend-build
@@ -95,7 +104,7 @@ release version="3.0.0-rc.1":
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
     mac sh 'p=~/{{mac_dir}}-payload; for f in redirect/fnredirect.dll gameserver/radarnite-server.dll tools/sigfit-installed.ps1 tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done; ls "$p"/patches/fnpakpatch.dll* >/dev/null || { echo "payload: no pak patch in patches/" >&2; exit 1; }'
     just _wait-cpu mac
-    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --backend backend-rs/out/radarnite-backend.exe --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
+    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --backend backend-rs/out/radarnite-backend.exe --play play/out/radarnite-play.exe --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
     mkdir -p dist
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe dist/RadarniteLauncherSetup-{{version}}.exe
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe.sha256 dist/RadarniteLauncherSetup-{{version}}.exe.sha256

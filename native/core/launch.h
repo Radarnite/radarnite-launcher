@@ -1,6 +1,6 @@
-// Game launch: the one entry point the core calls to start the game client. It is NOT implemented in this core;
-// launch_stub.cpp only reports that. A drop-in launch.cpp providing LaunchGame replaces the stub (build.sh picks
-// launch.cpp when it exists; for the UI, link launch.cpp's object before librncore.a).
+// Game launch: the one entry point the core calls to start the game client. launch.cpp runs radarnite-play.exe (the
+// 2.x launch code, play/) for it; launch_stub.cpp only reports "not implemented" (build.sh picks launch.cpp when it
+// exists; for the UI, link launch.cpp's object before librncore.a).
 #pragma once
 #include "buildinfo.h"
 #include "config.h"
@@ -19,6 +19,9 @@ struct LaunchRequest {
     const LauncherConfig* config = nullptr;   // config.json as loaded for this session (port, displayName, accountId...)
     HANDLE job = nullptr;               // the session's job object (KILL_ON_JOB_CLOSE): every process started goes in it
     LogFn log;                          // Activity lines (any thread)
+    // Optional, any thread, also after LaunchGame returned (while the client runs): (stage, state) like
+    // PlaySession::stage (game|server, run|ok|bad|""), and the local match's (phase, detail) (Session.Match).
+    std::function<void(const wchar_t*, const wchar_t*)> stage, match;
 };
 
 // Starts the game client for an already-running backend. Returns the client's process handle or nullptr with *error set.

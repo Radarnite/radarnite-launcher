@@ -3,6 +3,7 @@
 # with makensis, 7z and perl works the same).
 #
 #   tools/release.sh build --version 3.0.0-rc.1 --launcher <RadarniteLauncher.exe> --backend <radarnite-backend.exe> \
+#       --play <radarnite-play.exe> \
 #       --payload <dir> [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>] [--ban <text>]...
 #       [--no-version-check]
 #   tools/release.sh privacy-scan <file|dir>...   the privacy gate alone (exit 1 on any hit)
@@ -20,7 +21,7 @@
 # --payload is the rest of the program folder exactly as installed: redirect\fnredirect.dll,
 # gameserver\radarnite-server.dll, patches\fnpakpatch.dll, tools\ (cosmetics-gen, fn-modkit-sigfit,
 # sigfit-installed.ps1), THIRD-PARTY-NOTICES.txt, README-offline.md (tools/fetch-payload.sh copies it from the PC).
-# Those prebuilt binaries get the same-length path scrub of the 2.x build (tools/build-release.ps1). The two 3.0 exes
+# Those prebuilt binaries get the same-length path scrub of the 2.x build (tools/build-release.ps1). The 3.0 exes
 # are never scrubbed: they must come out of their builds clean (-s / strip, --remap-path-prefix), or the gate fails.
 #
 # Privacy gate (case-insensitive, UTF-8 and UTF-16LE): any "/Users/", "\Users\" (C:\Users\ or another drive),
@@ -139,13 +140,14 @@ product_version() {
 
 # ---------------------------------------------------------------- build
 cmd_build() {
-  local version="" launcher="" backend="" payload="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
+  local version="" launcher="" backend="" play="" payload="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
   local nsi="$ROOT/radarnite.nsi" makensis="" keep=0 vcheck=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --version) version="$2"; shift 2 ;;
       --launcher) launcher="$2"; shift 2 ;;
       --backend) backend="$2"; shift 2 ;;
+      --play) play="$2"; shift 2 ;;
       --payload) payload="$2"; shift 2 ;;
       --out) out="$2"; shift 2 ;;
       --icon) icon="$2"; shift 2 ;;
@@ -159,9 +161,9 @@ cmd_build() {
   done
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "--version must be semver (3.0.0, 3.0.0-rc.1 or 3.0.0-feat-3-0.1), got '$version'"
   local vnum="${version%%-*}"
-  for f in "$launcher" "$backend" "$icon" "$nsi"; do [ -f "$f" ] || die "missing file: '$f'"; done
+  for f in "$launcher" "$backend" "$play" "$icon" "$nsi"; do [ -f "$f" ] || die "missing file: '$f'"; done
   [ -d "$payload" ] || die "missing payload folder: '$payload'"
-  for f in "$launcher" "$backend"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
+  for f in "$launcher" "$backend" "$play"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
   if [ "$vcheck" = 1 ]; then
     local pv; pv="$(product_version "$launcher")"
     [ "$pv" = "$version" ] || die "the launcher's ProductVersion is '$pv', not $version: build it as $version (RN_VERSION=$version, just release $version)"
@@ -169,14 +171,14 @@ cmd_build() {
   [ -n "$makensis" ] || makensis="$(command -v makensis || echo /opt/homebrew/bin/makensis)"
   [ -x "$makensis" ] || die "makensis not found (brew install makensis, or --makensis)"
   command -v 7z >/dev/null || die "7z not found (brew install p7zip / sevenzip): needed to verify the installer"
-  add_ban "$(cd "$(dirname "$launcher")" && pwd)"; add_ban "$(cd "$(dirname "$backend")" && pwd)"; add_ban "$(cd "$payload" && pwd)"
+  add_ban "$(cd "$(dirname "$launcher")" && pwd)"; add_ban "$(cd "$(dirname "$backend")" && pwd)"; add_ban "$(cd "$(dirname "$play")" && pwd)"; add_ban "$(cd "$payload" && pwd)"
 
   STAGE="$(mktemp -d "${TMPDIR:-/tmp}/radarnite-stage.XXXXXX")"; KEEP=$keep
   trap '[ "$KEEP" = 1 ] && echo "staging kept: $STAGE" || rm -rf "$STAGE"' EXIT
   local stage="$STAGE" app="$STAGE/app"; mkdir -p "$app"
   echo "== stage $version (numeric $vnum)$([ "$vcheck" = 1 ] && echo ", launcher ProductVersion $version")"
   cp -R "$payload/." "$app/"
-  # the 3.0 program folder: no .NET runtime, no Node, no WebView2 page, never user data or anything from Epic
+  # the 3.0 program folder: no .NET runtime files, no Node, no WebView2 page, never user data or anything from Epic
   local bad=""
   for p in node backend ui runtimes webview2-radarnite config.json RadarniteLauncher.dll RadarniteLauncher.deps.json RadarniteLauncher.runtimeconfig.json; do
     [ -e "$app/$p" ] && bad="$bad $p"
@@ -193,6 +195,7 @@ cmd_build() {
   scrub_payload "$app"
   cp "$launcher" "$app/RadarniteLauncher.exe"
   cp "$backend" "$app/radarnite-backend.exe"
+  cp "$play" "$app/radarnite-play.exe"
   cp "$icon" "$app/radarnite.ico"; cp "$icon" "$stage/radarnite.ico"
   echo "== privacy gate (staging)"
   privacy_scan "$app" "$stage/radarnite.ico" || die "privacy gate failed on the staging"

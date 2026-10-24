@@ -6,7 +6,8 @@
 # A push to any other branch runs nothing: its PR does.
 # tools/ci-version.sh picks the version (last stable tag + 1 patch, or VERSION when higher) and writes the notes.
 # Everything builds on ubuntu-latest: zig c++ for the core and the window, cargo zigbuild for the backend, makensis
-# for the installer; the payload comes from the pinned 2.2.1 installer (tools/payload-from-release.sh).
+# for the installer, dotnet publish for radarnite-play.exe (play/); the payload comes from the pinned 2.2.1 installer
+# (tools/payload-from-release.sh).
 # CI only compiles and checks: the test suites are run by hand before a release (native/core/test/README.md,
 # tests/parity/README.md, `just backend-test`, `just release-selftest`).
 # Every action is pinned to a commit SHA (its tag in a comment). Third-party actions run only in the read-only jobs:
@@ -114,6 +115,18 @@ jobs:
           size=$(stat -c %s target/x86_64-pc-windows-gnu/release/radarnite-backend.exe)
           echo "radarnite-backend.exe: $size bytes"
           [ "$size" -le 3145728 ] || { echo "::error::radarnite-backend.exe is over 3 MB"; exit 1; }
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 8.0.x
+      - name: Game start helper (dotnet publish, self-contained win-x64 single file)
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+          DOTNET_NOLOGO: 1
+        run: |
+          dotnet publish play/RadarnitePlay.csproj -c Release -o play/out
+          ls -A play/out
+          [ "$(ls -A play/out)" = radarnite-play.exe ] || { echo "::error::play/out must hold radarnite-play.exe alone"; exit 1; }
+          echo "radarnite-play.exe: $(stat -c %s play/out/radarnite-play.exe) bytes"
       - name: Payload from the pinned 2.2.1 installer
         run: tools/payload-from-release.sh "$RUNNER_TEMP/payload"
       - name: Payload sources built here (informational, nothing of it ships)
@@ -136,6 +149,7 @@ jobs:
         run: >-
           tools/release.sh build --version "$VERSION" --launcher native/ui/out/RadarniteLauncher.exe
           --backend backend-rs/target/x86_64-pc-windows-gnu/release/radarnite-backend.exe
+          --play play/out/radarnite-play.exe
           --payload "$RUNNER_TEMP/payload" --out dist --makensis "$(command -v makensis)"
       - name: Program folder zip (the installer's content; no .sha256 asset, the updaters take any)
         run: |

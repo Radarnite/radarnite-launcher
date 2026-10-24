@@ -9,8 +9,9 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
 - `proc`, `session`: process list, job objects (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), preflight, StopAll, the backend
   (`radarnite-backend.exe` next to the launcher, where the installer puts it, else `node\node.exe backend\server.mjs`),
   health wait, write audit
-- `launch.h`: the one game-launch entry point, `LaunchGame`; `launch_stub.cpp` answers
-  "game launch not implemented in this core"
+- `launch.h`, `launch.cpp`: the game launch, `LaunchGame`, runs `radarnite-play.exe` (`play/`: the 2.x
+  `Session.StartClientAsync` and `MatchLoop`, compiled from `launcher/*.cs`) hidden in the session's job and reads its
+  stdout (`log:`, `stage:`, `match:`, `playlist:`, `pid:`, `error:`); `launch_stub.cpp` is the fallback without it
 - `net`, `update`: WinHTTP + BCrypt SHA-256 self-update, same assets and `.sha256` check as `Update.cs`; versions
   compared as semver with pre-releases. A release build asks `releases/latest` only, like 2.x; a pre-release build
   (`3.0.0-rc.N`, a GitHub prerelease) also reads the newest entry of `/releases` and is offered the newer of the two
@@ -53,8 +54,8 @@ when present; for the window, link its object before `librncore.a`.
 
 ## Not in this core
 
-- The game launch (`launch.h`).
-- The 2.x on-demand match server (`Session.MatchLoop`, `StartServerAsync`, `WatchMatch`): it starts a second game
-  process, so it belongs with the game launch. The session's "server" stage and match phases stay empty.
+- The game launch and the 2.x on-demand match server (`Session.MatchLoop`, `StartServerAsync`, `WatchMatch`): the C#
+  code of 2.x as `radarnite-play.exe` (`play/Program.cs` documents its arguments and lines). It exits once the client
+  runs, or stays until the client exits when the build has a local match.
 
 Tests: `test/README.md`.

@@ -102,21 +102,36 @@ public sealed class Session
         else if (_b.Match.s == Support.Experimental) _log($"Local match is EXPERIMENTAL on {_b.Version}: {_b.Match.why}.");
 
         // 2. client
-        var env = GameEnv(Path.Combine(off, "redirect-client.log"), "sandbox-client");
-        Stage?.Invoke("game", "run");
-        var (clientArgs, clientAc) = LaunchArgs($"{San(_c.DisplayName)}@offline.local");
-        _client = StartGame(clientArgs, env, hidden: false);
-        if (_client == null) { Fail("Could not start the game process."); Stop(); return false; }
-        StartFakeLaunchers(clientAc);
-        if (!await InjectRedirect(_client, Path.Combine(off, "redirect-client.log"))) { Stop(); return false; }
-        LoadPakPatch(_client, "Game");
-        Stage?.Invoke("game", "ok");
+        if (!await StartClientAsync(off)) { Stop(); return false; }
         _log($"Fortnite {_b.Version} started. Pick a mode in the game (CHANGE in the lobby) and press PLAY. Closing the game stops everything.");
 
         // 3. match server on demand
         if (matchOk) _ = Task.Run(() => MatchLoop(off));
         return true;
     }
+
+    /// <summary>The game client alone, for a backend that already runs (StartAsync, and radarnite-play.exe for the 3.0
+    /// launcher): redirect DLL loaded at process start, the suspended stubs, the pak patch. false = Failure says why;
+    /// nothing is stopped here (the caller does).</summary>
+    public async Task<bool> StartClientAsync(string off)
+    {
+        var env = GameEnv(Path.Combine(off, "redirect-client.log"), "sandbox-client");
+        Stage?.Invoke("game", "run");
+        var (clientArgs, clientAc) = LaunchArgs($"{San(_c.DisplayName)}@offline.local");
+        _client = StartGame(clientArgs, env, hidden: false);
+        if (_client == null) { Fail("Could not start the game process."); return false; }
+        StartFakeLaunchers(clientAc);
+        if (!await InjectRedirect(_client, Path.Combine(off, "redirect-client.log"))) return false;
+        LoadPakPatch(_client, "Game");
+        Stage?.Invoke("game", "ok");
+        return true;
+    }
+
+    /// <summary>Process id of the started game client (0 = none).</summary>
+    public int ClientPid => _client?.Id ?? 0;
+
+    /// <summary>How MatchLoop saves the remembered playlist (null = Config.Save, config.json).</summary>
+    public Action<Config>? SaveConfig;
 
     /// <summary>What the match server runs for a playlist the client asked for. Practice (Playground) runs the
     /// configured practice playlist with infinite materials and ammo and no bots; the Battle Royale playlists run
@@ -143,7 +158,7 @@ public sealed class Session
     /// <summary>Follows the client's matchmaking requests (backend /offline/wanted) and keeps a match server for the
     /// requested playlist: a fresh server of the same playlist is reused, anything else is replaced. The last
     /// playlist is remembered and pre-started at the next launch so the first PLAY is quick.</summary>
-    async Task MatchLoop(string off)
+    public async Task MatchLoop(string off)
     {
         var handled = 0;
         var pre = PlanFor(string.IsNullOrEmpty(_c.LastPlaylist) ? "playlist_defaultsolo" : _c.LastPlaylist);
@@ -157,7 +172,7 @@ public sealed class Session
             {
                 handled = w.seq;
                 var plan = PlanFor(w.playlist);
-                if (_c.LastPlaylist != plan.Code) { _c.LastPlaylist = plan.Code; try { _c.Save(); } catch { } }
+                if (_c.LastPlaylist != plan.Code) { _c.LastPlaylist = plan.Code; try { if (SaveConfig != null) SaveConfig(_c); else _c.Save(); } catch { } }
                 if (_server is { HasExited: false } && _serverReady && _plan?.Code == plan.Code && _phase == "waiting")
                 {
                     _log($"Match: {Pretty(plan)} (server already waiting).");
