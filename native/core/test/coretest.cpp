@@ -138,8 +138,10 @@ int semverTable() {
     struct E { const wchar_t* a; const wchar_t* b; };
     const E equal[] = { { L"v3.0.0-rc.1", L"3.0.0-rc.1+meta" }, { L"2.3", L"v2.3.0" }, { L"3.0.0+a", L"3.0.0+b" }, { L"3.0.0-rc.01", L"3.0.0-rc.1" } };
     for (auto& e : equal) expect(update::compare(ver(e.a), ver(e.b)) == 0, fmt(L"compare(%ls, %ls) = 0", e.a, e.b));
-    // test builds (the test channel's feed): by task, then by build number, all before the final
-    const wchar_t* tests[] = { L"3.0.0-rc.1", L"3.0.0-t106.1", L"3.0.0-t106.2", L"3.0.0-t106.10", L"3.0.0-t120.1", L"3.0.0" };
+    // test builds (the test channel's feed): the first ones by task and build, then just publish-test's
+    // <base>-test.<N>.<tag> by publish number whatever the task, all before the final
+    const wchar_t* tests[] = { L"3.0.0-rc.1", L"3.0.0-t106.1", L"3.0.0-t106.2", L"3.0.0-t106.10", L"3.0.0-t120.3", L"3.0.0-test.1.t120",
+                               L"3.0.0-test.2.t106", L"3.0.0-test.10.t99", L"3.0.0" };
     for (size_t i = 0; i + 1 < sizeof tests / sizeof tests[0]; i++)
         expect(update::compare(ver(tests[i]), ver(tests[i + 1])) < 0, fmt(L"compare(%ls, %ls) < 0", tests[i], tests[i + 1]));
 

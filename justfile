@@ -113,30 +113,33 @@ release version="3.0.0-rc.1":
     [ "$(cat dist/RadarniteLauncherSetup-{{version}}.exe.sha256)" = "$(tools/release.sh sha256-line dist/RadarniteLauncherSetup-{{version}}.exe)" ]
     ls -l dist/RadarniteLauncherSetup-{{version}}.exe*
 
-# Test build for the owner's installed launcher (test channel, native/core/update.h): `just publish-test 3.0.0-t120.2`
-# builds the installer with `release` and publishes it to the feed (tools/test-feed.py; folder, address and port in
-# ~/.config/rn-test-feed.env, served by the rn-test-feed user service). Launchers with the channel on poll it every
-# 2 minutes and install it by themselves within a few minutes, never during a game. The version must sort after the
-# feed's current one (so a 3.0.0-t106.y is refused once the feed has a t120.x).
-publish-test version notes="":
+# Test build for the owner's installed launcher (test channel, native/core/update.h): `just publish-test t106` builds
+# the installer as <version.h's version>-test.<N>.<tag> with `release` and publishes it to the feed (tools/test-feed.py;
+# folder, address and port in ~/.config/rn-test-feed.env, served by the rn-test-feed user service). N counts the
+# publishes, so the last one published is the newest whatever its task. Launchers with the channel on poll the feed
+# every 2 minutes and install a newer build by themselves within a few minutes, never during a game.
+publish-test tag notes="":
     #!/usr/bin/env bash
     set -euo pipefail
     env=~/.config/rn-test-feed.env
     [ -f "$env" ] || { echo "no $env (RN_FEED_DIR, RN_FEED_BIND, RN_FEED_PORT)" >&2; exit 1; }
     . "$env"
+    base=$(sed -n 's/^#define RN_VERSION_STR "\([^"]*\)".*/\1/p' native/core/version.h)
+    version=$(tools/test-feed.py next "$RN_FEED_DIR" "$base" {{quote(tag)}})
     cur=$(tools/test-feed.py current "$RN_FEED_DIR")
-    if [ -n "$cur" ] && ! tools/test-feed.py newer '{{version}}' "$cur"; then
-      echo "{{version}} is not newer than the feed's $cur: the launcher would never install it" >&2; exit 1
+    if [ -n "$cur" ] && ! tools/test-feed.py newer "$version" "$cur"; then
+      echo "$version is not newer than the feed's $cur: the launcher would never install it" >&2; exit 1
     fi
-    setup=dist/RadarniteLauncherSetup-{{version}}.exe
-    [ -f "$setup" ] || just release '{{version}}'
+    echo "publishing $version"
+    setup=dist/RadarniteLauncherSetup-$version.exe
+    [ -f "$setup" ] || just release "$version"
     notes={{quote(notes)}}
-    tools/test-feed.py publish "$RN_FEED_DIR" "$setup" '{{version}}' "${notes:-$(git log -1 --format=%s)}"
+    tools/test-feed.py publish "$RN_FEED_DIR" "$setup" "$version" "${notes:-$(git log -1 --format=%s)}"
     url="http://$RN_FEED_BIND:$RN_FEED_PORT"
     served=$(curl -sSf "$url/feed.json")
-    [ "$(jq -r .version <<< "$served")" = '{{version}}' ]
+    [ "$(jq -r .version <<< "$served")" = "$version" ]
     [ "$(curl -sSf "$url/$(jq -r .installer <<< "$served")" | sha256sum | cut -d' ' -f1)" = "$(jq -r .sha256 <<< "$served")" ]
-    echo "published {{version}}: $url/feed.json"
+    echo "published $version: $url/feed.json"
 
 # tools/release-selftest.sh on the Mac: placeholder exes, the privacy gate, the 2.x .sha256 format, the version check
 release-selftest: (_wait-cpu "mac") _sync-mac

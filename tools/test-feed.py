@@ -2,13 +2,15 @@
 """The test channel's feed (native/core/update.h): feed.json + the installers it names, in one folder served as-is
 by a static HTTP server on a private network. `just publish-test <version>` runs `publish`.
 
+  test-feed.py next <dir> <base> <tag>                           the next test version: <base>-test.<N>.<tag>
   test-feed.py publish <dir> <installer.exe> <version> [notes]   copy the installer, then swap feed.json in
   test-feed.py current <dir>                                     the feed's version ("" = none)
   test-feed.py newer <a> <b>                                     exit 0 when a > b (the launcher's semver order)
 
-publish refuses a version that is not newer than the feed's current one: the launcher only installs a newer build, so
-an older one would be published and never arrive. Pre-release identifiers compare as the launcher does
-(update::compare, Semantic Versioning 2.0.0): numbers by value, words in ASCII order, so t120 > t106 but t99 > t106.
+Test versions are <base>-test.<N>.<tag> (3.0.0-test.7.t106): N counts the publishes, so whatever is published last
+sorts last whichever task it comes from (the tag only says where it came from). publish still refuses a version that is
+not newer than the feed's current one: the launcher only installs a newer build (update::compare, Semantic Versioning
+2.0.0: numbers by value, words in ASCII order), so an older one would be published and never arrive.
 The two newest installers are kept, older ones are deleted.
 """
 import functools, hashlib, json, os, re, shutil, sys, tempfile
@@ -59,6 +61,14 @@ def current(d):
         return ""
 
 
+def next_version(d, base, tag):
+    parse(base)
+    if not re.fullmatch(r"[0-9A-Za-z-]+", tag):
+        sys.exit(f"test-feed: the tag must be letters, digits or '-': {tag!r}")
+    m = re.search(r"-test\.(\d+)(\.|$)", current(d))
+    return f"{base}-test.{int(m.group(1)) + 1 if m else 1}.{tag}"
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -106,6 +116,8 @@ def publish(d, installer, version, notes=""):
 def main(a):
     if len(a) >= 4 and a[0] == "publish":
         publish(a[1], a[2], a[3], a[4] if len(a) > 4 else "")
+    elif len(a) == 4 and a[0] == "next":
+        print(next_version(a[1], a[2], a[3]))
     elif len(a) == 2 and a[0] == "current":
         print(current(a[1]))
     elif len(a) == 3 and a[0] == "newer":

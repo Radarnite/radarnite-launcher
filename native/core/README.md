@@ -17,7 +17,7 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
   (`3.0.0-rc.N`, a GitHub prerelease) also reads the newest entry of `/releases` and is offered the newer of the two.
   Test channel (off unless `--test-channel <feed.json URL>` was run once; `off` removes it): the feed is also read, at
   start and every 2 minutes, and a newer test build is installed silently (`/S /RELAUNCH=fg|bg`), never during a game;
-  `just publish-test <version>` publishes one
+  `just publish-test <tag>` publishes one as `3.0.0-test.<N>.<tag>`
 - `builddata`: AES keys and mappings download, `fn-cosmetics-gen`, add a build from a zip (Windows `tar.exe`) or a folder
 - `cli`: `--check --scan --set-builds-folder --firewall --firewall-remove --update-check --test-channel --cosmetics --stop --selftest-inject`
 - `core`: `rn::createCore()` implements `api.h`; `rn::core::ForwardToRunningInstance()` signals an open window
