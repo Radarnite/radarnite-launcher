@@ -781,9 +781,9 @@ function renderPortJob() {
     cpu: [`Waiting for the CPU to drop below 70 %${j.cpu >= 0 ? ` · now ${j.cpu} %` : ''}`, `Waiting ${fmtS(j.phaseMs + dt)} · it checks again every 20 s; closing heavy apps lets it continue sooner (gives up after 20 min)`],
     load: [`Batch ${j.batch} of ${j.batches}: reading the current Fortnite's files`, `fn-port loads the installed game before converting · ${fmtS(j.phaseMs + dt)}`],
     convert: [j.current ? `Converting ${nm(j.current)}` : 'Converting', j.current ? `${PT1[it?.type] || ''}${it?.type ? ' · ' : ''}meshes, textures, animations and sounds into a 14.30 pak · ${fmtS(j.currentMs + dt)}` : ''],
-    install: [`Installing into ${esc(j.build)}`, 'Copying the new paks and registering the items in custom-cosmetics.json'],
-    sign: ['Signing the new paks', `Fitting the pak signatures so ${esc(j.build)} accepts them · ${fmtS(j.phaseMs + dt)}`],
-  }[j.phase] || [j.line, ''];
+    install: [`Installing into ${j.build}`, 'Copying the new paks and registering the items in custom-cosmetics.json'],
+    sign: ['Signing the new paks', `Fitting the pak signatures so ${j.build} accepts them · ${fmtS(j.phaseMs + dt)}`],
+  }[j.phase] || [j.line || '', '']; // plain text: escaped below
   const eta = j.etaMs ? Math.max(0, j.etaMs - dt) : 0;
   const items = j.items.slice(-40).map((x) => { const t = idx.get(x.path); return `<span class="it ${x.st}">${t?.icon ? `<img alt="" src="${esc(t.icon)}">` : ''}<span class="s">${x.st === 'ok' ? `<svg class="i"><use href="#i-check"/></svg>` : x.st === 'failed' ? `<svg class="i"><use href="#i-x"/></svg>` : x.st === 'converting' ? '<span class="spin" style="width:10px;height:10px"></span>' : ''}</span>${esc(nm(x.path))}</span>`; }).join('');
   const open = box.querySelector('details')?.open;
@@ -791,7 +791,7 @@ function renderPortJob() {
       <span class="tm"> · ${fmtS(j.elapsedMs + dt)} elapsed${eta ? ` · ~${fmtS(eta)} left` : ''}</span></div></div><button class="btn sm" data-cmd="portStop">Stop</button></div>
     <div class="prog"><i style="width:${j.total ? Math.round(100 * j.done / j.total) : 0}%"></i></div>
     <div class="ph">${steps}</div>
-    <div class="now">${it?.icon ? `<img alt="" src="${esc(it.icon)}">` : '<span class="spin" style="width:18px;height:18px;margin:0 8px"></span>'}<div class="w"><b>${what[0]}</b><div>${what[1]}</div></div></div>
+    <div class="now">${it?.icon ? `<img alt="" src="${esc(it.icon)}">` : '<span class="spin" style="width:18px;height:18px;margin:0 8px"></span>'}<div class="w"><b>${esc(what[0])}</b><div>${esc(what[1])}</div></div></div>
     ${items ? `<div class="its">${items}</div>` : ''}
     <details class="lg"${open ? ' open' : ''}><summary>What the importer is printing</summary><pre>${j.recent.map((r) => esc(r.t + '  ' + r.text)).join('\n')}</pre></details></div>`;
   const its = box.querySelector('.its'); if (its) its.scrollLeft = its.scrollWidth;
