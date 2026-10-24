@@ -70,7 +70,7 @@ build-pc:
       native/core/version.sh "{{rn_version}}" > "$gen/version.gen.h"
       vset='set "RN_VERSION_H={{pc_dir}}\src\version.gen.h" && '; vtar=(-C "$gen" version.gen.h)
     fi
-    tar -c native/core/*.cpp native/core/*.h native/core/build.cmd native/core/vendor native/ui/*.cpp native/ui/*.h native/ui/app.rc \
+    tar -c native/core/*.cpp native/core/*.h native/core/build.cmd native/core/vendor native/ui/*.cpp native/ui/*.h native/ui/*.inc native/ui/app.rc \
       native/ui/app.manifest native/ui/build.rsp native/ui/build.cmd launcher/ui/fonts launcher/ui/radarnite.png launcher/radarnite.ico \
       "${vtar[@]}" | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\src'
     pc sh "$vset"'set "ZIG=%LOCALAPPDATA%\fp-tools\zig\zig.exe" && {{pc_dir}}\src\native\core\build.cmd out && mkdir {{pc_dir}}\src\native\ui\out && {{pc_dir}}\src\native\ui\build.cmd {{pc_dir}}\src\native\ui\out\RadarniteLauncher.exe'
