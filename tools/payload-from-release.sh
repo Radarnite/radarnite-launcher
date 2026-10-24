@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# payload-from-release.sh - the prebuilt part of the program folder, for tools/release.sh --payload, taken from a
-# published installer pinned by sha256: what CI ships (tools/fetch-payload.sh copies it from the PC's dev tree instead).
-#   tools/payload-from-release.sh <dest-dir> [<version> <sha256>]     default: 2.2.1 (the justfile's ref_version)
+# payload-from-release.sh - the prebuilt part of the program folder, for tools/ci-build.sh --payload, taken from a
+# published installer pinned by sha256: what CI ships.
+#   tools/payload-from-release.sh <dest-dir> [<version> <sha256>]     default: 2.2.1
 # The installer is downloaded from this repo's release v<version> (or read from $RN_PAYLOAD_SETUP), checked against
-# <sha256>, extracted with 7z and never run. Same selection as fetch-payload.sh: redirect\, patches\ and tools\ whole,
-# from gameserver\ only radarnite-server.dll, THIRD-PARTY-NOTICES.txt and README-offline.md; no .pdb. 2.2.1's payload
-# is the one 3.0.0-rc.1 shipped from the dev tree, byte for byte apart from the scrubbed PDB paths.
-# Not built in CI: fn-modkit-sigfit, sigfit-installed.ps1, the notices and LargePakPatch have no source here;
-# cosmetics-gen builds against a CUE4Parse checkout ($(CUE4ParseDir)) that is not in the repo; the gameserver is an
-# MSVC project whose MinHook and curl libraries are not in the repo; and the DLLs loaded into the game (redirect, the
-# pak patches) ship as the binaries that were played with, not rebuilt by another toolchain. A new payload ships by
-# publishing a release built with `just release` (fetch-payload.sh) and pinning it here.
+# <sha256>, extracted with 7z and never run. Same selection as tools/build-release.ps1 copies from the dev tree:
+# node\, redirect\, patches\ and tools\ whole, from gameserver\ only radarnite-server.dll, THIRD-PARTY-NOTICES.txt and
+# README-offline.md; no .pdb. The launcher itself (dotnet publish) and backend\server.mjs come from this checkout.
+# Not built in CI: node.exe is the Node.js runtime; fn-modkit-sigfit, sigfit-installed.ps1, the notices and
+# LargePakPatch have no source here; cosmetics-gen builds against a CUE4Parse checkout ($(CUE4ParseDir)) that is not in
+# the repo; the gameserver is an MSVC project whose MinHook and curl libraries are not in the repo; and the DLLs loaded
+# into the game (redirect, the pak patches) ship as the binaries that were played with, not rebuilt by another
+# toolchain. A new payload ships by publishing a release built with tools/build-release.ps1 and pinning it here.
 set -euo pipefail
 DEST="${1:?usage: payload-from-release.sh <dest-dir> [<version> <sha256>]}"
 VERSION="${2:-2.2.1}"
@@ -32,13 +32,13 @@ got="$(sha256 "$setup")"
 
 7z x -y -bso0 -bsp0 -o"$tmp/x" "$setup" >/dev/null || die "7z could not extract $setup"
 rm -rf "$DEST"; mkdir -p "$DEST/gameserver"
-cp -R "$tmp/x/redirect" "$tmp/x/patches" "$tmp/x/tools" "$tmp/x/THIRD-PARTY-NOTICES.txt" "$tmp/x/README-offline.md" "$DEST/"
+cp -R "$tmp/x/node" "$tmp/x/redirect" "$tmp/x/patches" "$tmp/x/tools" "$tmp/x/THIRD-PARTY-NOTICES.txt" "$tmp/x/README-offline.md" "$DEST/"
 cp "$tmp/x/gameserver/radarnite-server.dll" "$DEST/gameserver/"
 find "$DEST" -type f -iname '*.pdb' -delete
 
-# what `just release` requires of a payload
-for f in redirect/fnredirect.dll gameserver/radarnite-server.dll tools/sigfit-installed.ps1 tools/cosmetics-gen/fn-cosmetics-gen.exe \
-    tools/fn-modkit-sigfit/fn-modkit.dll THIRD-PARTY-NOTICES.txt README-offline.md; do
+# what the installer needs of a payload
+for f in node/node.exe redirect/fnredirect.dll gameserver/radarnite-server.dll tools/sigfit-installed.ps1 \
+    tools/cosmetics-gen/fn-cosmetics-gen.exe tools/fn-modkit-sigfit/fn-modkit.dll THIRD-PARTY-NOTICES.txt README-offline.md; do
   [ -s "$DEST/$f" ] || die "missing $f"
 done
 ls "$DEST"/patches/fnpakpatch.dll* >/dev/null 2>&1 || die "no pak patch in patches/"

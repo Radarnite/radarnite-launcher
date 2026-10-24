@@ -24,7 +24,8 @@ namespace FnOffline;
 sealed class WebHost : Form
 {
     const string Host = "radarnite.launcher";
-    readonly WebView2 _web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(16, 17, 20) };
+    WebView2 _web = NewWebView(); // replaced by a fresh, uninitialised control when the view is released (idle memory)
+    static WebView2 NewWebView() => new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(16, 17, 20) };
     readonly BuildInfo? _autoPlay; // set by --play <build> (desktop shortcut): select it and launch
     Session? _session;
     string _state = "idle", _sessionVersion = "", _failure = "";
@@ -32,6 +33,14 @@ sealed class WebHost : Form
     string? _selected;
     readonly List<string> _backlog = new();
     bool _ready;
+    bool _started;          // the first page load ran its one-time work (auto-play, update check)
+    bool _dormant;          // minimized: the WebView is hidden + suspended (or released); page messages wait
+    bool _released;         // minimized for a while: the WebView and its browser processes are gone until restore
+    int _dormantGen;        // cancels a pending suspend/release when the window comes back first
+    // Activity lines, kept host-side so a page that was suspended or recreated gets every line it missed.
+    readonly List<(long seq, string json)> _logs = new();
+    long _logSeq, _deliveredSeq;
+    const int MaxLogs = 3000; // same cap as the page (MAXLOG)
     /// <summary>Developer self-test: render the page, save a PNG of the real window content, exit.</summary>
     public string? SelfTestPng;
     public string? SelfTestScript;
@@ -53,7 +62,11 @@ sealed class WebHost : Form
             var wa = Screen.FromControl(this).WorkingArea;
             Size = new Size(Math.Min((int)(1180 * s), wa.Width - 40), Math.Min((int)(740 * s), wa.Height - 40));
             if (StartPosition == FormStartPosition.CenterScreen) Location = new Point(wa.Left + (wa.Width - Width) / 2, wa.Top + (wa.Height - Height) / 2);
-            if (SelfTestPng != null) { var t = new System.Windows.Forms.Timer { Interval = 45000 }; t.Tick += (_, _) => Close(); t.Start(); }
+            if (SelfTestPng != null)
+            {
+                int.TryParse(Environment.GetEnvironmentVariable("RADARNITE_SELFTEST_WAIT_MS"), out var w);
+                var t = new System.Windows.Forms.Timer { Interval = 90000 + Math.Max(0, w) }; t.Tick += (_, _) => Close(); t.Start();
+            }
             try { await InitAsync(); }
             catch (Exception e)
             {
@@ -65,7 +78,7 @@ sealed class WebHost : Form
                 fallback.Show();
             }
         };
-        Resize += (_, _) => { UpdateBorder(); PostWindow(); };
+        Resize += (_, _) => { UpdateBorder(); if (WindowState == FormWindowState.Minimized) _ = SleepAsync(); else Wake(); PostWindow(); };
         Activated += (_, _) => PostWindow();
         Deactivate += (_, _) => PostWindow();
         FormClosing += (_, e) =>
@@ -73,6 +86,17 @@ sealed class WebHost : Form
             if (_session is { Running: true } && SelfTestPng == null &&
                 MessageBox.Show(this, "Fortnite is running. Closing Radarnite Launcher stops the game and the local servers.", "Radarnite Launcher",
                     MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { e.Cancel = true; return; }
+            if (_port is { } job)
+            {
+                // a cosmetics import: stop it after the batch being installed, then close (it resumes next time)
+                e.Cancel = true;
+                if (_closing) return;
+                if (SelfTestPng == null && MessageBox.Show(this, "Cosmetics are being imported. Closing stops the import (importing again continues where it stopped).", "Radarnite Launcher",
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+                _closing = true;
+                _ = job.CancelAndWaitAsync(120_000).ContinueWith(_ => { try { BeginInvoke(() => { _port = null; Close(); }); } catch { } });
+                return;
+            }
             if (_session != null) { _session.Stop(); Session.StopAll(_ => { }); }
         };
     }
@@ -198,9 +222,129 @@ sealed class WebHost : Form
     void Post(object msg)
     {
         if (InvokeRequired) { try { BeginInvoke(() => Post(msg)); } catch { } return; }
+        var type = msg.GetType().GetProperty("type")?.GetValue(msg) as string;
         var json = JsonSerializer.Serialize(msg);
-        if (!_ready) { _backlog.Add(json); return; }
+        if (type == "log")
+        {
+            _logs.Add((++_logSeq, json));
+            if (_logs.Count > MaxLogs) _logs.RemoveRange(0, _logs.Count - MaxLogs);
+            if (_ready && !_dormant) FlushLogs();
+            return;
+        }
+        if (_dormant)
+        {
+            // Asleep: state / session / window are pushed fresh on wake; only toasts are kept (capped).
+            if (type != "toast") return;
+            if (_backlog.Count >= 50) _backlog.RemoveAt(0);
+        }
+        if (!_ready || _dormant) { _backlog.Add(json); return; }
         try { _web.CoreWebView2?.PostWebMessageAsJson(json); } catch { }
+    }
+
+    void FlushLogs()
+    {
+        foreach (var (seq, json) in _logs)
+            if (seq > _deliveredSeq)
+                try { _web.CoreWebView2?.PostWebMessageAsJson(json); } catch { }
+        _deliveredSeq = _logSeq;
+    }
+
+    // ---------------------------------------------------------------- idle memory
+    // While the window is minimized (also while a game runs: the launcher minimizes itself) nobody looks at the page,
+    // but WebView2 keeps a browser, a renderer, a GPU and utility processes alive (~200 MB private, ~350 MB working set).
+    //  1. after a short grace period the view is hidden, asked to use as little memory as possible
+    //     (MemoryUsageTargetLevel.Low) and suspended (TrySuspendAsync): rendering and script timers stop;
+    //  2. if the window stays minimized, the WebView is released: its browser processes exit and only the small
+    //     .NET host remains. Restoring the window builds a fresh view from the same page; the host replays the
+    //     Activity lines and pushes state/session, so the page looks as it did (the build selection is host-side).
+    // Restoring during step 1 only resumes the view. Messages posted meanwhile reach the page when it is back.
+    const int SuspendAfterMs = 1500, ReleaseAfterMs = 60_000;
+
+    async Task SleepAsync()
+    {
+        if (_dormant || !_ready || SelfTestPng != null || _web.CoreWebView2 is not { } core) return;
+        var gen = ++_dormantGen;
+        await Task.Delay(SuspendAfterMs); // a quick minimize/restore or a Win+D toggle should not churn the page
+        if (gen != _dormantGen || WindowState != FormWindowState.Minimized || _dormant) return;
+        await EnterDormantAsync(core);
+        if (WindowState != FormWindowState.Minimized) { Wake(); return; } // restored while suspending
+        await Task.Delay(ReleaseAfterMs);
+        if (gen != _dormantGen || WindowState != FormWindowState.Minimized || !_dormant) return;
+        ReleaseWebView();
+    }
+
+    async Task EnterDormantAsync(CoreWebView2 core)
+    {
+        _dormant = true;
+        try
+        {
+            _web.Visible = false; // CoreWebView2Controller.IsVisible = false: required before suspending
+            core.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Low;
+            await core.TrySuspendAsync();
+        }
+        catch (Exception e) { UiError("sleep", e); }
+    }
+
+    void ReleaseWebView()
+    {
+        try
+        {
+            _ready = false; _released = true;
+            var old = _web;
+            _web = NewWebView(); // not added nor initialised: no browser process until the window is restored
+            Controls.Remove(old);
+            old.Dispose(); // closes the controller; the browser processes of our user-data folder then exit
+        }
+        catch (Exception e) { UiError("release", e); }
+    }
+
+    void Wake()
+    {
+        _dormantGen++;
+        if (!_dormant) return;
+        _dormant = false;
+        if (_released)
+        {
+            _released = false; _deliveredSeq = 0; // a new page: replay every Activity line
+            Controls.Add(_web);
+            _ = RecreateAsync();
+            return;
+        }
+        try
+        {
+            var core = _web.CoreWebView2;
+            if (core != null)
+            {
+                core.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Normal;
+                if (core.IsSuspended) core.Resume();
+            }
+            _web.Visible = true;
+        }
+        catch (Exception e) { UiError("wake", e); }
+        if (!_ready) return;
+        foreach (var j in _backlog) try { _web.CoreWebView2?.PostWebMessageAsJson(j); } catch { }
+        _backlog.Clear();
+        FlushLogs();
+        PushState(); PostSession(); PostWindow();
+    }
+
+    async Task RecreateAsync()
+    {
+        try { await InitAsync(); } // the page's "ready" then pushes state, session and the Activity lines
+        catch (Exception e)
+        {
+            UiError("recreate", e);
+            // Same fallback as a failed first start: the plain WinForms window.
+            Hide();
+            Form fallback = _autoPlay == null ? new MainForm() : new PlayForm(_autoPlay);
+            fallback.FormClosed += (_, _) => Close();
+            fallback.Show();
+        }
+    }
+
+    static void UiError(string what, Exception e)
+    {
+        try { File.AppendAllText(Path.Combine(Paths.LauncherDir, "ui-error.log"), $"{DateTime.Now:O} {what} {e}\r\n"); } catch { }
     }
 
     void Log(string s, string? level = null)
@@ -209,6 +353,10 @@ sealed class WebHost : Form
         var b = _session != null ? _sessionBuild : null;
         if (b != null) try { File.AppendAllText(Path.Combine(Paths.Offline(b.Dir), "launcher.log"), $"{DateTime.Now:O} {s}\r\n"); } catch { }
     }
+
+    bool _closing;          // closing once the running import has stopped
+    Porter.Job? _port; // a running cosmetics import (Porter): one at a time, never while a game runs
+    void PostPort() => Post(new { type = "portJob", job = _port?.View() });
 
     BuildInfo? _sessionBuild;
     (string phase, string detail) _match = ("", "");
@@ -237,7 +385,8 @@ sealed class WebHost : Form
                 try { lob = b.Lobby; mat = b.Match; } catch (Exception e) { lob = (Support.No, e.Message); }
                 return new { name = b.Name, dir = b.Dir, version = b.Version, major = b.Major, minor = b.Minor, cl = b.Cl, engine = b.Engine,
                     lobby = lob.s.ToString(), lobbyWhy = lob.why, match = mat.s.ToString(), matchWhy = mat.why,
-                    matchServer = File.Exists(Paths.GameServerDll), cosmetics = cos, firewall = fw };
+                    matchServer = File.Exists(Paths.GameServerDll), cosmetics = cos, firewall = fw,
+                    port = Porter.Supports(b), imported = Porter.Supports(b) ? Porter.Imported(b).Count : 0 };
             }).ToList();
             Post(new { type = "state", builds, selected = _selected, root = Paths.Root, session = SessionDto(),
                 config = new { displayName = c.DisplayName, mode = c.Mode, bots = c.Bots, botsAI = c.BotsAI, infiniteMaterials = c.InfiniteMaterials, infiniteAmmo = c.InfiniteAmmo, lateGame = c.LateGame } });
@@ -272,7 +421,11 @@ sealed class WebHost : Form
                 _ready = true;
                 foreach (var j in _backlog) _web.CoreWebView2.PostWebMessageAsJson(j);
                 _backlog.Clear();
+                FlushLogs();
                 PushState(); PostWindow();
+                if (WindowState == FormWindowState.Minimized) _ = SleepAsync();
+                if (_started) { PostSession(); break; } // a recreated view (idle memory): the one-time work already ran
+                _started = true;
                 if (SelfTestPng != null) { await SelfTestCaptureAsync(); break; }
                 if (_autoPlay != null) { await LaunchAsync(_autoPlay); break; }
                 _ = RunUpdateAsync(false); // offline-first background check; silent when there is no network
@@ -298,7 +451,49 @@ sealed class WebHost : Form
                 c.Save();
                 break;
             }
-            case "launch": if (Sel(m) is { } lb) await LaunchAsync(lb); break;
+            case "launch":
+                if (_port != null) { Log("Wait for the cosmetics import to finish (or stop it) before launching.", "warn"); break; }
+                if (Sel(m) is { } lb) await LaunchAsync(lb);
+                break;
+            case "portCatalog":
+                if (Sel(m) is { } pb)
+                {
+                    var refresh = m["refresh"]?.GetValue<bool>() == true;
+                    JsonObject cat;
+                    var catBuild = pb.Name;
+                    try
+                    {
+                        cat = await Task.Run(() => Porter.CatalogAsync(pb, refresh, s => Log(s),
+                            (stage, ms, done) => Post(new { type = "portLoad", build = catBuild, stage, ms, done }),
+                            early => { early["build"] = catBuild; Post(new { type = "portCatalog", catalog = early }); }));
+                    }
+                    catch (Exception e) { cat = new JsonObject { ["error"] = e.Message }; }
+                    cat["build"] = pb.Name;
+                    Post(new { type = "portCatalog", catalog = cat });
+                    PostPort();
+                }
+                break;
+            case "portImport":
+                if (Sel(m) is { } ib)
+                {
+                    if (_port != null) { Log("A cosmetics import is already running.", "warn"); break; }
+                    if (_state is "launching" or "running" or "stopping") { Log("Stop the game before importing cosmetics.", "warn"); break; }
+                    var paths = m["paths"]?.AsArray().Select(x => x!.GetValue<string>()).ToList() ?? new();
+                    if (paths.Count == 0) break;
+                    _port = new Porter.Job();
+                    PostPort();
+                    var last = DateTime.MinValue;
+                    var ok = await Task.Run(() => Porter.ImportAsync(ib, paths, _port, s => Log(s), () =>
+                    {
+                        if ((DateTime.Now - last).TotalMilliseconds < 400) return;
+                        last = DateTime.Now; PostPort();
+                    }));
+                    var done = _port; _port = null;
+                    Post(new { type = "toast", text = done.Cancelled ? $"Import stopped: {done.Ok} imported" : ok ? $"{done.Ok} cosmetics imported into {ib.Version}" : "The import failed (see Activity)", level = ok ? "ok" : done.Cancelled ? "info" : "bad" });
+                    PostPort(); PushState();
+                }
+                break;
+            case "portCancel": _port?.Cancel(); break;
             case "stop":
                 _state = "stopping"; PostSession();
                 await Task.Run(() => { _session?.Stop(); Session.StopAll(s => Log(s)); });
@@ -422,10 +617,29 @@ sealed class WebHost : Form
     }
 
     // ---------------------------------------------------------------- self-test (developer)
+    static bool ProcessGone(int pid) { try { using var p = Process.GetProcessById(pid); return p.HasExited; } catch { return true; } }
+
+    async Task<JsonObject> MemReportAsync()
+    {
+        var ids = new List<int> { Environment.ProcessId };
+        try { foreach (var i in await _web.CoreWebView2.Environment.GetProcessExtendedInfosAsync()) ids.Add(i.ProcessInfo.ProcessId); } catch { }
+        return MemReport(ids);
+    }
+
+    static JsonObject MemReport(IEnumerable<int> ids)
+    {
+        long priv = 0, ws = 0; int n = 0;
+        foreach (var id in ids.Distinct())
+            try { using var p = Process.GetProcessById(id); p.Refresh(); priv += p.PrivateMemorySize64; ws += p.WorkingSet64; n++; } catch { }
+        return new JsonObject { ["processes"] = n, ["privateMB"] = priv / 1048576, ["workingSetMB"] = ws / 1048576 };
+    }
+
     async Task SelfTestCaptureAsync()
     {
         await Task.Delay(2000);
         if (SelfTestScript != null) { await _web.CoreWebView2.ExecuteScriptAsync(SelfTestScript); await Task.Delay(800); }
+        // a script that starts host work (listing or importing cosmetics) needs time before the capture
+        if (int.TryParse(Environment.GetEnvironmentVariable("RADARNITE_SELFTEST_WAIT_MS"), out var waitMs)) await Task.Delay(waitMs);
         using (var fs = File.Create(SelfTestPng!)) await _web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, fs);
         // window-frame facts, measured on the real window
         var report = new JsonObject
@@ -434,6 +648,38 @@ sealed class WebHost : Form
             ["nonClientRegions"] = _web.CoreWebView2.Settings.IsNonClientRegionSupportEnabled,
             ["webviewVersion"] = _web.CoreWebView2.Environment.BrowserVersionString,
         };
+        if (Environment.GetEnvironmentVariable("RADARNITE_SELFTEST_SLEEP") == "1")
+        {
+            // idle-memory check: the same sleep the minimized window uses (without actually minimizing on screen)
+            const string HasLine = "S.logs.some(l => l.text === 'posted while asleep')";
+            report["memAwake"] = await MemReportAsync();
+            await EnterDormantAsync(_web.CoreWebView2);
+            report["suspended"] = _web.CoreWebView2.IsSuspended;
+            Log("posted while asleep");
+            await Task.Delay(8000);
+            report["memSuspended"] = await MemReportAsync();
+            Wake();
+            await Task.Delay(1500);
+            report["suspendedAfterWake"] = _web.CoreWebView2.IsSuspended;
+            report["lineDeliveredAfterResume"] = await _web.CoreWebView2.ExecuteScriptAsync(HasLine);
+            // stage 2: release the view, as after a minute minimized
+            var browserPid = (int)_web.CoreWebView2.BrowserProcessId;
+            _dormant = true; ReleaseWebView();
+            Log("posted while released");
+            for (var i = 0; i < 20 && !ProcessGone(browserPid); i++) await Task.Delay(500);
+            await Task.Delay(3000);
+            report["browserExitedAfterRelease"] = ProcessGone(browserPid);
+            report["memReleased"] = MemReport(new[] { Environment.ProcessId });
+            var t0 = DateTime.Now;
+            Wake();
+            for (var i = 0; i < 40 && !_ready; i++) await Task.Delay(250);
+            report["recreateMs"] = (int)(DateTime.Now - t0).TotalMilliseconds;
+            await Task.Delay(1000);
+            report["linesReplayedAfterRecreate"] = await _web.CoreWebView2.ExecuteScriptAsync(
+                "S.logs.some(l => l.text === 'posted while asleep') && S.logs.some(l => l.text === 'posted while released') && Array.isArray(S.builds)");
+            report["memAfterRecreate"] = await MemReportAsync();
+            using (var fs = File.Create(Path.ChangeExtension(SelfTestPng!, ".recreated.png"))) await _web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, fs);
+        }
         if (Environment.GetEnvironmentVariable("RADARNITE_SELFTEST_MAXIMIZE") != "1") { File.WriteAllText(Path.ChangeExtension(SelfTestPng!, ".json"), report.ToJsonString(new JsonSerializerOptions { WriteIndented = true })); Close(); return; }
         WindowState = FormWindowState.Maximized; await Task.Delay(400);
         var wa = Screen.FromControl(this).WorkingArea; var pt = PointToScreen(Point.Empty);
