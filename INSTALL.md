@@ -9,7 +9,7 @@
 ## Where it is installed
 
 - Program: `%LOCALAPPDATA%\Programs\Radarnite Launcher` (per-user, no administrator).
-- Builds folder: `S:\FortniteBuilds` (set by the installer; sees 3.6, 14.30, 17.50).
+- Builds folder: `S:\Fortnite\FortniteBuilds` (set by the installer; sees 3.6, 14.30, 17.50).
 - The installer never ships or overwrites `config.json`: the launcher creates it on first run and keeps it on upgrades.
 
 ## Auto-update (how it works)
@@ -45,7 +45,7 @@ The shipped binaries carry no developer name or home path:
 - the build verifies this and aborts if anything leaks.
 Verified on the installed tree: 0 occurrences of the developer name and 0 of `C:\Users\` across 753 files.
 
-## What was cleaned in the dev tree (S:\FortniteBuilds\launcher)
+## What was cleaned in the dev tree (S:\Fortnite\FortniteBuilds\launcher)
 
 Moved out (backups, in-use leftovers, stray reports): `backup-*`, `RadarniteLauncher.*.old-in-use-*`,
 `INFORME-iostore-firma.md`, `UPDATE-PROMPT.md`. `src`, `tools`, `backend`, `gameserver`, `redirect`, `patches`,

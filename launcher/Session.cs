@@ -485,7 +485,7 @@ public sealed class Session
         _log(hits.Count == 0 ? "Write check: nothing written outside the build folder." : $"Write check: {hits.Count} files changed in real Fortnite/Epic folders during the session (see offline\\writes-outside.log). They may come from the real game if it was used meanwhile.");
     }
 
-    /// <summary>Kills only processes whose executable is inside the builds root (S:\FortniteBuilds): the offline
+    /// <summary>Kills only processes whose executable is inside the builds root (S:\Fortnite\FortniteBuilds): the offline
     /// builds, their suspended stubs and the launcher's node.exe. Never anything else.</summary>
     public static int StopAll(Action<string> log)
     {

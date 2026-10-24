@@ -8,8 +8,8 @@ const { chromium } = require('playwright');
 const [ui, out] = process.argv.slice(2);
 fs.mkdirSync(out, { recursive: true });
 
-const b1750 = { name: '17.50', dir: 'S:\\FortniteBuilds\\17.50', version: '17.50', major: 17, minor: 50, cl: 17388565, engine: '4.26', lobby: 'Yes', lobbyWhy: 'UE4 (3.x-19.x): curl redirect + -noeac launch', match: 'Experimental', matchWhy: "Reboot: S16-S19 and S1-S2 'might not work perfectly'", reboot: true, cosmetics: 5338, firewall: 'OK' };
-const mk = (v, maj, min, cl, eng, extra = {}) => ({ ...b1750, name: v, dir: `S:\\FortniteBuilds\\${v}`, version: v, major: maj, minor: min, cl, engine: eng, ...extra });
+const b1750 = { name: '17.50', dir: 'S:\\Fortnite\\FortniteBuilds\\17.50', version: '17.50', major: 17, minor: 50, cl: 17388565, engine: '4.26', lobby: 'Yes', lobbyWhy: 'UE4 (3.x-19.x): curl redirect + -noeac launch', match: 'Experimental', matchWhy: "Reboot: S16-S19 and S1-S2 'might not work perfectly'", reboot: true, cosmetics: 5338, firewall: 'OK' };
+const mk = (v, maj, min, cl, eng, extra = {}) => ({ ...b1750, name: v, dir: `S:\\Fortnite\\FortniteBuilds\\${v}`, version: v, major: maj, minor: min, cl, engine: eng, ...extra });
 const many = [
   mk('3.5', 3, 5, 4166199, '4.20', { match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 412 }),
   mk('7.40', 7, 40, 5046157, '4.22', { match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 1530 }),
@@ -29,29 +29,29 @@ const logs = (n) => Array.from({ length: n }, (_, i) => {
 });
 
 const scenarios = [
-  { id: '01-one-build-practice-100', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: cfg, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
-  { id: '02-many-builds-bots-activity-125', vp: [960, 640], dpr: 1.25, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots', bots: 35 }, selected: '17.50', root: 'S:\\FortniteBuilds' }, ...logs(400)], open: true },
-  { id: '03-launching-150', vp: [800, 534], dpr: 1.5, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }, { type: 'session', session: { state: 'launching', version: '17.50', stages: { backend: 'ok', server: 'run', game: '' } } }] },
-  { id: '04-notices-firewall-missing', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'lobby', displayName: 'AVeryLongPlayerNameThatGoesOn' }, selected: '12.41', root: 'S:\\FortniteBuilds' }] },
-  { id: '05-unsupported', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: many, config: cfg, selected: '25.11', root: 'S:\\FortniteBuilds' }] },
-  { id: '06-error-state', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: cfg, selected: '17.50', root: 'S:\\FortniteBuilds' }, ...logs(30), { type: 'session', session: { state: 'error', version: '17.50', message: 'Not starting: The Epic Games Launcher is open: quit it completely (also from the tray) and try again.', stages: { backend: 'bad' } } }] },
-  { id: '07-running', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' } } }] },
-  { id: '08-empty', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [], config: cfg, selected: null, root: 'S:\\FortniteBuilds' }] },
-  { id: '09-minimum-760x520', vp: [760, 520], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
+  { id: '01-one-build-practice-100', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: cfg, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '02-many-builds-bots-activity-125', vp: [960, 640], dpr: 1.25, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots', bots: 35 }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, ...logs(400)], open: true },
+  { id: '03-launching-150', vp: [800, 534], dpr: 1.5, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, { type: 'session', session: { state: 'launching', version: '17.50', stages: { backend: 'ok', server: 'run', game: '' } } }] },
+  { id: '04-notices-firewall-missing', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'lobby', displayName: 'AVeryLongPlayerNameThatGoesOn' }, selected: '12.41', root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '05-unsupported', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: many, config: cfg, selected: '25.11', root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '06-error-state', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: cfg, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, ...logs(30), { type: 'session', session: { state: 'error', version: '17.50', message: 'Not starting: The Epic Games Launcher is open: quit it completely (also from the tray) and try again.', stages: { backend: 'bad' } } }] },
+  { id: '07-running', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' } } }] },
+  { id: '08-empty', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [], config: cfg, selected: null, root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '09-minimum-760x520', vp: [760, 520], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }] },
   { id: '10-loading', vp: [1200, 800], dpr: 1, msgs: [] },
-  { id: '12-bots-no-ai-125', vp: [1180, 760], dpr: 1.25, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
-  { id: '13-bots-ai-on-warning', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots', botsAI: true }, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
-  { id: '14-match-waiting', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'waiting', detail: 'Waiting for you: press PLAY in the game' } } }] },
-  { id: '15-match-warmup-150', vp: [880, 587], dpr: 1.5, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'warmup', detail: 'Warm-up island · bus in 60 s' } } }] },
-  { id: '16-match-storm', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'storm', detail: 'Storm' } } }] },
-  { id: '17-match-server-down', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'down', detail: 'The match server stopped' } } }, ...logs(12)], open: true },
+  { id: '12-bots-no-ai-125', vp: [1180, 760], dpr: 1.25, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '13-bots-ai-on-warning', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots', botsAI: true }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '14-match-waiting', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'waiting', detail: 'Waiting for you: press PLAY in the game' } } }] },
+  { id: '15-match-warmup-150', vp: [880, 587], dpr: 1.5, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'warmup', detail: 'Warm-up island · bus in 60 s' } } }] },
+  { id: '16-match-storm', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'storm', detail: 'Storm' } } }] },
+  { id: '17-match-server-down', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: { ...cfg, mode: 'bots' }, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }, { type: 'session', session: { state: 'running', version: '17.50', stages: { backend: 'ok', server: 'ok', game: 'ok' }, match: { phase: 'down', detail: 'The match server stopped' } } }, ...logs(12)], open: true },
   { id: '18-real-root-3.6-14.30-17.50', vp: [1200, 800], dpr: 1.25, msgs: [{ type: 'state', builds: [
-      mk('3.6-CL-4019403', 3, 6, 4019403, '4.20', { dir: 'S:\\FortniteBuilds\\3.6-CL-4019403\\Fortnite', match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 0, firewall: 'firewall rules missing for 6 programs' }),
+      mk('3.6-CL-4019403', 3, 6, 4019403, '4.20', { dir: 'S:\\Fortnite\\FortniteBuilds\\3.6-CL-4019403\\Fortnite', match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 0, firewall: 'firewall rules missing for 6 programs' }),
       mk('14.30', 14, 30, 15341163, '4.26', { match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 4100 }), b1750],
-      config: cfg, selected: '3.6-CL-4019403', root: 'S:\\FortniteBuilds' },
-      { type: 'log', text: 'Not a build, ignored: S:\\FortniteBuilds\\14.30-damaged (FortniteGame\\Binaries\\Win64\\FortniteClient-Win64-Shipping.exe is missing (incomplete extraction?)).', level: 'warn' }], open: true },
-  { id: '19-state-without-config', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: {}, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
-  { id: '11-large-1920x1080', vp: [1920, 1040], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'lobby' }, selected: '7.40', root: 'S:\\FortniteBuilds' }, ...logs(60)], open: true },
+      config: cfg, selected: '3.6-CL-4019403', root: 'S:\\Fortnite\\FortniteBuilds' },
+      { type: 'log', text: 'Not a build, ignored: S:\\Fortnite\\FortniteBuilds\\14.30-damaged (FortniteGame\\Binaries\\Win64\\FortniteClient-Win64-Shipping.exe is missing (incomplete extraction?)).', level: 'warn' }], open: true },
+  { id: '19-state-without-config', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: {}, selected: '17.50', root: 'S:\\Fortnite\\FortniteBuilds' }] },
+  { id: '11-large-1920x1080', vp: [1920, 1040], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'lobby' }, selected: '7.40', root: 'S:\\Fortnite\\FortniteBuilds' }, ...logs(60)], open: true },
 ];
 
 const browser = await chromium.launch({ headless: true });

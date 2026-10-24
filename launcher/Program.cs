@@ -153,7 +153,7 @@ static class Program
 
 /// <summary>
 /// One main window per Windows session. Every copy of the launcher (installed, or a dev tree such as
-/// S:\FortniteBuilds\launcher) shares the same session-local mutex, so opening it again (Start menu, a pinned icon,
+/// S:\Fortnite\FortniteBuilds\launcher) shares the same session-local mutex, so opening it again (Start menu, a pinned icon,
 /// a double-click on the exe) never stacks another window + WebView2 on top of the first one: the new process signals
 /// the named event, the open window restores itself and comes to the front, and the new process exits.
 /// </summary>

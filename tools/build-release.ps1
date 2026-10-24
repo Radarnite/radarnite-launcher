@@ -14,9 +14,9 @@
 #>
 param(
   [string]$Version,
-  [string]$SrcRoot  = 'S:\FortniteBuilds\launcher\src',
-  [string]$Runtime  = 'S:\FortniteBuilds\launcher',
-  [string]$OutDir   = 'S:\FortniteBuilds\installer',
+  [string]$SrcRoot  = 'S:\Fortnite\FortniteBuilds\launcher\src',
+  [string]$Runtime  = 'S:\Fortnite\FortniteBuilds\launcher',
+  [string]$OutDir   = 'S:\Fortnite\FortniteBuilds\installer',
   [string]$Dotnet   = "$env:LOCALAPPDATA\fp-dotnet\dotnet.exe",
   [string]$Makensis
 )

@@ -1,5 +1,5 @@
 "CPU " + (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average
-$p = Start-Process S:\FortniteBuilds\launcher\node\node.exe -ArgumentList 'S:\FortniteBuilds\launcher\backend\server.mjs','--build','S:\FortniteBuilds\17.50','--config','S:\FortniteBuilds\launcher\config.json','--port','3551' -PassThru -WindowStyle Hidden
+$p = Start-Process S:\Fortnite\FortniteBuilds\launcher\node\node.exe -ArgumentList 'S:\Fortnite\FortniteBuilds\launcher\backend\server.mjs','--build','S:\Fortnite\FortniteBuilds\17.50','--config','S:\Fortnite\FortniteBuilds\launcher\config.json','--port','3551' -PassThru -WindowStyle Hidden
 Start-Sleep 2
 $h = @{ 'User-Agent' = 'Fortnite/++Fortnite+Release-17.50-CL-17388565 Windows/10.0.19045.1.256.64bit' }
 $b = 'http://127.0.0.1:3551'
@@ -22,6 +22,6 @@ Get-NetTCPConnection -OwningProcess $p.Id -ErrorAction SilentlyContinue | Select
 "--- UDP of backend:"; Get-NetUDPEndpoint -OwningProcess $p.Id -ErrorAction SilentlyContinue | ft -auto | Out-String
 "backend RAM MB: " + [int]((Get-Process -Id $p.Id).WorkingSet64/1MB)
 Stop-Process -Id $p.Id -Force; Start-Sleep 1
-"left: " + @(Get-Process node -ErrorAction SilentlyContinue | ? { $_.Path -like 'S:\FortniteBuilds*' }).Count
+"left: " + @(Get-Process node -ErrorAction SilentlyContinue | ? { $_.Path -like 'S:\Fortnite\FortniteBuilds*' }).Count
 # reset the test equip so the owner starts clean
-Remove-Item S:\FortniteBuilds\17.50\offline\state.json -ErrorAction SilentlyContinue
+Remove-Item S:\Fortnite\FortniteBuilds\17.50\offline\state.json -ErrorAction SilentlyContinue

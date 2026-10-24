@@ -1,5 +1,5 @@
 # Build scan test: odd folders never break the list. Usage: scan-test.ps1 <RadarniteLauncher.exe>
-param($exe = "S:\FortniteBuilds\launcher\RadarniteLauncher.exe")
+param($exe = "S:\Fortnite\FortniteBuilds\launcher\RadarniteLauncher.exe")
 $root = Join-Path $env:TEMP ("rl-scantest-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 function FakeBuild($dir, $version) {
   $w = Join-Path $dir "FortniteGame\Binaries\Win64"; New-Item -ItemType Directory -Force $w | Out-Null
