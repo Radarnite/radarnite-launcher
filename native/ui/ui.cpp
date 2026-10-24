@@ -11,14 +11,16 @@ enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
     ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3,
     ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_LINES, ID_ACT, ID_PLAY,
-    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_CELL0, ID_MENU0 = 200, ID_BUILD0 = 1000,
+    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_MODE0, ID_MODE1, ID_CELL0, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
 const UINT_PTR T_SPIN = 1, T_TOAST = 2, T_ANIM = 3;
 // animation keys: kind | control id
 const uint32_t K_HOVER = 1u << 16, K_COLOR = 2u << 16, K_PRESS = 3u << 16, K_SWITCH = 4u << 16, K_TOAST = 5u << 16,
                K_SHEEN = 6u << 16, K_GREET = 7u << 16, K_SHIMMER = 8u << 16;
-const float TB = 40, LB = 72;
+const float TB = 40;
+// lobby screen colors (the mockup's): glass fill, the opaque fields under the EDITs, the ready green, dark text
+const uint32_t GLASS = 0x090D1C, FIELD = 0x0B0E19, GREEN = 0x3DFF6E, INK = 0x101114;
 const size_t MAXLOG = 3000;
 const float LOG_LH = 19.2f;   // 12px * 1.6
 
@@ -29,6 +31,8 @@ const MenuItem kAddMenu[] = {
     { Icon::Zip, nullptr, nullptr, Command::Refresh, true },
     { Icon::Refresh, L"Rescan builds", nullptr, Command::Refresh, false },
     { Icon::Refresh, L"Check for updates", nullptr, Command::CheckUpdates, false },
+    { Icon::Zip, nullptr, nullptr, Command::Refresh, true },
+    { Icon::Folder, L"Change builds folder…", nullptr, Command::ChooseRoot, false },
 };
 const MenuItem kBuildMenu[] = {
     { Icon::Refresh, L"Regenerate cosmetics", nullptr, Command::Cosmetics, false },
@@ -38,8 +42,13 @@ const MenuItem kBuildMenu[] = {
     { Icon::Zip, nullptr, nullptr, Command::Refresh, true },
     { Icon::Cog, L"Open config.json", nullptr, Command::OpenConfig, false },
 };
+// The Cosmetics button's menu (the cosmetics panel replaces it)
+const MenuItem kCosMenu[] = {
+    { Icon::Refresh, L"Regenerate cosmetics", nullptr, Command::Cosmetics, false },
+};
 const MenuItem* menuItems(int menu, int* n) {
     if (menu == 1) { *n = (int)(sizeof(kAddMenu) / sizeof(kAddMenu[0])); return kAddMenu; }
+    if (menu == 3) { *n = (int)(sizeof(kCosMenu) / sizeof(kCosMenu[0])); return kCosMenu; }
     *n = (int)(sizeof(kBuildMenu) / sizeof(kBuildMenu[0])); return kBuildMenu;
 }
 
@@ -58,6 +67,20 @@ std::wstring season(int major, int minor) {
     if (major <= 31) return fmt(L"Chapter 5 · Season %d", major - 27);
     return fmt(L"Fortnite %d.x", major);
 }
+// "C2 · S4" (the tabs)
+std::wstring seasonShort(int major, int minor) {
+    if (!major) return L"";
+    if (major <= 10) return fmt(L"C1 · S%d", major == 1 ? (minor < 8 ? 1 : 2) : major);
+    if (major <= 18) return fmt(L"C2 · S%d", major - 10);
+    if (major <= 22) return fmt(L"C3 · S%d", major - 18);
+    if (major <= 26) return fmt(L"C4 · S%d", major - 22);
+    if (major == 27) return L"C4 · OG";
+    if (major <= 31) return fmt(L"C5 · S%d", major - 27);
+    return fmt(L"%d.x", major);
+}
+std::wstring caps(const std::wstring& s) { std::wstring o = s; for (auto& c : o) c = (wchar_t)towupper(c); return o; }
+// The button a menu belongs to (focus goes back to it)
+int menuOwner(int menu) { return menu == 1 ? ID_ADD : menu == 2 ? ID_BUILDMENU : menu == 3 ? ID_COSMETICS : 0; }
 std::wstring thousands(int n) {
     std::wstring s = std::to_wstring(n), o;
     int c = 0;
@@ -132,8 +155,8 @@ LRESULT CALLBACK editProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD
 App::App(Gfx& g, Core* core) : g_(g), core_(core) {
     InitializeCriticalSection(&cs_);
     anim_.motion = false;   // offscreen renders show the rest state (the page's tests run with reduced motion)
-    edits_[0].id = ID_NAME; edits_[0].f = { Face::UI, 13, 500, false };
-    edits_[1].id = ID_BOTS; edits_[1].f = { Face::UI, 13, 600, false };
+    edits_[0].id = ID_NAME; edits_[0].f = { Face::UI, 13, 600, false }; edits_[0].bg = FIELD;
+    edits_[1].id = ID_BOTS; edits_[1].f = { Face::Display, 26, 900, true }; edits_[1].bg = FIELD; edits_[1].lazy = true;
     edits_[2].id = ID_SEARCH; edits_[2].f = { Face::UI, 12, 400, false };
     float h = 0;
     std::wstring v = core_->uiPref(L"activityHeight");
@@ -144,6 +167,7 @@ App::~App() {
     setTarget(nullptr, dpi_);
     for (auto& e : edits_) if (e.font) DeleteObject(e.font);
     if (editBrush_) DeleteObject(editBrush_);
+    if (fieldBrush_) DeleteObject(fieldBrush_);
     DeleteCriticalSection(&cs_);
 }
 
@@ -151,6 +175,8 @@ void App::attach(HWND hwnd) {
     hwnd_ = hwnd;
     anim_.motion = systemMotion();
     editBrush_ = CreateSolidBrush(RGB(0x18, 0x1A, 0x1F));
+    fieldBrush_ = CreateSolidBrush(RGB((FIELD >> 16) & 255, (FIELD >> 8) & 255, FIELD & 255));
+    art_.startAsync(hwnd, WM_APP_SINK);   // the season art arrives like a core message
     createEdits();
 }
 
@@ -206,6 +232,8 @@ void App::greet() {
 }
 
 void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
+    releaseArt();
+    release(modeBr_[0]); release(modeBr_[1]); release(rangeBr_);
     release(shimmer_); release(sheen_); release(logoBrush_); release(logo_); release(brush2_); release(brush_);
     rt_ = rt;
     dpi_ = dpi; scale_ = dpi / 96.f;
@@ -221,6 +249,13 @@ void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
     release(gs);
     if (SUCCEEDED(rt_->CreateGradientStopCollection(sk, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gs))) rt_->CreateLinearGradientBrush({}, gs, &shimmer_);
     release(gs);
+    // .md cards: linear-gradient(160deg, #6fd96f, #1f5420) and (160deg, #b06cff, #4a1f80); the bots range: #8b5cf6 -> #c084fc
+    const uint32_t grads[3][2] = { { 0x6FD96F, 0x1F5420 }, { 0xB06CFF, 0x4A1F80 }, { 0x8B5CF6, 0xC084FC } };
+    for (int i = 0; i < 3; i++) {
+        const D2D1_GRADIENT_STOP st[] = { { 0, rgb(grads[i][0]) }, { 1, rgb(grads[i][1]) } };
+        if (SUCCEEDED(rt_->CreateGradientStopCollection(st, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs))) rt_->CreateLinearGradientBrush({}, gs, i < 2 ? &modeBr_[i] : &rangeBr_);
+        release(gs);
+    }
     if (g_.logo && g_.wic) {
         IWICBitmapScaler* sc = nullptr;
         UINT px = (UINT)lroundf(20 * scale_);
@@ -237,8 +272,8 @@ void App::setDpi(float dpi) {
     if (!hwnd_) return;
     for (auto& e : edits_) {
         if (e.font) DeleteObject(e.font);
-        e.font = CreateFontW(-(int)lroundf(e.f.size * scale_), 0, 0, 0, e.f.weight, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             CLEARTYPE_QUALITY, DEFAULT_PITCH, g_.gdiFamily.c_str());
+        e.font = CreateFontW(-(int)lroundf(e.f.size * scale_), 0, 0, 0, e.f.weight, e.f.italic, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             CLEARTYPE_QUALITY, DEFAULT_PITCH, (e.f.face == Face::Display ? g_.gdiDisplayFamily : g_.gdiFamily).c_str());
         SendMessageW(e.hwnd, WM_SETFONT, (WPARAM)e.font, TRUE);
         HDC dc = GetDC(e.hwnd); HGDIOBJ old = SelectObject(dc, e.font);
         TEXTMETRICW tm; GetTextMetricsW(dc, &tm); e.textH = tm.tmHeight;
@@ -272,6 +307,7 @@ void App::drain() {
     std::vector<Event> q;
     EnterCriticalSection(&cs_); q.swap(queue_); LeaveCriticalSection(&cs_);
     for (auto& e : q) apply(e);
+    takeArt();
 }
 
 void App::apply(Event& e) {
@@ -280,7 +316,7 @@ void App::apply(Event& e) {
         bool first = !loaded_;
         st_ = std::move(e.state);
         loaded_ = st_.loaded;
-        if (loaded_) for (uint32_t i = 0; i < 5; i++) anim_.stop(K_SHIMMER | i);
+        if (loaded_) for (uint32_t i = 0; i < 8; i++) anim_.stop(K_SHIMMER | i);
         if (first && loaded_) greet();
         if (st_.hasSession) se_ = st_.session;
         auto have = [&](const std::wstring& n) { if (n.empty()) return false; for (auto& b : st_.builds) if (b.name == n) return true; return false; };
@@ -288,6 +324,7 @@ void App::apply(Event& e) {
             // the core's selection, else the build picked last time, else the newest build
             std::wstring last = core_->uiPref(L"lastBuild");
             selected_ = have(st_.selected) ? st_.selected : have(last) ? last : st_.builds.empty() ? L"" : st_.builds.back().name;
+            for (size_t i = 0; i < st_.builds.size(); i++) if (st_.builds[i].name == selected_) tabEnsure_ = (int)i;
         }
         syncEdits();
         updateSpinTimer();
@@ -405,6 +442,7 @@ void App::select(const std::wstring& name, bool click) {
     if (click) greet();   // the page greets on every click on a build, also the selected one
     if (name == selected_) return;
     selected_ = name;
+    for (size_t i = 0; i < st_.builds.size(); i++) if (st_.builds[i].name == name) tabEnsure_ = (int)i;
     core_->command(Command::Select, name);
     core_->setUiPref(L"lastBuild", name);
     contentScroll_ = 0;
@@ -451,7 +489,7 @@ void App::commitEdit(int id) {
 
 void App::editCommand(int id, int code) {
     if (code == EN_SETFOCUS) { focus_ = id; invalidate(); }
-    else if (code == EN_KILLFOCUS) { commitEdit(id); invalidate(); }
+    else if (code == EN_KILLFOCUS) { for (auto& e : edits_) if (e.id == id) e.want = false; commitEdit(id); invalidate(); }
     else if (code == EN_CHANGE && id == ID_SEARCH) {
         wchar_t buf[256] = L""; GetWindowTextW(edits_[2].hwnd, buf, 256);
         q_ = lower(buf); rowsDirty_ = true; invalidate();
@@ -479,7 +517,7 @@ void App::editKey(int id, UINT vk, bool ctrl, bool shift) {
 void App::layoutEdits() {
     if (!hwnd_) return;
     for (auto& e : edits_) {
-        bool show = e.show;
+        bool show = e.show && (!e.lazy || e.want || GetFocus() == e.hwnd);
         D2D1_RECT_F vis = inter(e.r, e.clip);
         if (vis.right - vis.left < 4 || vis.bottom - vis.top < 4) show = false;
         for (auto& o : overlays_) if (overlaps(o, e.r)) show = false;
@@ -502,6 +540,15 @@ void App::layoutEdits() {
             e.applied = r; e.shown = true; e.clipped = clipped;
         }
     }
+}
+
+// WM_CTLCOLOREDIT: the EDITs are opaque; their background is the field's own color
+HBRUSH App::editBrush(HWND edit, HDC dc) {
+    uint32_t bg = C::bg2;
+    for (auto& e : edits_) if (e.hwnd == edit) bg = e.bg;
+    SetTextColor(dc, RGB(0xF5, 0xF6, 0xF7));
+    SetBkColor(dc, RGB((bg >> 16) & 255, (bg >> 8) & 255, bg & 255));
+    return bg == FIELD ? fieldBrush_ : editBrush_;
 }
 
 // ================================================================================================ primitives
@@ -594,7 +641,7 @@ void App::skeleton(int i, D2D1_RECT_F r) {
 // box-shadow: 0 oy blur rgba(0,0,0,alpha). CSS blurs the offset box with a Gaussian of sigma = blur / 2, so at a
 // distance d outside it the shadow is alpha * erfc(d / (sigma * sqrt 2)) / 2. Stacked rounded rects, outermost first,
 // each with the alpha that brings the accumulated coverage to that profile at the middle of its band.
-void App::shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha) {
+void App::shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha, uint32_t color) {
     if (measuring_ || blur <= 0) return;
     float sigma = blur / 2, step = std::max(1.f, sigma / 6);
     auto target = [&](float d) { return alpha * 0.5f * erfcf(d / (sigma * 1.41421356f)); };
@@ -606,7 +653,7 @@ void App::shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha)
         if (a <= 0.001f) continue;
         D2D1_RECT_F s = { r.left - e, r.top + oy - e, r.right + e, r.bottom + oy + e };
         if (s.right - s.left < 1 || s.bottom - s.top < 1) break;
-        fill(s, 0x000000, a, std::max(0.f, radius + e));
+        fill(s, color, a, std::max(0.f, radius + e));
     }
 }
 
@@ -715,6 +762,9 @@ void App::drawScrollbar(int id, float x, float y, float h, float scroll, float t
 }
 
 // ================================================================================================ paint
+// The main screen ("B · Lobby"): the selected build's season art fills the window under the title bar; build tabs and
+// the Cosmetics / Build buttons on top, the version, its status and Launch at the bottom left, a glass side panel
+// with the status cells, modes and settings on the right, Activity docked at the bottom when open.
 void App::paint(float W, float H) {
     if (!rt_) return;
     W_ = W; H_ = H;
@@ -727,36 +777,24 @@ void App::paint(float W, float H) {
     rt_->SetTransform(base_);
     rt_->Clear(rgb(C::bg));
 
+    // Activity docks over the bottom (the art stays the same size under it: no new decode or stage bitmap when it
+    // opens or its grip moves); the hero and the panel keep at least 220 DIPs above it
+    float actTop = H;
+    if (actOpen_) actTop = H - std::max(140.f, std::min(actH_, H - TB - 220));
+    drawStage(TB, H);
     drawTitle(W);
-    float railW = W <= 720 ? 72.f : W <= 900 ? 200.f : 264.f;
-    drawRail(0, TB, railW, H - TB);
 
-    float wsX = railW, wsW = W - railW;
-    fill({ wsX, TB, W, H }, C::bg2);
-    float barY = H - LB, actTop = barY;
-    if (actOpen_) actTop = barY - std::max(140.f, std::min(actH_, std::max(140.f, H * 0.7f)));
-    float viewH = std::max(0.f, actTop - TB);
-    contentView_ = viewH;
-    bool sb = contentH_ > viewH + 0.5f;
-    contentScroll_ = std::max(0.f, std::min(contentScroll_, std::max(0.f, contentH_ - viewH)));
-    contentScroll_ = roundf(contentScroll_ * scale_) / scale_;
-    contentClip_ = clip_ = { wsX, TB, W, actTop };
-    rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
-    oy_ = TB - contentScroll_;
-    base_ = D2D1::Matrix3x2F::Translation(0, oy_);
-    rt_->SetTransform(base_);
-    inContent_ = true;
-    float h = drawContent(wsX, 0, wsW - (sb ? 10 : 0), viewH);
-    inContent_ = false;
-    base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0;
-    rt_->SetTransform(base_);
-    rt_->PopAxisAlignedClip();
-    clip_ = { -1e9f, -1e9f, 1e9f, 1e9f };
-    if (fabsf(h - contentH_) > 0.5f) { contentH_ = h; invalidate(); }
-    if (sb) drawScrollbar(ID_SB_CONTENT, W - 10, TB, viewH, contentScroll_, contentH_, viewH);
-
-    if (actOpen_) drawActivity(wsX, actTop, wsW, barY - actTop);
-    drawBar(wsX, barY, wsW);
+    float pw = std::max(280.f, std::min(340.f, W * 0.27f));
+    float px = W - 24 - pw, py = TB + 90, pb = actTop - 24;
+    bool panel = pb - py >= 70;
+    drawTop(TB + 18, W);
+    drawHero(W < 900 ? 24.f : 34.f, (panel ? px : W) - 24, py, actTop - (actTop - TB < 600 ? 24.f : 34.f));
+    contentClip_ = {};
+    if (panel) drawPanel(px, py, pw, pb - py);
+    if (actOpen_) drawActivity(0, actTop, W, H - actTop);
+    if (playShown_) hit(ID_PLAY, playRect_, F_FOCUS | F_HAND | (playDisabled_ ? F_DISABLED : 0), 16);   // the last control, like the page
+    toastRight_ = panel ? px - 16 : W - 24;
+    toastBottom_ = actTop - 24;
     drawMenu();
     drawToasts(W, H);
 
@@ -775,6 +813,704 @@ void App::paint(float W, float H) {
     layoutEdits();   // hides an EDIT under this frame's menu/toast; Windows then repaints the area it uncovers
     if (pendingEnsure_) { pendingEnsure_ = false; ensureVisible(focus_); }
     animate();
+}
+
+// ------------------------------------------------------------------------------------------------ lobby primitives
+// .glass: rgba(9,13,28,.62) with a 1px rgba(255,255,255,.12) border (no backdrop blur)
+void App::glass(D2D1_RECT_F r, float radius, float fillA, float borderA) { box(r, radius, GLASS, fillA, C::white, borderA); }
+
+// .badge: a black pill skewed -12deg, italic 900 11px uppercase (+.02em); a level dot (.ok::before: 7px with a 2px
+// ring) or a spinner before the text. Returns its width (21 DIPs tall).
+float App::pill(float x, float y, const std::wstring& s, int lvl, bool measure) {
+    Font f{ Face::Display, 11, 900, true };
+    float tw = textW(s, f, 0.22f), dw = lvl == 3 ? 11 + 7 : lvl >= 0 ? 7 + 7 : 0;
+    float w = 9 + dw + tw + 9, h = 21;
+    if (measure || measuring_) return w;
+    rt_->SetTransform(D2D1::Matrix3x2F::Skew(-12, 0, D2D1::Point2F(x + w / 2, y + h / 2)) * base_);
+    rt_->FillRoundedRectangle(D2D1::RoundedRect(rc(x, y, w, h), 6, 6), br(0x000000));
+    rt_->SetTransform(base_);
+    if (lvl == 3) spinner(x + 9, y + 5, 11);
+    else if (lvl >= 0) {
+        uint32_t c = lvl == 0 ? GREEN : lvl == 1 ? C::warn : C::bad;
+        rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x + 9 + 3.5f, y + h / 2), 5.5f, 5.5f), br(c, .35f));
+        dot(x + 9 + 3.5f, y + h / 2, 7, c);
+    }
+    text(s, f, x + 9 + dw, y, tw + 2, h, C::white, 0, 0.22f);
+    return w;
+}
+
+// .glass.g: the top buttons (and the empty state's and notices'); ic = Icon::Count for a text-only one
+float App::gbutton(int id, float x, float y, float h, const wchar_t* label, Icon ic, bool iconOnly, bool measure) {
+    Font f{ Face::UI, 12.5f, 600, false };
+    float pad = h < 34 ? 10.f : 14.f;
+    bool hasIcon = ic != Icon::Count;
+    float tw = label && !iconOnly ? textW(label, f) : 0;
+    float w = iconOnly ? h : pad * 2 + (hasIcon ? 16 : 0) + (hasIcon && tw > 0 ? 8 : 0) + tw;
+    if (measure) return w;
+    D2D1_RECT_F r = rc(x, y, w, h);
+    int owner = menu_ == 1 ? ID_ADD : menu_ == 2 ? ID_BUILDMENU : menu_ == 3 ? ID_COSMETICS : 0;
+    float hv = fx(K_HOVER | id, hover_ == id || owner == id ? 1.f : 0.f, r);
+    glass(r, 12, .62f + .2f * hv, .12f + .16f * hv);
+    if (hasIcon) icon(ic, iconOnly ? x + (w - 16) / 2 : x + pad, y + (h - 16) / 2, 16, C::white);
+    if (tw > 0 && text(label, f, x + pad + (hasIcon ? 24 : 0), y, tw + 1, h, C::white)) issues.push_back(std::wstring(L"clipped btn: ") + label);
+    hit(id, r, F_FOCUS | F_HAND, 12);
+    return w;
+}
+
+// ------------------------------------------------------------------------------------------------ season art
+void App::releaseArt() {
+    release(bg_); release(bgRT_);
+    for (auto& t : thumbs_) { release(t.brush); release(t.bmp); }
+}
+
+// Finished downloads/decodes: the selected skin replaces the art (the previous one is already gone), thumbnails
+// land in their tab.
+void App::takeArt() {
+    bool changed = false;
+    for (auto& im : art_.take()) {
+        changed = true;
+        if (im.thumb) {
+            for (auto& t : thumbs_) if (t.skin == im.skin) {
+                t.req = 0;
+                if (!im.px.empty()) { release(t.brush); release(t.bmp); t.img = std::move(im); }
+                break;
+            }
+        } else if (im.skin == artWant_) {
+            artReqPx_ = 0;
+            if (!im.px.empty()) { artImg_ = std::move(im); artGen_++; }
+        }
+    }
+    if (changed) invalidate();
+}
+
+// The selected build's skin at px rows (the stage's height in device pixels; never above the file's own size).
+// Another build drops the old pixels at once; a resize asks for a new decode only past 10 %.
+void App::ensureArt(const wchar_t* skin, UINT px) {
+    std::wstring s = skin ? skin : L"";
+    if (s != artWant_) { artWant_ = s; artImg_ = ArtImage(); artReqPx_ = 0; artGen_++; }
+    if (s.empty() || px < 16 || art_.failed(s)) return;
+    UINT target = artImg_.srcH ? std::min(px, artImg_.srcH) : px;
+    auto within = [&](UINT a) { return a && fabsf((float)a - (float)target) <= 0.1f * target; };
+    UINT have = artImg_.px.empty() ? 0 : artImg_.h - artImg_.padT - artImg_.padB;
+    if (within(have) || within(artReqPx_)) return;
+    artReqPx_ = target;
+    art_.request(s, false, target);
+    if (!hwnd_) takeArt();   // offscreen: decoded right away
+}
+
+// A tab's thumbnail: .tab img { height: 150% } = 78 DIPs, its left part faded out (baked in the pixels).
+ID2D1BitmapBrush* App::thumb(const wchar_t* skin) {
+    if (!skin || !rt_) return nullptr;
+    UINT need = (UINT)lroundf(78 * scale_);
+    size_t i = 0;
+    while (i < thumbs_.size() && thumbs_[i].skin != skin) i++;
+    if (i == thumbs_.size()) { thumbs_.push_back(Thumb{}); thumbs_.back().skin = skin; }
+    if (art_.failed(thumbs_[i].skin)) return nullptr;
+    UINT target = thumbs_[i].img.srcH ? std::min(need, thumbs_[i].img.srcH) : need;
+    UINT have = thumbs_[i].img.px.empty() ? 0 : thumbs_[i].img.h;
+    if (have != target && thumbs_[i].req != target) {
+        thumbs_[i].req = target;
+        art_.request(thumbs_[i].skin, true, target);
+        if (!hwnd_) takeArt();
+    }
+    Thumb& t = thumbs_[i];
+    if (t.img.px.empty()) return nullptr;
+    if (!t.brush) {
+        D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi_, dpi_);
+        if (SUCCEEDED(rt_->CreateBitmap(D2D1::SizeU(t.img.w, t.img.h), t.img.px.data(), t.img.w * 4, bp, &t.bmp))) rt_->CreateBitmapBrush(t.bmp, &t.brush);
+    }
+    return t.brush;
+}
+
+// .stage: .bg radial gradient, .rays, img.art and .fade, composed once into a bitmap of the stage's device pixels and
+// rebuilt only when the size, the season, the art or the target change (a frame then draws one bitmap).
+void App::drawStage(float top, float bottom) {
+    if (bottom - top < 1) return;
+    const Build* b = loaded_ ? sel() : nullptr;
+    const SeasonArt& sa = b ? seasonArt(b->major, b->minor) : seasonArt(0, 0);
+    float W = W_, sh = bottom - top;
+    ensureArt(sa.skin, (UINT)lroundf(sh * scale_));
+    BgKey k = { W, top, bottom, scale_, &sa, artGen_, rt_ };
+    bool same = bg_ && k.w == bgKey_.w && k.top == bgKey_.top && k.bottom == bgKey_.bottom && k.scale == bgKey_.scale && k.sa == bgKey_.sa &&
+                k.artGen == bgKey_.artGen && k.rt == bgKey_.rt;
+    if (!same) {
+        release(bg_); release(bgRT_);
+        D2D1_SIZE_U px = D2D1::SizeU((UINT32)ceilf(W * scale_ - 0.01f), (UINT32)ceilf(sh * scale_ - 0.01f));
+        if (px.width && px.height && SUCCEEDED(rt_->CreateCompatibleRenderTarget(D2D1::SizeF(px.width / scale_, px.height / scale_), px, &bgRT_))) {
+            ID2D1RenderTarget* t = bgRT_;
+            t->BeginDraw();
+            t->Clear(rgb(sa.c[3]));
+            ID2D1GradientStopCollection* gs = nullptr;
+            // .bg: radial-gradient(90% 120% at 70% 35%, c0 0%, c1 30%, c2 55%, c3 100%)
+            const D2D1_GRADIENT_STOP bgs[] = { { 0, rgb(sa.c[0]) }, { .30f, rgb(sa.c[1]) }, { .55f, rgb(sa.c[2]) }, { 1, rgb(sa.c[3]) } };
+            ID2D1RadialGradientBrush* rb = nullptr;
+            if (SUCCEEDED(t->CreateGradientStopCollection(bgs, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
+                SUCCEEDED(t->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(D2D1::Point2F(.70f * W, .35f * sh), {}, .9f * W, 1.2f * sh), gs, &rb)))
+                t->FillRectangle(D2D1::RectF(0, 0, W, sh), rb);
+            release(rb); release(gs);
+            // .rays: repeating-conic-gradient(from 190deg at 66% 42%, rgba(255,255,255,.055) 0 5deg, transparent 5deg 15deg),
+            // masked by radial-gradient(55% 75% at 66% 42%, #000, transparent): 24 wedges under a fading radial brush
+            float cx = .66f * W, cy = .42f * sh, R = 2 * (W + sh);
+            ID2D1PathGeometry* pg = nullptr; ID2D1GeometrySink* gk = nullptr;
+            if (SUCCEEDED(g_.d2d->CreatePathGeometry(&pg)) && SUCCEEDED(pg->Open(&gk))) {
+                for (int i = 0; i < 24; i++) {
+                    float a0 = (190 + 15.f * i) * 0.01745329f, a1 = a0 + 5 * 0.01745329f;
+                    gk->BeginFigure(D2D1::Point2F(cx, cy), D2D1_FIGURE_BEGIN_FILLED);
+                    gk->AddLine(D2D1::Point2F(cx + R * sinf(a0), cy - R * cosf(a0)));
+                    gk->AddLine(D2D1::Point2F(cx + R * sinf(a1), cy - R * cosf(a1)));
+                    gk->EndFigure(D2D1_FIGURE_END_CLOSED);
+                }
+                gk->Close();
+                const D2D1_GRADIENT_STOP rs[] = { { 0, rgb(C::white, sa.skin ? .055f : .03f) }, { 1, rgb(C::white, 0) } };   // softer on the dark neutral one
+                if (SUCCEEDED(t->CreateGradientStopCollection(rs, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
+                    SUCCEEDED(t->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(D2D1::Point2F(cx, cy), {}, .55f * W, .75f * sh), gs, &rb)))
+                    t->FillGeometry(pg, rb);
+                release(rb); release(gs);
+            }
+            release(gk); release(pg);
+            // img.art: height = the stage, bottom 16 % below it, translateX(-46%) from the middle; its drop shadow is in
+            // the pixels
+            if (!artImg_.px.empty()) {
+                ID2D1Bitmap* bm = nullptr;
+                D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+                if (SUCCEEDED(t->CreateBitmap(D2D1::SizeU(artImg_.w, artImg_.h), artImg_.px.data(), artImg_.w * 4, bp, &bm))) {
+                    float boxH = (float)(artImg_.h - artImg_.padT - artImg_.padB), kk = sh / boxH;
+                    float boxW = (artImg_.w - artImg_.padL - artImg_.padR) * kk;
+                    float left = .5f * W - .46f * boxW, bot = sh * (1 + 120.f / 760.f), tp = bot - sh;
+                    t->DrawBitmap(bm, D2D1::RectF(left - artImg_.padL * kk, tp - artImg_.padT * kk, left + boxW + artImg_.padR * kk, bot + artImg_.padB * kk), 1,
+                                  D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                }
+                release(bm);
+            }
+            // .fade: linear-gradient(0deg, rgba(6,9,22,.92) 0%, rgba(6,9,22,.35) 32%, transparent 55%),
+            //        linear-gradient(90deg, rgba(6,9,22,.7) 0%, transparent 35%, transparent 65%, rgba(6,9,22,.75) 100%)
+            const uint32_t fc = 0x060916;
+            const D2D1_GRADIENT_STOP f1[] = { { 0, rgb(fc, .92f) }, { .32f, rgb(fc, .35f) }, { .55f, rgb(fc, 0) }, { 1, rgb(fc, 0) } };
+            const D2D1_GRADIENT_STOP f2[] = { { 0, rgb(fc, .7f) }, { .35f, rgb(fc, 0) }, { .65f, rgb(fc, 0) }, { 1, rgb(fc, .75f) } };
+            ID2D1LinearGradientBrush* lb = nullptr;
+            if (SUCCEEDED(t->CreateGradientStopCollection(f1, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
+                SUCCEEDED(t->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, sh), D2D1::Point2F(0, 0)), gs, &lb)))
+                t->FillRectangle(D2D1::RectF(0, 0, W, sh), lb);
+            release(lb); release(gs);
+            if (SUCCEEDED(t->CreateGradientStopCollection(f2, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
+                SUCCEEDED(t->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(W, 0)), gs, &lb)))
+                t->FillRectangle(D2D1::RectF(0, 0, W, sh), lb);
+            release(lb); release(gs);
+            if (SUCCEEDED(t->EndDraw())) bgRT_->GetBitmap(&bg_);
+        }
+        bgKey_ = k;
+    }
+    if (bg_) {
+        D2D1_SIZE_F s = bg_->GetSize();
+        rt_->DrawBitmap(bg_, D2D1::RectF(0, top, s.width, top + s.height), 1, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    } else fill({ 0, top, W, bottom }, sa.c[3]);
+}
+
+// ------------------------------------------------------------------------------------------------ top row
+// .top: build tabs (version, "C2 · S4", the skin faded on the right; the selected one white), the + tab, then the glass
+// Cosmetics and Build buttons on the right. Tabs shrink towards 112 DIPs, then scroll (wheel, keyboard, selection).
+void App::drawTop(float y, float W) {
+    const Build* b = loaded_ ? sel() : nullptr;
+    bool compact = W < 860;
+    float bw = 0, cw = 0, right = W - 24;
+    if (b) {
+        bw = gbutton(ID_BUILDMENU, 0, 0, 40, L"Build", Icon::More, compact, true);
+        cw = gbutton(ID_COSMETICS, 0, 0, 40, L"Cosmetics", Icon::Cos, compact, true);
+        right -= bw + 10 + cw + 16;
+    }
+    const float x0 = 24;
+    float avail = std::max(0.f, right - x0 - 10 - 52);
+    Font vf{ Face::Display, 22, 900, true }, sf{ Face::UI, 10.5f, 400, false };
+    int n = loaded_ ? (int)st_.builds.size() : 3;
+    std::vector<float> tw((size_t)n, 150.f);
+    float total = 0;
+    for (int i = 0; i < n; i++) {
+        if (loaded_) {
+            const Build& bd = st_.builds[i];
+            tw[i] = std::min(220.f, std::max(150.f, 28 + 2 + std::max(textW(bd.version, vf, -0.44f), textW(seasonShort(bd.major, bd.minor), sf))));
+        }
+        total += tw[i] + (i ? 10 : 0);
+    }
+    if (total > avail && n) {
+        float gaps = 10.f * (n - 1), k = std::max(0.f, avail - gaps) / (total - gaps);
+        total = gaps;
+        for (auto& w : tw) { w = std::max(112.f, floorf(w * k)); total += w; }
+    }
+    float viewW = std::min(total, avail);
+    tabMax_ = std::max(0.f, total - avail);
+    if (tabEnsure_ >= 0 && tabEnsure_ < n) {
+        float a = 0;
+        for (int i = 0; i < tabEnsure_; i++) a += tw[i] + 10;
+        if (a < tabScroll_) tabScroll_ = a;
+        else if (a + tw[tabEnsure_] > tabScroll_ + viewW) tabScroll_ = a + tw[tabEnsure_] - viewW;
+    }
+    tabEnsure_ = -1;
+    tabScroll_ = std::max(0.f, std::min(tabScroll_, tabMax_));
+    tabScroll_ = roundf(tabScroll_ * scale_) / scale_;
+
+    D2D1_RECT_F saved = clip_;
+    tabClip_ = clip_ = { x0 - 4, y - 6, x0 + viewW + 4, y + 52 + 6 };
+    rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
+    float x = x0 - tabScroll_;
+    for (int i = 0; i < n; i++) {
+        D2D1_RECT_F r = rc(x, y, tw[i], 52);
+        x += tw[i] + 10;
+        if (!loaded_) { skeleton(i, r); continue; }
+        const Build& bd = st_.builds[i];
+        int id = ID_BUILD0 + i;
+        bool on = bd.name == selected_;
+        float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);   // background and border 120 ms (selection is instant)
+        if (on) fill(r, C::white, 1, 12); else box(r, 12, 0x080C1A, .55f + .15f * hv, C::white, 0);
+        const SeasonArt& sa = seasonArt(bd.major, bd.minor);
+        if (ID2D1BitmapBrush* tb = thumb(sa.skin)) {
+            const ArtImage* im = nullptr;
+            for (auto& t : thumbs_) if (t.brush == tb) im = &t.img;
+            float ih = im->h / scale_, s = 78 / ih, iw = im->w / scale_ * s;
+            tb->SetTransform(D2D1::Matrix3x2F::Scale(s, s) * D2D1::Matrix3x2F::Translation(r.right + 8 - iw, r.top - 4));
+            tb->SetOpacity((on ? 1.f : .85f) * alpha_);
+            rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 12, 12), tb);
+        }
+        if (!on) box(r, 12, 0, 0, C::white, .12f + .14f * hv);
+        float ty = y + (52 - 22 - 12.6f) / 2;
+        text(bd.version, vf, r.left + 14, ty, tw[i] - 28, 22, on ? INK : C::white, 0, -0.44f);
+        text(seasonShort(bd.major, bd.minor), sf, r.left + 14, ty + 22, tw[i] - 28, 12.6f, on ? 0x4B5160 : C::white, 0, 0, on ? 1.f : .7f);
+        hit(id, r, F_FOCUS | F_HAND, 12);
+    }
+    rt_->PopAxisAlignedClip();
+    clip_ = saved;
+
+    // .tab.add
+    D2D1_RECT_F ar = rc(x0 + viewW + (n ? 10 : 0), y, 52, 52);
+    float hv = fx(K_HOVER | ID_ADD, hover_ == ID_ADD || menu_ == 1 ? 1.f : 0.f, ar);
+    box(ar, 12, 0x080C1A, .55f + .2f * hv, C::white, .12f + .16f * hv);
+    icon(Icon::Plus, ar.left + 18, ar.top + 18, 16, C::white, .75f + .25f * hv);
+    hit(ID_ADD, ar, F_FOCUS | F_HAND, 12);
+    if (menu_ == 1) menuAnchor_ = ar;
+
+    if (b) {
+        float bx = W - 24 - bw, cx = bx - 10 - cw;
+        gbutton(ID_COSMETICS, cx, y + 6, 40, L"Cosmetics", Icon::Cos, compact);
+        if (menu_ == 3) menuAnchor_ = rc(cx, y + 6, cw, 40);
+        gbutton(ID_BUILDMENU, bx, y + 6, 40, L"Build", Icon::More, compact);
+        if (menu_ == 2) menuAnchor_ = rc(bx, y + 6, bw, 40);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ hero (bottom left)
+// Bottom up: Launch, the status row (.sea: badge + meta, or the launch stages), the version (italic 900, 168 DIPs at
+// most, smaller to fit), the season badge, and the notices above it.
+void App::drawHero(float x, float right, float top, float bottom) {
+    playShown_ = false;
+    float w = std::max(0.f, right - x);
+    if (!loaded_) {   // skeleton while the host loads
+        skeleton(3, rc(x, bottom - 68 - 20 - 21 - 14 - 110, std::min(w, 380.f), 110));
+        skeleton(4, rc(x, bottom - 68, std::min(w, 330.f), 68));
+        return;
+    }
+    const Build* b = sel();
+    if (!b) {
+        // empty: how to add a build
+        const int ids[3] = { ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT };
+        const wchar_t* lb[3] = { L"Add from zip…", L"Add from folder…", L"Change builds folder…" };
+        const Icon ic[3] = { Icon::Zip, Icon::Folder, Icon::Folder };
+        float bwid[3]; int row[3], rows = 1; float cx = 0;
+        for (int i = 0; i < 3; i++) {
+            bwid[i] = gbutton(ids[i], 0, 0, 40, lb[i], ic[i], false, true);
+            if (cx > 0 && cx + bwid[i] > w) { rows++; cx = 0; }
+            row[i] = rows - 1; cx += bwid[i] + 8;
+        }
+        float by = bottom - rows * 40 - (rows - 1) * 8;
+        cx = x; int r0 = 0;
+        for (int i = 0; i < 3; i++) {
+            if (row[i] != r0) { r0 = row[i]; cx = x; }
+            gbutton(ids[i], cx, by + row[i] * 48, 40, lb[i], ic[i], false);
+            cx += bwid[i] + 8;
+        }
+        Font hf{ Face::UI, 12.5f, 400, false };
+        std::wstring help = L"Builds live in **" + st_.root + L"**. A downloaded zip is extracted there; a folder is moved or copied.";
+        float hw = std::min(w, 520.f), th = rich(help, hf, 0, 0, hw, 18.75f, C::ink2, C::white, 0, false);
+        float y = by - 20 - th;
+        rich(help, hf, x, y, hw, 18.75f, C::ink2, C::white);
+        Font v100{ Face::Display, 100, 900, true };
+        float vw = textW(L"No build", v100, -5.f);
+        float size = std::max(36.f, std::min(96.f, vw > 0 ? w / vw * 98 : 96.f));
+        float vy = y - 14 - .8f * size;
+        text(L"No build", Font{ Face::Display, size, 900, true }, x, vy, w + size, .8f * size, C::white, 0, -.05f * size);
+        if (vy - 16 - 21 > top) pill(x, vy - 16 - 21, L"GET STARTED", -1);
+        return;
+    }
+
+    const SeasonArt& sa = seasonArt(b->major, b->minor);
+    bool isBusy = busy();
+    float bw = std::min(330.f, w);
+    D2D1_RECT_F pr = rc(x, bottom - 68, bw, 68);
+
+    // .sea: the badge and a meta line; while a session runs, its state and the launch stages
+    auto sea = [&](float sy) -> float {
+        Font mf{ Face::UI, 12, 400, false, true };
+        static const struct { int cls; const wchar_t* label; } MP[] = {
+            { -1, L"" }, { -1, L"MATCH READY" }, { 0, L"IN THE MATCH" }, { 0, L"IN THE MATCH" }, { 0, L"IN THE MATCH" },
+            { 0, L"IN THE MATCH" }, { -1, L"MATCH OVER" }, { 2, L"SERVER STOPPED" } };
+        float h = 21;
+        if (se_.state == SessionState::Error) {
+            float pw = pill(x, sy, L"FAILED", 2);
+            std::wstring m = (se_.message.empty() ? L"Launch failed" : se_.message) + L" **Details in Activity.**";
+            float mx = x + pw + 10, mw = std::max(40.f, x + w - mx);
+            Font ef{ Face::UI, 12.5f, 400, false };
+            float th = rich(m, ef, mx, sy + 1.5f, mw, 18, C::badText, C::white, 0, !measuring_);
+            h = std::max(h, th + 1.5f);
+        } else if (isBusy) {
+            bool ph = se_.state == SessionState::Running && se_.phase != MatchPhase::None;
+            int pcls = ph ? MP[(int)se_.phase].cls : 0;
+            std::wstring label = se_.state == SessionState::Stopping ? L"STOPPING" : se_.state == SessionState::Launching ? L"LAUNCHING"
+                               : ph ? MP[(int)se_.phase].label : L"RUNNING";
+            int pd = se_.state == SessionState::Running ? (pcls == 2 ? 2 : 0) : 3;
+            float pw = pill(x, sy, label, pd);
+            float mx = x + pw + 10, mw = std::max(0.f, x + w - mx), my = sy + (21 - 17.4f) / 2;
+            if (se_.state == SessionState::Stopping) text(L"Stopping the game and the local servers…", mf, mx, my, mw, 17.4f, C::ink2);
+            else if (ph) text(se_.matchDetail, mf, mx, my, mw, 17.4f, pcls == 0 ? C::white : pcls == 2 ? C::badText : C::ink2);
+            else {
+                struct St { Stage s; const wchar_t* l; } steps[3] = { { se_.backend, L"Backend" }, { se_.game, L"Game" }, { se_.server, L"Match server" } };
+                int nst = se_.hasServer ? 3 : 2;
+                float zx = mx;
+                for (int i = 0; i < nst; i++) {
+                    if (i) { fill(rc(zx + 6, my + 8.2f, 14, 1), C::white, .3f); zx += 6 + 14 + 6; }
+                    Stage s = steps[i].s;
+                    if (s == Stage::Ok) { icon(Icon::Check, zx, my + 0.7f, 16, GREEN); zx += 16; }
+                    else if (s == Stage::Bad) { icon(Icon::X, zx, my + 0.7f, 16, C::bad); zx += 16; }
+                    else if (s == Stage::Run) { spinner(zx, my + 1.7f, 14); zx += 14; }
+                    else { dot(zx + 4, my + 8.7f, 8, C::dim); zx += 8; }
+                    if (W_ > 900) { zx += 6; text(steps[i].l, mf, zx, my, 200, 17.4f, C::ink2); zx += textW(steps[i].l, mf); }
+                }
+            }
+        } else {
+            bool no = b->lobby == Support::No;
+            float pw = pill(x, sy, no ? L"NOT SUPPORTED" : L"READY", no ? 2 : level(*b));
+            float mx = x + pw + 10, mw = std::max(0.f, x + w - mx), my = sy + (21 - 17.4f) / 2;
+            std::wstring meta = no ? b->lobbyWhy
+                              : fmt(L"CL %u · UE %ls · %ls", b->cl, b->engine.c_str(), b->cosmetics ? (thousands(b->cosmetics) + L" cosmetics").c_str() : L"no cosmetics list yet");
+            text(meta, mf, mx, my, mw, 17.4f, C::white, 0, 0, .7f);
+            hit(ID_META, rc(mx, my, std::min(mw, textW(meta, mf)), 17.4f), 0, 0);   // tooltip only
+        }
+        return h;
+    };
+    measuring_ = true;
+    float seaH = sea(0);
+    measuring_ = false;
+    float seaTop = pr.top - 20 - seaH;
+
+    // notices (.notice of the page): why it cannot launch, or what is missing, with their buttons
+    struct Notice { int cls; std::wstring html; int btn; const wchar_t* label; };
+    std::vector<Notice> notices;
+    bool fwOk = b->firewall == L"OK";
+    if (b->lobby == Support::No) notices.push_back({ 2, L"**Fortnite " + b->version + L" cannot be launched.** " + b->lobbyWhy + L".", 0, nullptr });
+    else {
+        if (!fwOk) notices.push_back({ 1, L"**Firewall rules missing.** " + b->firewall + L". They are created before launch (administrator prompt).", ID_NOTICE_FW, L"Create now" });
+        if (!b->cosmetics) notices.push_back({ 1, L"**No cosmetics list yet.** Only the default items will show in the locker.", ID_NOTICE_COS, L"Generate" });
+    }
+    float nw = std::min(w, 520.f);
+    Font nf{ Face::UI, 12.5f, 400, false };
+    auto noticeH = [&](const Notice& n, float* tw, float* nbw) {
+        *nbw = n.btn ? gbutton(n.btn, 0, 0, 28, n.label, Icon::Count, false, true) : 0;
+        *tw = nw - 14 - 16 - 10 - (n.btn ? *nbw + 12 : 0) - 14;
+        return 24 + std::max(rich(n.html, nf, 0, 0, *tw, 18.75f, C::warnText, C::white, 0, false), n.btn ? 28.f : 18.f);
+    };
+    float notesH = 0;
+    for (auto& n : notices) { float a, c; notesH += noticeH(n, &a, &c) + 10; }
+
+    // the version: as big as fits the width and what is left of the height (168 at most)
+    Font v100{ Face::Display, 100, 900, true };
+    float vw100 = textW(b->version, v100, -5.f);
+    float byW = vw100 > 0 ? w / vw100 * 98 : 168.f;
+    float room = seaTop - 14 - top - notesH;
+    bool showSeason = true;
+    float size = std::min({ 168.f, byW, (room - 21 - 16) / .8f });
+    if (size < 56) { showSeason = false; size = std::min({ 168.f, byW, room / .8f }); }
+    bool showVer = size >= 32;
+    float vTop = seaTop - 14 - .8f * size;
+    if (showVer) {
+        text(b->version, Font{ Face::Display, size, 900, true }, x, vTop, w + size, .8f * size, C::white, 0, -.05f * size);
+        float ny = vTop;
+        if (showSeason) {
+            std::wstring s = season(b->major, b->minor);
+            if (sa.name && *sa.name && b->major) s += std::wstring(L" · ") + sa.name;
+            ny = vTop - 16 - 21;
+            pill(x, ny, caps(s), -1);
+        }
+        ny -= 12;
+        for (auto it = notices.rbegin(); it != notices.rend(); ++it) {
+            float tw, nbw, h = noticeH(*it, &tw, &nbw);
+            ny -= h;
+            if (ny < top - 70) break;
+            D2D1_RECT_F r = rc(x, ny, nw, h);
+            uint32_t tc = it->cls == 2 ? C::badText : C::warnText;
+            glass(r, 12, .72f);
+            fill(r, it->cls == 2 ? C::bad : C::warn, .14f, 12);
+            icon(Icon::Warn, x + 14, ny + 12 + 1.4f, 16, tc);
+            rich(it->html, nf, x + 14 + 16 + 10, ny + 12, tw, 18.75f, tc, C::white);
+            if (it->btn) gbutton(it->btn, r.right - 14 - nbw, ny + (h - 28) / 2, 28, it->label, Icon::Count, false);
+            ny -= 10;
+        }
+    }
+    sea(seaTop);
+    drawLaunch(pr, sa.c[0]);
+}
+
+// .play: white, 68 DIPs, radius 16, a glow in the season's color; Stop while a session runs. Its hit is added at the
+// end of the frame (the last control in the focus order, like the page).
+void App::drawLaunch(D2D1_RECT_F pr, uint32_t glow) {
+    const Build* b = sel();
+    bool stopStyle = busy();
+    bool disabled = stopStyle ? se_.state == SessionState::Stopping : (!b || b->lobby == Support::No);
+    playRect_ = pr; playShown_ = true; playDisabled_ = disabled;
+    float bw = pr.right - pr.left;
+    D2D1_RECT_F area = grow(pr, 4);
+    bool phov = hover_ == ID_PLAY && !disabled;
+    // background 120 ms; the hover ring 120 ms; :active scale(.985) 120 ms var(--ease). Text, style and width change at once.
+    uint32_t bg = fxc(K_COLOR | ID_PLAY, disabled ? 0x1A1E2B : stopStyle ? (phov ? 0x1C2338 : 0x0E1222) : C::white, area);
+    float ring = fx(K_HOVER | ID_PLAY, phov ? 1.f : 0.f, area);
+    float press = fx(K_PRESS | ID_PLAY, press_ == ID_PLAY && !disabled ? 1.f : 0.f, area, T1, Curve::Ui);
+    // box-shadow: 0 16px 50px -8px <season color> .8
+    if (!stopStyle && !disabled) shadow(grow(pr, -8), 8, 50, 16, 1.f, glow);   // .8 in CSS; the browser's blur reads brighter
+    D2D1_MATRIX_3X2_F saved = base_;
+    if (press > 0) {
+        float k = 1 - 0.015f * press;
+        base_ = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2)) * base_;
+        rt_->SetTransform(base_);
+    }
+    if (ring > 0 && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, 1.5f), 17.5f, 17.5f), br(C::white, 0.16f * ring), 3);
+    if (stopStyle || disabled) box(pr, 16, bg, .9f, C::white, .18f);
+    else {
+        fill(pr, bg, 1, 16);
+        if (!measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, .5f), 16.5f, 16.5f), br(C::white, .4f), 1);   // 0 0 0 1px rgba(255,255,255,.4)
+    }
+    // .play::after sheen (greet wins over hover, like the later CSS rule); out of the button at rest
+    float sh = anim_.running(K_GREET) ? tw(K_GREET, -1.2f, area) : anim_.running(K_SHEEN) ? tw(K_SHEEN, -1.2f, area) : -1.2f;
+    if (sh > -1.2f && sh < 1.2f && sheen_ && !measuring_) {
+        float bh = pr.bottom - pr.top;
+        const float dx = 0.9659258f, dy = 0.2588190f;   // 105deg: (sin a, -cos a)
+        float len = bw * dx + bh * dy, gx = (pr.left + pr.right) / 2 + sh * bw, gy = (pr.top + pr.bottom) / 2;
+        sheen_->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
+        sheen_->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
+        sheen_->SetOpacity(alpha_);
+        rt_->FillRoundedRectangle(D2D1::RoundedRect(pr, 16, 16), sheen_);
+    }
+    // ▶ LAUNCH <small>version</small>: italic 900 34px, gap 14px; the version in 14px #5b6170
+    Font pf{ Face::Display, 34, 900, true }, sf{ Face::Display, 14, 900, true };
+    const wchar_t* pl = stopStyle ? L"STOP" : L"LAUNCH";
+    std::wstring ver = stopStyle || !b ? L"" : b->version;
+    float iconS = stopStyle ? 30.f : 40.f, gap = 14;
+    float g0 = 4.5f / 16 * iconS, gw = (stopStyle ? 7.f : 8.7f) / 16 * iconS;   // the glyph inside the icon box
+    float ptw = textW(pl, pf, -0.34f), stw = ver.empty() ? 0 : textW(ver, sf);
+    float cw = gw + gap + ptw + (stw > 0 ? gap + stw : 0);
+    if (cw > bw - 32) { stw = 0; cw = gw + gap + ptw; }
+    uint32_t pc = disabled ? 0x6B7080 : stopStyle ? C::white : INK;
+    float cx = pr.left + (bw - cw) / 2, cy = (pr.top + pr.bottom) / 2;
+    icon(stopStyle ? Icon::X : Icon::Play, cx - g0, cy - iconS / 2, iconS, pc);
+    if (text(pl, pf, cx + gw + gap, pr.top, ptw + 2, pr.bottom - pr.top, pc, 0, -0.34f)) issues.push_back(L"clipped play");
+    if (stw > 0) text(ver, sf, cx + gw + gap + ptw + gap, pr.top + 2, stw + 2, pr.bottom - pr.top, disabled ? 0x6B7080 : 0x5B6170);
+    base_ = saved;
+    rt_->SetTransform(base_);
+}
+
+// ------------------------------------------------------------------------------------------------ side panel
+// .right.glass: 340 wide (280 at least), from below the tabs to the bottom; its content scrolls when it does not fit,
+// the Activity button stays at its bottom.
+void App::drawPanel(float x, float y, float w, float h) {
+    glass(rc(x, y, w, h), 16);
+    D2D1_RECT_F ar = rc(x + 18, y + h - 16 - 38, w - 36, 38);
+    float viewTop = y + 1, viewBottom = ar.top - 8, viewH = std::max(0.f, viewBottom - viewTop);
+    contentView_ = viewH;
+    bool sb = contentH_ > viewH + 0.5f;
+    contentScroll_ = std::max(0.f, std::min(contentScroll_, std::max(0.f, contentH_ - viewH)));
+    contentScroll_ = roundf(contentScroll_ * scale_) / scale_;
+    contentClip_ = clip_ = { x + 1, viewTop, x + w - 1, viewBottom };
+    rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
+    oy_ = viewTop - contentScroll_;
+    base_ = D2D1::Matrix3x2F::Translation(0, oy_);
+    rt_->SetTransform(base_);
+    inContent_ = true;
+    float ch = panelBody(x + 18, 15, w - 36);
+    inContent_ = false;
+    base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0;
+    rt_->SetTransform(base_);
+    rt_->PopAxisAlignedClip();
+    clip_ = { -1e9f, -1e9f, 1e9f, 1e9f };
+    if (fabsf(ch - contentH_) > 0.5f) { contentH_ = ch; invalidate(); }
+    if (sb) drawScrollbar(ID_SB_CONTENT, x + w - 12, viewTop + 6, viewH - 12, contentScroll_, contentH_, viewH);
+
+    // .act: Activity with its count (unseen lines colored by their worst level)
+    float av = fx(K_HOVER | ID_ACT, hover_ == ID_ACT || actOpen_ ? 1.f : 0.f, ar);   // background 120 ms
+    fill(ar, C::white, .06f + .07f * av, 10);
+    icon(Icon::Log, ar.left + 12, ar.top + 11, 16, C::white);
+    text(L"Activity", Font{ Face::UI, 12.5f, 600, false }, ar.left + 12 + 24, ar.top, 100, 38, C::white);
+    int badgeN = unseen_ ? unseen_ : (int)logs_.size();
+    std::wstring bn = std::to_wstring(badgeN);
+    Font badge{ Face::UI, 11, 700, false, true };   // tabular-nums
+    float bw = std::max(20.f, 12 + textW(bn, badge));
+    D2D1_RECT_F brr = rc(ar.right - 12 - bw, ar.top + 9, bw, 20);
+    if (unseen_ && unseenLevel_ == 2) fill(brr, C::bad, 1, 10);
+    else if (unseen_ && unseenLevel_ == 1) fill(brr, C::warn, 1, 10);
+    else fill(brr, C::white, .14f, 10);
+    text(bn, badge, brr.left, brr.top, bw, 20, unseen_ && unseenLevel_ == 1 ? 0x111111 : unseen_ && unseenLevel_ == 2 ? C::white : C::ink2, 1);
+    hit(ID_ACT, ar, F_FOCUS | F_HAND, 10);
+}
+
+float App::panelBody(float x, float y0, float w) {
+    float y = y0;
+    const Config& c = st_.config;
+    Font h3{ Face::Display, 18, 900, true }, lbl{ Face::UI, 10.5f, 600, false };
+    auto head = [&](const wchar_t* s) { text(s, h3, x, y, w, 18, C::white); y += 18 + 11; };
+    auto label = [&](const wchar_t* s) { text(s, lbl, x, y, w, 15, C::white, 0, 0.74f, .55f); y += 15; };
+    if (!loaded_) {
+        skeleton(5, rc(x, y, w, 120)); y += 120 + 11;
+        skeleton(6, rc(x, y, w, 74)); y += 74 + 11;
+        skeleton(7, rc(x, y, w, 38)); y += 38;
+        return y + 8;
+    }
+    const Build* b = sel();
+    bool dis = b && b->lobby == Support::No, hasMatch = matchOk(b);
+    if (b) {
+        // STATUS: the four cells (.st), a dot by level
+        head(L"STATUS");
+        Sup lob = sup(b->lobby), mat = b->matchServer ? sup(b->match) : Sup{ 2, L"No server" };
+        bool fwOk = b->firewall == L"OK";
+        struct Cell { const wchar_t* k; std::wstring v; int cls; } cells[4] = {
+            { L"LOBBY", lob.label, lob.cls },
+            { L"LOCAL MATCH", mat.label, mat.cls },
+            { L"COSMETICS", b->cosmetics ? thousands(b->cosmetics) : L"Missing", b->cosmetics ? 0 : 1 },
+            { L"FIREWALL", fwOk ? L"Local only" : L"Missing", fwOk ? 0 : 2 },
+        };
+        float cw = (w - 8) / 2, chh = 10 + 14 + 2 + 18 + 10;
+        for (int i = 0; i < 4; i++) {
+            float cx = x + (i % 2) * (cw + 8), cy = y + (i / 2) * (chh + 8);
+            fill(rc(cx, cy, cw, chh), C::white, .06f, 11);
+            text(cells[i].k, Font{ Face::UI, 10, 600, false }, cx + 12, cy + 10, cw - 24, 14, C::white, 0, 0.7f, .55f);
+            dot(cx + 12 + 3.5f, cy + 10 + 14 + 2 + 9, 7, cells[i].cls == 0 ? GREEN : clsColor(cells[i].cls));
+            text(cells[i].v, Font{ Face::UI, 13, 700, false }, cx + 12 + 13, cy + 10 + 14 + 2, cw - 24 - 13, 18,
+                 cells[i].cls == 0 ? C::white : cells[i].cls == 1 ? C::warnText : C::badText);
+            hit(ID_CELL0 + i, rc(cx, cy, cw, chh), 0, 0);   // tooltip only
+        }
+        y += 2 * chh + 8 + 11;
+
+        // MODES: Practice / Battle Royale cards (picked in the game), or lobby only
+        if (dis) { alpha_ = .5f; noHit_ = true; }
+        head(L"MODES");
+        Font tf{ Face::Display, 16, 900, true }, df{ Face::UI, 11, 400, false };
+        if (hasMatch) {
+            float mw = (w - 8) / 2;
+            const wchar_t* mt[2] = { L"PRACTICE", L"BATTLE ROYALE" };
+            const wchar_t* md[2] = { L"Creative · Playground", L"Solo to Squads" };
+            float th[2] = { rich(mt[0], tf, 0, 0, mw - 24, 16, C::white, C::white, 0, false), rich(mt[1], tf, 0, 0, mw - 24, 16, C::white, C::white, 0, false) };
+            float mh = std::max(74.f, 10 + std::max(th[0], th[1]) + 5 + 15 + 10);
+            for (int i = 0; i < 2; i++) {
+                D2D1_RECT_F r = rc(x + i * (mw + 8), y, mw, mh);
+                // linear-gradient(160deg, ...): the line through the center along (sin 160, -cos 160)
+                if (modeBr_[i] && !measuring_) {
+                    const float dx = 0.3420201f, dy = 0.9396926f;
+                    float len = mw * dx + mh * dy, gx = (r.left + r.right) / 2, gy = (r.top + r.bottom) / 2;
+                    modeBr_[i]->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
+                    modeBr_[i]->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
+                    modeBr_[i]->SetOpacity(alpha_);
+                    rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 12, 12), modeBr_[i]);
+                }
+                rich(mt[i], tf, r.left + 12, r.top + 10, mw - 24, 16, C::white, C::white);
+                text(md[i], df, r.left + 12, r.top + 10 + th[i] + 5, mw - 24, 15, C::white, 0, 0, .85f);
+                hit(ID_MODE0 + i, r, 0, 0);   // tooltip only
+            }
+            y += mh + 11;
+        } else {
+            D2D1_RECT_F r = rc(x, y, w, 58);
+            fill(r, C::white, .06f, 12);
+            text(L"LOBBY ONLY", tf, r.left + 12, r.top + 10, w - 24, 16, C::white);
+            text(L"No local match on this build: lobby, locker and styles", df, r.left + 12, r.top + 10 + 16 + 5, w - 24, 15, C::white, 0, 0, .75f);
+            hit(ID_MODE0, r, 0, 0);
+            y += 58 + 11;
+        }
+    }
+
+    // player name (a native EDIT on an opaque field)
+    label(L"PLAYER NAME"); y += 6;
+    {
+        EditBox& e = edits_[0];
+        bool foc = hwnd_ && GetFocus() == e.hwnd;
+        D2D1_RECT_F fr = rc(x, y, w, 38);
+        float fv = fx(K_COLOR | ID_NAME, foc ? 1.f : hover_ == ID_NAME ? .45f : 0.f, fr);   // border 120 ms on hover and focus
+        box(fr, 10, FIELD, 1, C::white, .12f + .3f * fv);
+        D2D1_RECT_F inner = { x + 12, y + 1, x + w - 12, y + 37 };
+        if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
+        if (!e.show || measuring_) text(c.displayName, Font{ Face::UI, 13, 600, false }, inner.left, y, inner.right - inner.left, 38, C::white);
+        hit(ID_NAME, fr, F_FOCUS | F_EDIT, 10);
+        y += 38 + 11;
+    }
+
+    if (hasMatch) {
+        // bots: the number (an EDIT while it has the focus), the slider, - and +
+        label(L"BOTS"); y += 4;
+        int bots = botsDrag_ >= 0 ? botsDrag_ : c.bots;
+        const float rowH = 34;
+        EditBox& e = edits_[1];
+        D2D1_RECT_F nr = rc(x, y, 52, rowH);
+        bool editing = hwnd_ && (e.want || GetFocus() == e.hwnd);
+        if (!measuring_) { e.r = { nr.left + 3, nr.top + 1 + oy_, nr.right - 3, nr.bottom - 1 + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
+        if (editing && !dis) box(nr, 8, FIELD, 1, C::white, .42f);
+        else text(std::to_wstring(bots), Font{ Face::Display, 32, 900, true }, x, y, 60, rowH, C::white, 0, -0.32f);
+        hit(ID_BOTS, nr, F_FOCUS | F_EDIT, 8);
+        float cy = y + rowH / 2, s2 = x + w - 26, s1 = s2 - 6 - 26;
+        float rx = x + 52 + 8, rw = std::max(40.f, s1 - 12 - rx);
+        fill({ rx, cy - 3, rx + rw, cy + 3 }, C::white, .12f, 3);
+        float tx = rx + 8 + (rw - 16) * bots / 99.f;
+        if (!measuring_) {
+            if (rangeBr_) {   // linear-gradient(90deg, #8b5cf6, #c084fc) up to the knob
+                rangeBr_->SetStartPoint(D2D1::Point2F(rx, 0)); rangeBr_->SetEndPoint(D2D1::Point2F(std::max(rx + 1, tx), 0));
+                rangeBr_->SetOpacity(alpha_);
+                rt_->FillRoundedRectangle(D2D1::RoundedRect({ rx, cy - 3, std::max(rx + 6, tx), cy + 3 }, 3, 3), rangeBr_);
+            }
+            if (hover_ == ID_RANGE || drag_ == ID_RANGE) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(tx, cy), 12, 12), br(C::white, 0.12f));
+            rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(tx, cy), 8, 8), br(C::white));
+        }
+        hit(ID_RANGE, rc(rx, y, rw, rowH), F_FOCUS | F_HAND, 6);
+        auto step = [&](int id, float sx, const wchar_t* t) {
+            D2D1_RECT_F r = rc(sx, cy - 13, 26, 26);
+            float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);
+            fill(r, C::white, .08f + .1f * hv, 13);
+            text(t, Font{ Face::UI, 15, 600, false }, sx, cy - 13, 26, 26, C::white, 1);
+            hit(id, r, F_FOCUS | F_HAND, 13);
+        };
+        step(ID_STEP_DN, s1, L"−");
+        step(ID_STEP_UP, s2, L"+");
+        y += rowH + 11;
+
+        // .tg: the four switches (their details are the tooltips)
+        struct Tg { const wchar_t* label; bool on; } tg[4] = {
+            { L"Bots use the game's AI", c.botsAI }, { L"Late game", c.lateGame }, { L"Infinite materials", c.infiniteMaterials }, { L"Infinite ammo", c.infiniteAmmo },
+        };
+        Font tgf{ Face::UI, 12.5f, 500, false };
+        for (int i = 0; i < 4; i++) {
+            int id = ID_TG0 + i;
+            D2D1_RECT_F r = rc(x, y, w, 30);
+            text(tg[i].label, tgf, x, y, w - 44, 30, C::white);
+            fill(rc(x, y + 29, w, 1), C::white, .07f);
+            float sx = x + w - 32, sy = y + 6;
+            // .sw: background and the knob 180 ms var(--ease)
+            float v = fx(K_SWITCH | id, tg[i].on ? 1.f : 0.f, rc(sx, sy, 32, 18), T2, Curve::Ui);
+            fill(rc(sx, sy, 32, 18), mix(0x474C5A, C::ok, v), 1, 9);
+            dot(sx + 2 + 7 + 14 * v, sy + 9, 14, mix(0xCFD2D6, C::white, v));
+            hit(id, r, F_FOCUS | F_HAND, 6);
+            y += 30;
+        }
+        if (c.botsAI) {   // the page's warning when the bots' AI is on
+            y += 10;
+            Font wf{ Face::UI, 11.5f, 400, false };
+            std::wstring note = L"**Bot AI is on.** On " + b->version + L" it crashes the match server a few seconds after it starts.";
+            float th = rich(note, wf, 0, 0, w - 24, 16.5f, C::warnText, C::white, 0, false);
+            icon(Icon::Warn, x, y + 0.5f, 16, C::warn);
+            rich(note, wf, x + 24, y, w - 24, 16.5f, C::warnText, C::white);
+            y += th;
+        }
+    }
+    alpha_ = 1; noHit_ = false;
+    return y + 10;
 }
 
 void App::drawTitle(float W) {
@@ -809,302 +1545,6 @@ void App::drawTitle(float W) {
         icon(ics[i], r.left + 18, (TB - 1 - 10) / 2, 10, c);
         hit(id, r, F_FOCUS | F_HAND | F_RING_IN, 0);
     }
-}
-
-void App::drawRail(float x, float y, float w, float h) {
-    vline(x + w - 1, y, y + h, C::line2);
-    bool tiny = w <= 72;
-    float iw = w - 1;
-    if (!tiny) text(L"BUILDS", Font{ Face::UI, 11, 600, false }, x + 16, y, 120, 48, C::dim, 0, 0.88f);
-    float ax = tiny ? (iw - 28) / 2 : iw - 12 - 28;
-    button(ID_ADD, ax, y + 10, nullptr, Icon::Plus, true, true, true);
-    if (menu_ == 1) menuAnchor_ = rc(ax, y + 10, 28, 28);
-
-    float footH = 12 + 17.4f + 12 + 1, ft = y + h - footH;
-    // list
-    float ly = y + 48, lx = x + 8, lw = iw - 16;
-    D2D1_RECT_F saved = clip_;
-    clip_ = { x, y + 48, x + iw, ft };
-    rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
-    if (!loaded_) {
-        for (int i = 0; i < 3; i++) { skeleton(i, rc(lx, ly + 2, lw, 52)); ly += 56; }
-    } else if (st_.builds.empty()) {
-        float th = rich(L"No builds yet.\nAdd a downloaded zip or a folder with **+**.", Font{ Face::UI, 12.5f, 400, false }, 0, 0, lw - 32 - 2, 18.125f, C::muted, C::text, 1, false);
-        D2D1_RECT_F r = rc(lx, ly + 8, lw, 40 + th + 2);
-        if (!measuring_) {
-            ID2D1StrokeStyle* dash = nullptr;
-            float dashes[] = { 3, 3 };
-            g_.d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10, D2D1_DASH_STYLE_CUSTOM, 0), dashes, 2, &dash);
-            rt_->DrawRoundedRectangle(D2D1::RoundedRect({ r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f }, 11.5f, 11.5f), br(C::line), 1, dash);
-            release(dash);
-        }
-        if (!tiny) rich(L"No builds yet.\nAdd a downloaded zip or a folder with **+**.", Font{ Face::UI, 12.5f, 400, false }, r.left + 17, r.top + 21, lw - 34, 18.125f, C::muted, C::text, 1);
-    } else {
-        bool b = busy();
-        for (size_t i = 0; i < st_.builds.size(); i++) {
-            const Build& bd = st_.builds[i];
-            int id = ID_BUILD0 + (int)i;
-            float ih = tiny ? 49.f : 10 + 20 + 2 + 17.4f + 10;
-            D2D1_RECT_F r = rc(lx, ly, lw, ih);
-            bool on = bd.name == selected_;
-            float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);   // .bi: background 120 ms (selection is instant)
-            if (on) fill(r, C::surface, 1, 8); else if (hv > 0) fill(r, C::bg2, hv, 8);
-            uint32_t dc = clsColor(level(bd));
-            if (tiny) {
-                text(bd.version, Font{ Face::Display, 15, 900, true }, lx + 4, ly + 10, lw - 8, 15, C::text, 1, -0.15f);
-                dot(lx + lw / 2, ly + 10 + 15 + 6 + 4, 8, dc);
-            } else {
-                if (text(bd.version, Font{ Face::Display, 20, 900, true }, lx + 12, ly + 10, lw - 24 - 16, 20, C::text, 0, -0.2f)) issues.push_back(L"clipped bi.v: " + bd.version);
-                text(season(bd.major, bd.minor), Font{ Face::UI, 12, 400, false }, lx + 12, ly + 10 + 20 + 2, lw - 24 - 16, 17.4f, C::muted);
-                dot(lx + lw - 12 - 4, ly + ih / 2, 8, dc);
-            }
-            hit(id, r, F_FOCUS | F_HAND | (b ? 0 : 0), 8);
-            ly += ih + 2;
-        }
-    }
-    rt_->PopAxisAlignedClip();
-    clip_ = saved;
-    // footer: the builds folder
-    hline(x, x + iw, ft, C::line2);
-    bool hov = hover_ == ID_ROOT;
-    uint32_t c = hov ? C::text : C::dim;
-    icon(Icon::Folder, tiny ? x + (iw - 16) / 2 : x + 16, ft + 1 + 12 + (17.4f - 16) / 2, 16, c);
-    if (!tiny) text(st_.root, Font{ Face::UI, 12, 400, false }, x + 16 + 16 + 8, ft + 1 + 12, iw - 16 - 16 - 8 - 16, 17.4f, c);
-    hit(ID_ROOT, { x, ft, x + iw, y + h }, F_FOCUS | F_HAND | F_RING_IN, 0);
-}
-
-float App::drawContent(float x0, float y0, float avail, float viewH) {
-    (void)viewH;
-    bool n1040 = W_ <= 1040, n1000 = W_ <= 1000, n900 = W_ <= 900, shortH = H_ <= 560;
-    float boxW = std::min(880.f, avail), px = n1040 ? 24.f : 32.f;
-    float pt = shortH ? 16.f : n1040 ? 20.f : 24.f, pb = n1040 ? 20.f : 24.f, gap = shortH ? 16.f : 24.f;
-    float x = x0 + (avail - boxW) / 2 + px, cw = boxW - 2 * px, y = y0 + pt;
-    const Config& c = st_.config;
-
-    if (!loaded_) {   // skeleton while the host loads
-        skeleton(3, rc(x, y, cw, 110)); y += 110 + gap;
-        skeleton(4, rc(x, y, cw, 220)); y += 220;
-        return y + pb;
-    }
-    const Build* b = sel();
-    if (!b) {
-        text(L"No build", Font{ Face::Display, 40, 900, true }, x, y, cw, 36, C::text, 0, -1.0f); y += 36 + 8;
-        text(L"Add a Fortnite build to start", Font{ Face::UI, 15, 600, false }, x, y, cw, 21.75f, C::text); y += 21.75f + 2;
-        text(L"Builds live in " + st_.root + L". A downloaded zip is extracted there; a folder is moved or copied.", Font{ Face::UI, 12, 400, false }, x, y, cw, 17.4f, C::dim);
-        y += 17.4f + gap;
-        float bx = x;
-        bx += button(ID_EMPTY_ZIP, bx, y, L"Add from zip…", Icon::Zip, false, false, false) + 8;
-        bx += button(ID_EMPTY_FOLDER, bx, y, L"Add from folder…", Icon::Folder, false, false, false) + 8;
-        button(ID_EMPTY_ROOT, bx, y, L"Change builds folder…", Icon::Folder, false, false, false);
-        return y + 34 + pb;
-    }
-
-    // ---- hero
-    float verSize = shortH ? 40.f : n1040 ? 48.f : 56.f;
-    float bw = button(ID_BUILDMENU, 0, 0, L"Build", Icon::More, true, false, false, true, true);
-    float leftW = cw - bw - 16;
-    float vlh = verSize * 0.9f;
-    text(b->version, Font{ Face::Display, verSize, 900, true }, x, y, leftW, vlh, C::text, 0, -0.025f * verSize);
-    float yy = y + vlh + 8;
-    text(season(b->major, b->minor), Font{ Face::UI, 15, 600, false }, x, yy, leftW, 21.75f, C::text); yy += 21.75f + 2;
-    text(fmt(L"CL %u · Unreal Engine %ls · %ls", b->cl, b->engine.c_str(), (b->dir.empty() ? b->name : b->dir).c_str()),
-         Font{ Face::UI, 12, 400, false, true }, x, yy, leftW, 17.4f, C::dim);   // .meta: tabular-nums
-    hit(ID_META, rc(x, yy, leftW, 17.4f), 0, 0);   // tooltip only
-    yy += 17.4f;
-    button(ID_BUILDMENU, x + cw - bw, y, L"Build", Icon::More, true, false, false);
-    if (menu_ == 2) menuAnchor_ = rc(x + cw - bw, y + oy_, bw, 28);
-    y = std::max(yy, y + 28) + 16;
-
-    // ---- the four status cells
-    Sup lob = sup(b->lobby), mat = b->matchServer ? sup(b->match) : Sup{ 2, L"match server missing" };
-    bool fwOk = b->firewall == L"OK";
-    struct Cell { Icon ic; const wchar_t* k; std::wstring v; int cls; } cells[4] = {
-        { Icon::Lobby, L"Lobby", lob.label, lob.cls },
-        { Icon::Match, L"Local match", mat.label, mat.cls },
-        { Icon::Cos, L"Cosmetics", b->cosmetics ? thousands(b->cosmetics) : L"Missing", b->cosmetics ? 0 : 1 },
-        { Icon::Fw, L"Firewall", fwOk ? L"127.0.0.1 only" : L"Missing", fwOk ? 0 : 2 },
-    };
-    int cols = n900 ? 2 : 4, rows = 4 / cols;
-    float cellH = 12 + 17.4f + 2 + 18.85f + 12, cellW = (cw - 2) / cols;
-    float stripH = rows * cellH + (rows - 1) + 2;
-    box(rc(x, y, cw, stripH), 12, C::bg, 1, C::line2);
-    for (int i = 0; i < 4; i++) {
-        int col = i % cols, row = i / cols;
-        float cx = x + 1 + col * cellW, cy = y + 1 + row * (cellH + 1);
-        float iw = cellW - 32;
-        if (col > 0) { vline(cx, cy, cy + cellH, C::line2); cx += 1; iw -= 1; }   // .cell+.cell border-left is inside the cell
-        if (row > 0 && col == 0) hline(x + 1, x + cw - 1, cy - 1, C::line2);
-        icon(cells[i].ic, cx + 16, cy + 12 + (17.4f - 16) / 2, 16, C::muted);
-        text(cells[i].k, Font{ Face::UI, 12, 400, false }, cx + 16 + 22, cy + 12, iw - 22, 17.4f, C::muted);
-        text(cells[i].v, Font{ Face::UI, 13, 600, false }, cx + 16, cy + 12 + 17.4f + 2, iw, 18.85f, clsColor(cells[i].cls));
-        hit(ID_CELL0 + i, rc(cx, cy, iw + 32, cellH), 0, 0);   // tooltip only
-    }
-    y += stripH;
-
-    // ---- notices
-    struct Notice { int cls; std::wstring html; int btn; const wchar_t* label; };
-    std::vector<Notice> notices;
-    if (b->lobby == Support::No) notices.push_back({ 2, L"**Fortnite " + b->version + L" cannot be launched.** " + b->lobbyWhy + L".", 0, nullptr });
-    else {
-        if (!fwOk) notices.push_back({ 1, L"**Firewall rules missing.** " + b->firewall + L". They are created before launch (administrator prompt).", ID_NOTICE_FW, L"Create now" });
-        if (!b->cosmetics) notices.push_back({ 1, L"**No cosmetics list yet.** Only the default items will show in the locker.", ID_NOTICE_COS, L"Generate" });
-    }
-    for (auto& n : notices) {
-        y += gap;
-        float nbw = n.btn ? button(n.btn, 0, 0, n.label, Icon::Plus, true, false, false, false, true) : 0;
-        float tw = cw - 32 - 16 - 12 - (n.btn ? nbw + 12 : 0);
-        uint32_t tc = n.cls == 2 ? C::badText : C::warnText;
-        Font nf{ Face::UI, 12.5f, 400, false };
-        float th = rich(n.html, nf, 0, 0, tw, 18.75f, tc, C::text, 0, false);
-        float h = 24 + std::max(th, n.btn ? 28.f : 18.f);
-        fill(rc(x, y, cw, h), n.cls == 2 ? C::bad : C::warn, 0.12f, 12);
-        icon(Icon::Warn, x + 16, y + 12 + 2, 16, tc);
-        rich(n.html, nf, x + 16 + 16 + 12, y + 12, tw, 18.75f, tc, C::text);
-        if (n.btn) button(n.btn, x + cw - 16 - nbw, y + 12, n.label, Icon::Plus, true, false, false, false);
-        y += h;
-    }
-
-    // ---- settings card (measured first, then drawn on its background)
-    y += gap;
-    bool dis = b->lobby == Support::No, hasMatch = matchOk(b);
-    float cardY = y;
-    auto body = [&]() -> float {
-        float sp = shortH ? 16.f : 20.f, ix = x + 1 + sp, iw = cw - 2 - 2 * sp, yy = cardY + 1 + sp;
-        text(L"Modes", Font{ Face::UI, 12, 600, false }, ix, yy, iw, 17.4f, C::muted); yy += 17.4f + 8;
-        if (hasMatch) {
-            float mw = (iw - 8) / 2, mpv = n1000 ? 10.f : 12.f;
-            Font df{ Face::UI, 12, 400, false };
-            std::wstring d[2] = { L"Pick **Creative / Playground** in the game: alone, infinite materials and ammo, 0 ping.",
-                                  fmt(L"Pick **Solo, Duos, Trios or Squads**: bus, storm and loot, with %d bots.", c.bots) };
-            float dh = std::max(rich(d[0], df, 0, 0, mw - 26, 16.8f, C::muted, C::ink2, 0, false), rich(d[1], df, 0, 0, mw - 26, 16.8f, C::muted, C::ink2, 0, false));
-            float mh = 2 + 2 * mpv + 18.85f + 4 + dh;
-            const Icon mi[2] = { Icon::Build, Icon::Bots };
-            const wchar_t* mt[2] = { L"Practice", L"Battle Royale" };
-            for (int i = 0; i < 2; i++) {
-                float mx = ix + i * (mw + 8);
-                box(rc(mx, yy, mw, mh), 8, C::bg2, 1, C::line2);
-                icon(mi[i], mx + 13, yy + 1 + mpv + (18.85f - 16) / 2, 16, C::text);
-                if (text(mt[i], Font{ Face::UI, 13, 600, false }, mx + 13 + 24, yy + 1 + mpv, mw - 26 - 24, 18.85f, C::text)) issues.push_back(std::wstring(L"clipped mode.t: ") + mt[i]);
-                rich(d[i], df, mx + 13, yy + 1 + mpv + 18.85f + 4, mw - 26, 16.8f, C::muted, C::ink2);
-            }
-            yy += mh;
-            if (n1000) {
-                yy += 8;
-                yy += rich(L"In the game's lobby press **CHANGE**, pick a mode, then **PLAY**. The match server for it starts by itself.", Font{ Face::UI, 12, 400, false }, ix, yy, iw, 17.4f, C::muted, C::ink2);
-            }
-        } else {
-            Font nf{ Face::UI, 12.5f, 400, false };
-            float th = rich(L"This build has no local match: lobby, locker and styles only.", nf, 0, 0, iw - 24, 18.125f, C::muted, C::ink2, 0, false);
-            icon(Icon::Lobby, ix, yy + (th - 16) / 2, 16, C::muted);
-            rich(L"This build has no local match: lobby, locker and styles only.", nf, ix + 24, yy, iw - 24, 18.125f, C::muted, C::ink2);
-            yy += th;
-        }
-        yy += sp;
-        hline(x + 1, x + cw - 1, yy, C::line2);
-        yy += 1 + sp;
-
-        // player name + bots
-        int cols2 = n900 ? 1 : 2;
-        float colW = cols2 == 2 ? (iw - 24) / 2 : iw, fieldH = 17.4f + 8 + 34 + 6 + 17.4f;
-        auto field = [&](float fx, float fy, const wchar_t* label, const wchar_t* help) {
-            text(label, Font{ Face::UI, 12, 600, false }, fx, fy, colW, 17.4f, C::muted);
-            text(help, Font{ Face::UI, 12, 400, false }, fx, fy + 17.4f + 8 + 34 + 6, colW, 17.4f, C::dim);
-            return fy + 17.4f + 8;
-        };
-        {
-            float fy = field(ix, yy, L"Player name", L"Local account only, never an Epic account.");
-            EditBox& e = edits_[0];
-            bool foc = hwnd_ && GetFocus() == e.hwnd;
-            bool hov = hover_ == ID_NAME;
-            // .field .in: border-color 120 ms on hover and focus
-            box(rc(ix, fy, colW, 34), 8, C::bg2, 1, fxc(K_COLOR | ID_NAME, foc ? C::muted : hov ? C::l2 : C::line, rc(ix, fy, colW, 34)));
-            D2D1_RECT_F inner = { ix + 13, fy + 1, ix + colW - 13, fy + 33 };
-            if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
-            if (!e.show || measuring_) text(c.displayName, Font{ Face::UI, 13, 500, false }, inner.left, fy, inner.right - inner.left, 34, C::text);
-            hit(ID_NAME, rc(ix, fy, colW, 34), F_FOCUS | F_EDIT, 8);
-        }
-        if (hasMatch) {
-            float bx = cols2 == 2 ? ix + colW + 24 : ix, by = cols2 == 2 ? yy : yy + fieldH + 16;
-            float fy = field(bx, by, L"Bots", L"0–99. 20 suits this PC.");
-            int bots = botsDrag_ >= 0 ? botsDrag_ : c.bots;
-            box(rc(bx, fy, 98, 34), 8, C::bg2, 1, C::line);
-            // focus order like the page: -, the number, +
-            auto stepBtn = [&](int id, float sx, const wchar_t* label) {
-                text(label, Font{ Face::UI, 13, 400, false }, sx, fy, 30, 34, hover_ == id ? C::text : C::muted, 1);
-                hit(id, rc(sx, fy + 1, 30, 32), F_FOCUS | F_HAND, 6);
-            };
-            stepBtn(ID_STEP_DN, bx + 1, L"\u2212");
-            EditBox& e = edits_[1];
-            D2D1_RECT_F inner = { bx + 31, fy + 1, bx + 31 + 36, fy + 33 };
-            if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
-            if (!e.show || measuring_) text(std::to_wstring(bots), Font{ Face::UI, 13, 600, false }, inner.left, fy, 36, 34, C::text, 1);
-            hit(ID_BOTS, rc(inner.left, fy, 36, 34), F_FOCUS | F_EDIT, 4);
-            stepBtn(ID_STEP_UP, bx + 1 + 30 + 36, L"+");
-            float rx = bx + 98 + 12, rw = std::max(60.f, colW - 98 - 12);
-            float cy = fy + 17;
-            fill({ rx, cy - 2, rx + rw, cy + 2 }, C::line, 1, 2);
-            float tx = rx + 8 + (rw - 16) * bots / 99.f;
-            if (!measuring_) {
-                rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(tx, cy), 12, 12), br(C::white, 0.08f));
-                rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(tx, cy), 8, 8), br(C::white));
-            }
-            hit(ID_RANGE, rc(rx, fy, rw, 34), F_FOCUS | F_HAND, 6);
-        }
-        yy += cols2 == 2 || !hasMatch ? fieldH : 2 * fieldH + 16;
-
-        if (hasMatch) {
-            // four switches, two per row
-            yy += 12;
-            struct Tg { const wchar_t* label; const wchar_t* sub; bool on; } tg[4] = {
-                { L"Bots use the game's AI", L"Experimental: crashes the match on 17.50", c.botsAI },
-                { L"Late game", L"Small storm, shields", c.lateGame },
-                { L"Infinite materials", L"Battle Royale (practice always has them)", c.infiniteMaterials },
-                { L"Infinite ammo", L"Battle Royale (practice always has it)", c.infiniteAmmo },
-            };
-            float tcw = (iw - 24) / 2;
-            Font sf{ Face::UI, 11.5f, 400, false };
-            for (int r = 0; r < 2; r++) {
-                float lh[2], rowH = 34;
-                for (int k = 0; k < 2; k++) { lh[k] = 18.85f + rich(tg[r * 2 + k].sub, sf, 0, 0, tcw - 44, 16.675f, C::dim, C::dim, 0, false); rowH = std::max(rowH, lh[k]); }
-                for (int k = 0; k < 2; k++) {
-                    const Tg& t = tg[r * 2 + k];
-                    int id = ID_TG0 + r * 2 + k;
-                    float tx = ix + k * (tcw + 24), ty = yy + (rowH - lh[k]) / 2;
-                    text(t.label, Font{ Face::UI, 13, 400, false }, tx, ty, tcw - 44, 18.85f, C::ink2);
-                    rich(t.sub, sf, tx, ty + 18.85f, tcw - 44, 16.675f, C::dim, C::dim);
-                    float sx = tx + tcw - 32, sy = yy + (rowH - 18) / 2;
-                    // .sw: background and the knob's transform 180 ms var(--ease)
-                    float v = fx(K_SWITCH | id, t.on ? 1.f : 0.f, rc(sx, sy, 32, 18), T2, Curve::Ui);
-                    fill(rc(sx, sy, 32, 18), mix(C::l2, C::ok, v), 1, 9);
-                    dot(sx + 3 + 6 + 14 * v, sy + 9, 12, C::white);
-                    hit(id, rc(tx, yy, tcw, rowH), F_FOCUS | F_HAND, 4);
-                }
-                yy += rowH;
-            }
-            // note about the bots' AI
-            yy += 12;
-            Font nf{ Face::UI, 12.5f, 400, false };
-            std::wstring note = c.botsAI ? L"**Bot AI is on.** On " + b->version + L" the game's bot AI crashes the match server a few seconds after it starts. Turn it off to play."
-                                         : L"**Bots have no AI.** They drop from the bus and land, but they do not loot or fight.";
-            float th = rich(note, nf, 0, 0, iw - 24 - 24, 18.125f, C::muted, C::ink2, 0, false);
-            float nh = 16 + std::max(17.f, th);
-            fill(rc(ix, yy, iw, nh), c.botsAI ? C::warn : C::surface, c.botsAI ? 0.12f : 1.f, 8);
-            icon(c.botsAI ? Icon::Warn : Icon::Bots, ix + 12, yy + 8 + 1, 16, c.botsAI ? C::warn : C::muted);
-            rich(note, nf, ix + 12 + 16 + 8, yy + 8, iw - 24 - 24, 18.125f, c.botsAI ? C::ink2 : C::muted, C::ink2);
-            yy += nh;
-        }
-        yy += sp + 1;
-        return yy - cardY;
-    };
-    measuring_ = true;
-    float cardH = body();
-    measuring_ = false;
-    if (dis) { alpha_ = 0.5f; noHit_ = true; }
-    box(rc(x, cardY, cw, cardH), 12, C::bg, 1, C::line2);
-    body();
-    alpha_ = 1; noHit_ = false;
-    y = cardY + cardH;
-    return y + pb;
 }
 
 void App::drawActivity(float x, float y, float w, float h) {
@@ -1217,125 +1657,6 @@ void App::drawActivity(float x, float y, float w, float h) {
     if (sbNow) drawScrollbar(ID_SB_LOG, x + w - 10, ly, lh, logScroll_, total, lh);
 }
 
-void App::drawBar(float x, float y, float w) {
-    fill({ x, y, x + w, y + LB }, C::bg);
-    hline(x, x + w, y, C::line2);
-    y += 0.5f;   // the page centres the bar's content in its content box, under the 1px border-top: centre at 36.5
-    const Build* b = sel();
-    const Config& c = st_.config;
-    bool isBusy = busy();
-    // play / stop button
-    bool stopStyle = isBusy;
-    bool disabled = isBusy ? se_.state == SessionState::Stopping : (!b || b->lobby == Support::No);
-    Font pf = stopStyle ? Font{ Face::UI, 14, 600, false } : Font{ Face::Display, 24, 900, true };
-    const wchar_t* pl = stopStyle ? L"Stop" : L"LAUNCH";
-    float ptw = textW(pl, pf, stopStyle ? 0 : -0.24f);
-    float minW = stopStyle ? 150.f : (W_ <= 720 ? 140.f : 196.f);
-    float pw = std::max(minW, 24 + 18 + 10 + ptw + 24 + (stopStyle ? 2 : 0));
-    D2D1_RECT_F pr = rc(x + w - 24 - pw, y + 10, pw, 52), area = grow(pr, 4);
-    bool phov = hover_ == ID_PLAY && !disabled;
-    // .play: background 120 ms; box-shadow ring 120 ms on hover (Stop too); :active scale(.985) 120 ms var(--ease).
-    // The text colour, the Stop border and the width change at once, like the page.
-    uint32_t bg = fxc(K_COLOR | ID_PLAY, disabled ? C::surface : stopStyle ? (phov ? C::hover : C::surface) : C::white, area);
-    float ring = fx(K_HOVER | ID_PLAY, phov ? 1.f : 0.f, area);
-    float press = fx(K_PRESS | ID_PLAY, press_ == ID_PLAY && !disabled ? 1.f : 0.f, area, T1, Curve::Ui);
-    D2D1_MATRIX_3X2_F saved = base_;
-    if (press > 0) {
-        float k = 1 - 0.015f * press;
-        base_ = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2)) * base_;
-        rt_->SetTransform(base_);
-    }
-    if (ring > 0 && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, 1.5f), 13.5f, 13.5f), br(C::white, 0.16f * ring), 3);
-    if (stopStyle) box(pr, 12, bg, 1, C::line); else fill(pr, bg, 1, 12);
-    // .play::after sheen (greet wins over hover, like the later CSS rule); out of the button at rest
-    float sh = anim_.running(K_GREET) ? tw(K_GREET, -1.2f, area) : anim_.running(K_SHEEN) ? tw(K_SHEEN, -1.2f, area) : -1.2f;
-    if (sh > -1.2f && sh < 1.2f && sheen_ && !measuring_) {
-        float bw = pr.right - pr.left, bh = pr.bottom - pr.top;
-        const float dx = 0.9659258f, dy = 0.2588190f;   // 105deg: (sin a, -cos a)
-        float len = bw * dx + bh * dy, gx = (pr.left + pr.right) / 2 + sh * bw, gy = (pr.top + pr.bottom) / 2;
-        sheen_->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
-        sheen_->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
-        sheen_->SetOpacity(alpha_);
-        rt_->FillRoundedRectangle(D2D1::RoundedRect(pr, 12, 12), sheen_);
-    }
-    uint32_t pc = disabled ? C::dim : stopStyle ? C::text : C::bg;
-    float cx = pr.left + (pw - (18 + 10 + ptw)) / 2;
-    icon(stopStyle ? Icon::X : Icon::Play, cx, y + 10 + 17, 18, pc);
-    if (text(pl, pf, cx + 28, y + 10, ptw + 2, 52, pc, 0, stopStyle ? 0 : -0.24f)) issues.push_back(L"clipped play");
-    base_ = saved;
-    rt_->SetTransform(base_);
-
-    // activity toggle
-    Font af{ Face::UI, 12.5f, 600, false };
-    int badgeN = unseen_ ? unseen_ : (int)logs_.size();
-    std::wstring bn = std::to_wstring(badgeN);
-    Font badge{ Face::UI, 11, 400, false, true };   // .badge: tabular-nums
-    float bw = std::max(18.f, 10 + textW(bn, badge));
-    float aw = 12 + 16 + 8 + textW(L"Activity", af) + 8 + bw + 12 + 2;
-    D2D1_RECT_F ar = rc(pr.left - 16 - aw, y + 19, aw, 34);
-    float av = fx(K_HOVER | ID_ACT, hover_ == ID_ACT || actOpen_ ? 1.f : 0.f, ar);   // .act: background and color 120 ms
-    box(ar, 8, C::surface, av, C::line);
-    uint32_t ac = mix(C::muted, C::text, av);
-    icon(Icon::Log, ar.left + 13, y + 19 + 9, 16, ac);
-    text(L"Activity", af, ar.left + 13 + 24, y + 19, 80, 34, ac);
-    float bx = ar.right - 13 - bw;
-    uint32_t bbg = unseen_ && unseenLevel_ == 2 ? C::bad : unseen_ && unseenLevel_ == 1 ? C::warn : C::surface2;
-    uint32_t bfg = unseen_ && unseenLevel_ == 2 ? C::white : unseen_ && unseenLevel_ == 1 ? 0x111111 : C::ink2;
-    fill(rc(bx, y + 27, bw, 18), bbg, 1, 9);
-    text(bn, badge, bx, y + 27, bw, 18, bfg, 1);
-    hit(ID_ACT, ar, F_FOCUS | F_HAND, 8);
-    hit(ID_PLAY, pr, F_FOCUS | F_HAND | (disabled ? F_DISABLED : 0), 12);   // after Activity, like the page
-
-    // status (left)
-    float sx = x + 24, sw = ar.left - 16 - sx;
-    float ty = y + (LB - (18.85f + 17.4f)) / 2;
-    Font fa{ Face::UI, 13, 600, false }, fb{ Face::UI, 12, 400, false };
-    if (isBusy) {
-        static const struct { const wchar_t* cls; const wchar_t* label; } MP[] = {
-            { L"", L"" }, { L"", L"Match ready" }, { L"ok", L"In the match" }, { L"ok", L"In the match" }, { L"ok", L"In the match" },
-            { L"ok", L"In the match" }, { L"", L"Match over" }, { L"bad", L"Match server stopped" } };
-        bool ph = se_.state == SessionState::Running && se_.phase != MatchPhase::None;
-        int pcls = ph ? (!wcscmp(MP[(int)se_.phase].cls, L"ok") ? 0 : !wcscmp(MP[(int)se_.phase].cls, L"bad") ? 2 : -1) : 0;
-        float tx = sx;
-        if (se_.state == SessionState::Running) { dot(sx + 4, y + LB / 2, 8, ph ? (pcls == -1 ? C::ok : clsColor(pcls)) : C::ok); tx += 8 + 12; }
-        else { spinner(sx, y + LB / 2 - 7, 14); tx += 14 + 12; }
-        std::wstring head = se_.state == SessionState::Stopping ? L"Stopping…"
-                          : se_.state != SessionState::Running ? L"Launching Fortnite " + se_.version + L"…"
-                          : ph ? std::wstring(MP[(int)se_.phase].label) + L" · Fortnite " + se_.version
-                          : L"Fortnite " + se_.version + L" is running";
-        float tw = sx + sw - tx;
-        text(head, fa, tx, ty, tw, 18.85f, C::text);
-        float by = ty + 18.85f;
-        if (ph) text(se_.matchDetail, fb, tx, by, tw, 17.4f, pcls == 0 ? C::ink2 : pcls == 2 ? C::badText : C::muted);
-        else {
-            struct St { Stage s; const wchar_t* l; } steps[3] = { { se_.backend, L"Backend" }, { se_.game, L"Game" }, { se_.server, L"Match server" } };
-            int nst = se_.hasServer ? 3 : 2;
-            float zx = tx;
-            for (int i = 0; i < nst; i++) {
-                if (i) { fill(rc(zx + 6, by + 8.2f, 16, 1), C::line); zx += 6 + 16 + 6; }
-                Stage s = steps[i].s;
-                if (s == Stage::Ok) { icon(Icon::Check, zx, by + 0.7f, 16, C::ok); zx += 16; }
-                else if (s == Stage::Bad) { icon(Icon::X, zx, by + 0.7f, 16, C::bad); zx += 16; }
-                else if (s == Stage::Run) { spinner(zx, by + 1.7f, 14); zx += 14; }
-                else { dot(zx + 4, by + 8.7f, 8, C::dim); zx += 8; }
-                if (W_ > 900) { zx += 6; text(steps[i].l, fb, zx, by, 200, 17.4f, C::muted); zx += textW(steps[i].l, fb); }
-            }
-        }
-    } else if (se_.state == SessionState::Error) {
-        icon(Icon::Warn, sx, y + LB / 2 - 8, 16, C::bad);
-        text(se_.message.empty() ? L"Launch failed" : se_.message, fa, sx + 28, ty, sw - 28, 18.85f, C::badText);
-        text(L"Details in Activity", fb, sx + 28, ty + 18.85f, sw - 28, 17.4f, C::muted);
-    } else if (!b) {
-        text(L"No build selected", fa, sx, ty, sw, 18.85f, C::text);
-        text(L"Add or pick a build on the left", fb, sx, ty + 18.85f, sw, 17.4f, C::muted);
-    } else {
-        dot(sx + 4, y + LB / 2, 8, clsColor(level(*b)));
-        std::wstring extra = matchOk(b) ? fmt(L"Mode picked in the game · %d bots in Battle Royale", c.bots) : L"Lobby and locker only";
-        text(b->lobby == Support::No ? L"Not supported" : L"Ready · Fortnite " + b->version, fa, sx + 20, ty, sw - 20, 18.85f, C::text);
-        text(extra + L" · " + c.displayName, fb, sx + 20, ty + 18.85f, sw - 20, 17.4f, C::muted);
-    }
-}
-
 void App::drawMenu() {
     if (!menu_) return;
     int n; const MenuItem* it = menuItems(menu_, &n);
@@ -1368,7 +1689,8 @@ void App::drawMenu() {
 }
 
 void App::drawToasts(float W, float H) {
-    float bottom = H - LB - 16;
+    (void)H;
+    float bottom = toastBottom_;
     Font f{ Face::UI, 12.5f, 400, false };
     for (int i = (int)toasts_.size() - 1; i >= 0; i--) {
         const Toast& t = toasts_[i];
@@ -1376,7 +1698,8 @@ void App::drawToasts(float W, float H) {
         float tw = std::min(maxText, textW(t.text, f) + 1);
         float th = rich(t.text, f, 0, 0, tw, 18.125f, C::text, C::text, 0, false);
         float w = 32 + 2 + 8 + 12 + tw, h = 20 + 2 + std::max(th, 8.f);
-        D2D1_RECT_F r = rc(W - 24 - w, bottom - h, w, h);
+        (void)W;
+        D2D1_RECT_F r = rc(toastRight_ - w, bottom - h, w, h);
         overlays_.push_back({ r.left, r.top, r.right, r.bottom + 6 });   // the whole slide, so it stays put while it moves
         D2D1_RECT_F area = { r.left - 46, r.top - 34, r.right + 46, r.bottom + 6 + 12 + 46 };   // + shadow (3 sigma)
         toastRects_.push_back(area);
@@ -1459,7 +1782,13 @@ std::wstring App::tooltip(int id) const {
     case ID_MAX: return maximized_ ? L"Restore down" : L"Maximize";
     case ID_CLOSE: return L"Close";
     case ID_ADD: return L"Add build";
-    case ID_ROOT: return st_.root.empty() ? L"Change the builds folder" : L"Builds folder: " + st_.root + L" (click to change)";
+    case ID_COSMETICS: return L"Cosmetics of this build";
+    case ID_MODE0: return matchOk(b) ? L"Pick Creative / Playground in the game: alone, infinite materials and ammo, 0 ping." : L"This build has no local match: lobby, locker and styles only.";
+    case ID_MODE1: return fmt(L"Pick Solo, Duos, Trios or Squads: bus, storm and loot, with %d bots.", st_.config.bots);
+    case ID_TG0: return L"Experimental: crashes the match on 17.50";
+    case ID_TG1: return L"Small storm, shields";
+    case ID_TG2: return L"Battle Royale (practice always has them)";
+    case ID_TG3: return L"Battle Royale (practice always has it)";
     case ID_BUILDMENU: return L"Build actions";
     case ID_GRIP: return L"Drag to resize";
     case ID_COPY: return L"Copy activity";
@@ -1507,7 +1836,7 @@ void App::mouseDown(float x, float y) {
     focusVisible_ = false;
     const Hit* h = findHit(x, y);
     int id = h ? h->id : 0;
-    int toggle = menu_ == 1 ? ID_ADD : menu_ == 2 ? ID_BUILDMENU : 0;
+    int toggle = menuOwner(menu_);
     if (menu_ && id != ID_POPUP && !(id >= ID_MENU0 && id < ID_MENU0 + 20) && id != toggle) { menu_ = 0; invalidate(); }
     if (!h || (h->flags & F_DISABLED) || id == ID_POPUP || id == ID_TOAST) {
         if (hwnd_ && GetFocus() != hwnd_) SetFocus(hwnd_);
@@ -1566,6 +1895,8 @@ void App::wheel(float x, float y, float delta) {
     if (actOpen_ && l && inside(l->r, x, y)) {
         logScroll_ = std::max(0.f, logScroll_ - delta / 120.f * LOG_LH * 3);
         logFollow_ = logScroll_ >= logMax_ - 8;
+    } else if (tabMax_ > 0 && inside(tabClip_, x, y)) {
+        tabScroll_ -= delta / 120.f * 80;
     } else if (inside(contentClip_, x, y)) {
         contentScroll_ -= delta / 120.f * 100;
     } else return;
@@ -1581,7 +1912,7 @@ void App::activate(int id) {
         int m = menu_;
         menu_ = 0;
         if (i < n && !it[i].sep) core_->command(it[i].cmd, b);
-        setFocus(m == 1 ? ID_ADD : ID_BUILDMENU, focusVisible_);
+        setFocus(menuOwner(m), focusVisible_);
         invalidate();
         return;
     }
@@ -1590,14 +1921,14 @@ void App::activate(int id) {
     case ID_MIN: ShowWindow(hwnd_, SW_MINIMIZE); break;
     case ID_MAX: ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE); break;
     case ID_CLOSE: PostMessageW(hwnd_, WM_CLOSE, 0, 0); break;
-    case ID_ADD: case ID_BUILDMENU: {
-        int m = id == ID_ADD ? 1 : 2;
+    case ID_ADD: case ID_BUILDMENU: case ID_COSMETICS: {   // the cosmetics panel takes ID_COSMETICS over
+        int m = id == ID_ADD ? 1 : id == ID_BUILDMENU ? 2 : 3;
         menu_ = menu_ == m ? 0 : m;
         if (menu_ && focusVisible_) focus_ = ID_MENU0;   // keyboard: the first item
         invalidate();
         break;
     }
-    case ID_ROOT: case ID_EMPTY_ROOT: core_->command(Command::ChooseRoot, b); break;
+    case ID_EMPTY_ROOT: core_->command(Command::ChooseRoot, b); break;
     case ID_EMPTY_ZIP: core_->command(Command::AddZip, b); break;
     case ID_EMPTY_FOLDER: core_->command(Command::AddFolder, b); break;
     case ID_NOTICE_FW: core_->command(Command::Firewall, b); break;
@@ -1637,7 +1968,10 @@ void App::setFocus(int id, bool keyboard) {
     focus_ = id; focusVisible_ = keyboard;
     if (hwnd_) {
         HWND target = hwnd_;
-        for (auto& e : edits_) if (e.id == id && e.shown) target = e.hwnd;
+        for (auto& e : edits_) if (e.id == id) {
+            if (e.lazy && !e.shown && e.show) { e.want = true; layoutEdits(); }   // the bots number: its EDIT appears to take the focus
+            if (e.shown) target = e.hwnd;
+        }
         if (GetFocus() != target) SetFocus(target);
         if (target != hwnd_ && keyboard) SendMessageW(target, EM_SETSEL, 0, -1);   // like tabbing into an input
     }
@@ -1646,6 +1980,7 @@ void App::setFocus(int id, bool keyboard) {
 }
 
 void App::ensureVisible(int id) {
+    if (id >= ID_BUILD0 && id - ID_BUILD0 < (int)st_.builds.size()) { tabEnsure_ = id - ID_BUILD0; invalidate(); return; }
     const Hit* h = hitById(id);
     if (!h || !(h->flags & F_CONTENT)) return;
     float before = contentScroll_;
@@ -1678,19 +2013,19 @@ void App::moveFocus(int dir) {
 
 bool App::key(UINT vk, bool ctrl, bool shift) {
     if (vk == VK_ESCAPE) {
-        if (menu_) { int t = menu_ == 1 ? ID_ADD : ID_BUILDMENU; menu_ = 0; setFocus(t, focusVisible_); return true; }
+        if (menu_) { int t = menuOwner(menu_); menu_ = 0; setFocus(t, focusVisible_); return true; }
         return false;
     }
     if (ctrl && vk == VK_RETURN) { const Hit* p = hitById(ID_PLAY); if (p && !(p->flags & F_DISABLED)) activate(ID_PLAY); return true; }
     if (ctrl && vk == 'L') { openActivity(!actOpen_); return true; }
-    if (vk == VK_TAB) { if (menu_) { int t = menu_ == 1 ? ID_ADD : ID_BUILDMENU; menu_ = 0; focus_ = t; } moveFocus(shift ? -1 : 1); return true; }
+    if (vk == VK_TAB) { if (menu_) { int t = menuOwner(menu_); menu_ = 0; focus_ = t; } moveFocus(shift ? -1 : 1); return true; }
     if (menu_ && (vk == VK_DOWN || vk == VK_UP)) { moveFocus(vk == VK_DOWN ? 1 : -1); return true; }
     int f = focus_;
-    if (f >= ID_BUILD0 && (vk == VK_DOWN || vk == VK_UP)) {
+    if (f >= ID_BUILD0 && (vk == VK_DOWN || vk == VK_UP || vk == VK_LEFT || vk == VK_RIGHT)) {   // the tabs
         if (busy() || st_.builds.empty()) return true;
         int i = -1;
         for (size_t k = 0; k < st_.builds.size(); k++) if (st_.builds[k].name == selected_) i = (int)k;
-        int j = std::max(0, std::min((int)st_.builds.size() - 1, i + (vk == VK_DOWN ? 1 : -1)));
+        int j = std::max(0, std::min((int)st_.builds.size() - 1, i + (vk == VK_DOWN || vk == VK_RIGHT ? 1 : -1)));
         select(st_.builds[j].name);
         setFocus(ID_BUILD0 + j, true);
         return true;
@@ -1770,6 +2105,8 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     check(L"Down in the build list selects the next build", cur + 1 < st_.builds.size() ? selected_ == st_.builds[cur + 1].name : true);
     key(VK_UP, false, false); frame();
     check(L"Up goes back", selected_ == st_.builds[cur].name);
+    key(VK_RIGHT, false, false); key(VK_LEFT, false, false); frame();
+    check(L"Right and Left on the tabs move the selection and back", selected_ == st_.builds[cur].name && focus_ == ID_BUILD0 + (int)cur);
 
     // build menu: click opens, Escape closes and returns the focus
     click(ID_BUILDMENU);
@@ -1836,7 +2173,7 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
           ncHit(300, 20) == HTCAPTION && ncHit(W - 23, 20) == HTCLIENT && ncHit(W - 23 - 46 * 2, 20) == HTCLIENT && ncHit(300, 60) == HTCLIENT);
     // tooltips: the page's title attributes
     bool tips = true;
-    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0 };
+    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0, ID_MODE0, ID_TG0 };
     for (int id : tipIds) tips = tips && !tooltip(id).empty();
     const Build* sb = sel();
     check(L"icon buttons, build items and status cells have the page's tooltips",
@@ -1887,6 +2224,9 @@ std::vector<std::pair<std::wstring, bool>> App::liveCheck() {
         tipOk = tools == 1 && info && !memcmp(&got, &want, sizeof got) && got.right > got.left && tooltip(ID_CELL0 + 1) == buf && buf[0];
     }
     check(L"hovering a status cell moves the tooltip onto it with the cell's reason", tipOk);
+    // the season art: downloaded or read from the cache off the UI thread, then the stage bitmap is rebuilt with it
+    check(L"the season art arrives off the UI thread and the stage is drawn with it",
+          !art_.pending() && !artImg_.px.empty() && bg_ && bgKey_.artGen == artGen_);
     mouseLeave();
     return out;
 }

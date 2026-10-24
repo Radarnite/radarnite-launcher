@@ -5,7 +5,10 @@ Linked with the real core (`native/core`, `api.h`) into `RadarniteLauncher.exe`;
 and `--selftest-ui`.
 
 - Custom title bar (drag, double-click maximize, Snap, resize edges) and dark DWM frame, per-monitor DPI v2
-- Builds rail, build details with the four status cells, notices, modes card and settings form
+- Lobby screen: the selected build's season art fills the window (per-season gradient, light rays, the battle-pass
+  skin from the cosmetics API, cached in `cache\art` and decoded off the UI thread at the size it is drawn), build tabs
+  with thumbnails, the version, status and Launch at the bottom left, a glass side panel with the status cells,
+  modes and settings (`art.cpp`: the season table and the loader)
 - Activity panel: resizable, filters, search, copy/clear, virtualized list of up to 3,000 lines
 - Launch bar with stages, spinner and Launch/Stop; menus, toasts and the page's tooltips
 - Native EDIT fields, icons as Direct2D geometries from the page's SVG, keyboard navigation with a visible focus ring
