@@ -131,6 +131,8 @@ const MockScenario kScenarios[] = {
     { L"44-poster-settings-2048x1104-125", 2048, 1104, 1.25f, false, 9 },
     { L"45-poster-settings-1280x800", 1280, 800, 1.0f, false, 9 },
     { L"46-poster-settings-760x520", 760, 520, 1.0f, false, 9 },
+    { L"47-poster-settings-activity-760x520", 760, 520, 1.0f, true, 9 },
+    { L"48-poster-activity-760x520", 760, 520, 1.0f, true },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -268,7 +270,7 @@ public:
         else if (id.rfind(L"23-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.selected = L"17.50"; }
         else if (id.rfind(L"21-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.botsAI = true; st.selected = L"17.50"; }
         else if (id.rfind(L"22-", 0) == 0) { st.builds = withServer(many()); st.selected = L"12.41"; post = logs(5); }
-        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0 || (_wtoi(id.c_str()) >= 43 && _wtoi(id.c_str()) <= 46)) {
+        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0 || (_wtoi(id.c_str()) >= 43 && _wtoi(id.c_str()) <= 48)) {
             st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86";
             LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
             l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);

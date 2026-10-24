@@ -864,9 +864,9 @@ void App::paint(float W, float H) {
     rt_->Clear(rgb(C::bg));
 
     // Activity docks over the bottom (the art stays the same size under it: no new decode or stage bitmap when it
-    // opens or its grip moves); the title and the dock keep at least 220 DIPs above it
+    // opens or its grip moves); the title and the dock keep at least 310 DIPs above it
     float actTop = H;
-    if (actOpen_) actTop = H - std::max(140.f, std::min(actH_, H - TB - 220));
+    if (actOpen_) actTop = H - std::max(140.f, std::min(actH_, H - TB - 310));
     drawStage(TB, H);
     drawTitle(W);
 
@@ -1599,7 +1599,7 @@ float App::drawSheet(float x, float w, float top, float bottom) {
     measuring_ = true;
     float ch = sheetBody(x + 23, 20, w - 46) + 20;   // padding 20 22 (+ the 1px border)
     measuring_ = false;
-    float h = std::min(ch + 2, std::max(80.f, bottom - top));
+    float h = std::max(0.f, std::min(ch + 2, bottom - top));   // never over the top row: the content scrolls
     D2D1_RECT_F r = rc(x, bottom - h, w, h);
     sheetRect_ = r;
     float a = tw(K_SHEET, 1, grow(r, 2));   // fades in when it opens (180 ms)
