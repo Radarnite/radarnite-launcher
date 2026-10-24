@@ -236,12 +236,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_COMMAND:
         if (l) g_app->editCommand(LOWORD(w), HIWORD(w));
         return 0;
-    case WM_CTLCOLOREDIT: {
-        HDC dc = (HDC)w;
-        SetTextColor(dc, RGB(0xF5, 0xF6, 0xF7));
-        SetBkColor(dc, RGB(0x18, 0x1A, 0x1F));
-        return (LRESULT)g_app->editBrush();
-    }
+    case WM_CTLCOLOREDIT: return (LRESULT)g_app->editBrush((HWND)l, (HDC)w);
     case WM_SETTINGCHANGE:   // Windows "Show animations" (prefers-reduced-motion for the page)
         if (w == SPI_SETCLIENTAREAANIMATION && !g_selftest) { BOOL on = TRUE; SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0); g_app->setMotion(on != FALSE); }
         break;
@@ -400,11 +395,12 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         }
     };
     pump(std::max(first, 0.0) + 1000);
-    // the Launch button greets ~2.5 s after the first state: the rest starts when nothing moves any more
-    double settleLimit = msSinceStart() + 6000;
-    while (g_app->animating() && msSinceStart() < settleLimit) pump(msSinceStart() + 20);
+    // the Launch button greets ~2.5 s after the first state and the season art arrives (downloaded once, then from the
+    // cache): the rest starts when nothing moves any more
+    double settleLimit = msSinceStart() + 8000;
+    while ((g_app->animating() || g_app->artPending()) && msSinceStart() < settleLimit) pump(msSinceStart() + 20);
     double settled = msSinceStart();
-    bool settledOk = !g_app->animating();
+    bool settledOk = !g_app->animating() && !g_app->artPending();
     double cpu0 = cpuMs(), t0 = msSinceStart(); int paints0 = g_paints, timers0 = g_timers;
     pump(10000);
     double cpu1 = cpuMs(), t1 = msSinceStart(); int idlePaints = g_paints - paints0, idleTimers = g_timers - timers0;
@@ -496,7 +492,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     size_t portPrivVideo = 0, portPrivVideoClosed = 0;
     size_t portPriv0 = 0, portPrivOpen = 0, portPrivScrolled = 0, portPrivClosed = 0, portImgBytes = 0, portImgMax = 0, portImgCount = 0;
     {
-        Core* c = createMockCore(L"25-port-catalog-125");
+        Core* c = createMockCore(L"28-port-catalog-125");
         g_app = new App(g_gfx, c);
         HWND ph = createWindow(inst, true, 1200, 800);
         g_app->attach(ph);
@@ -623,7 +619,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         delete c; delete app;   // the core first: its timers (launch) never reach a deleted window state
     }
     {
-        Core* c = createMockCore(L"25-port-catalog-125");
+        Core* c = createMockCore(L"28-port-catalog-125");
         App* app = new App(g_gfx, c);
         app->start(); app->drain();
         IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;

@@ -31,6 +31,8 @@ class PlaySession {
 public:
     // (stage, state): stage backend|server|game, state run|ok|bad|skip.
     std::function<void(const wchar_t*, const wchar_t*)> stage;
+    // (phase, detail) of the local match while the game runs (Session.Match): waiting|joined|warmup|bus|storm|ended|down.
+    std::function<void(const wchar_t*, const wchar_t*)> match;
     std::wstring failure;                 // why start() failed (shown in the launch bar)
 
     PlaySession(const BuildInfo& b, const LauncherConfig& c, LogFn log);

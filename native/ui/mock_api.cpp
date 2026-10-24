@@ -41,6 +41,14 @@ std::vector<Build> many() {
     e.match = Support::No; e.matchWhy = kNoServer; e.cosmetics = 0; v.push_back(e);
     return v;
 }
+// The lobby screen's mockup: 3.6, 14.30 and 17.50 with the match server, 14.30 selected
+std::vector<Build> lobby() {
+    Build a = mk(L"3.6", 3, 6, 4019403, L"4.20"); a.match = Support::Yes; a.matchWhy = kS3; a.cosmetics = 2210;
+    Build b = mk(L"14.30", 14, 30, 14456520, L"4.26"); b.match = Support::Yes; b.matchWhy = kS3; b.cosmetics = 4025;
+    std::vector<Build> v = { a, b, b1750() };
+    for (auto& x : v) x.matchServer = true;
+    return v;
+}
 Config cfg() {
     Config c; c.has = true; c.displayName = L"testingacc"; c.mode = L"practice"; c.bots = 20;
     c.botsAI = false; c.infiniteMaterials = true; c.infiniteAmmo = false; c.lateGame = false;
@@ -94,16 +102,20 @@ const MockScenario kScenarios[] = {
     { L"21-match-server-ai-on-900-125", 900, 640, 1.25f, false },
     { L"22-build-menu-toast", 1200, 800, 1.0f, false, 2 },
     { L"23-keyboard-focus-switch", 1200, 800, 1.0f, false, 0, 18 },
-    // the cosmetics panel (14.30): the build page's card, then the panel in its states
-    { L"24-port-card", 1200, 800, 1.0f, false },
-    { L"25-port-catalog-125", 1200, 800, 1.25f, false, 0, 0, 1 },
-    { L"26-port-filters", 1200, 800, 1.0f, false, 0, 0, 2 },
-    { L"27-port-import-all-dialog", 1200, 800, 1.0f, false, 0, 0, 3 },
-    { L"28-port-importing-760x520", 760, 520, 1.0f, false, 0, 0, 1 },
-    { L"29-port-selected-hover", 1200, 800, 1.0f, false, 0, 0, 5 },
-    { L"30-port-preview", 1200, 800, 1.0f, false, 0, 0, 4 },
-    { L"31-port-loading", 1200, 800, 1.0f, false, 0, 0, 1 },
-    { L"32-port-importing-1920", 1920, 1040, 1.0f, false, 0, 0, 1 },
+    // the lobby screen at the mockup's size, at 125 % and at the minimum window size
+    { L"24-lobby-1280x800", 1280, 800, 1.0f, false },
+    { L"25-lobby-1280x800-125", 1280, 800, 1.25f, false },
+    { L"26-lobby-760x520", 760, 520, 1.0f, false },
+    // the cosmetics panel (14.30): the lobby with its Cosmetics button, then the panel in its states
+    { L"27-port-lobby-button", 1200, 800, 1.0f, false },
+    { L"28-port-catalog-125", 1200, 800, 1.25f, false, 0, 0, 1 },
+    { L"29-port-filters", 1200, 800, 1.0f, false, 0, 0, 2 },
+    { L"30-port-import-all-dialog", 1200, 800, 1.0f, false, 0, 0, 3 },
+    { L"31-port-importing-760x520", 760, 520, 1.0f, false, 0, 0, 1 },
+    { L"32-port-selected-hover", 1200, 800, 1.0f, false, 0, 0, 5 },
+    { L"33-port-preview", 1200, 800, 1.0f, false, 0, 0, 4 },
+    { L"34-port-loading", 1200, 800, 1.0f, false, 0, 0, 1 },
+    { L"35-port-importing-1920", 1920, 1040, 1.0f, false, 0, 0, 1 },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -221,6 +233,11 @@ public:
         else if (id.rfind(L"23-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.selected = L"17.50"; }
         else if (id.rfind(L"21-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.botsAI = true; st.selected = L"17.50"; }
         else if (id.rfind(L"22-", 0) == 0) { st.builds = withServer(many()); st.selected = L"12.41"; post = logs(5); }
+        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0) {
+            st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86";
+            LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
+            l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
+        }
         else if (portScenario()) { st.builds = { b1750(), b1430() }; st.selected = L"14.30"; }
         lock(); state_ = st; unlock();
         sink_->onState(st);
@@ -228,14 +245,14 @@ public:
         for (auto& l : post) sink_->onLog(l);
         if (hasSession) { lock(); session_ = se; unlock(); sink_->onSession(se); }
         if (id.rfind(L"22-", 0) == 0) sink_->onToast(L"Desktop shortcut created", Level::Ok);
-        if (id.rfind(L"28-", 0) == 0 || id.rfind(L"32-", 0) == 0) { auto j = portJobOf(37); lock(); job_ = j; unlock(); sink_->onPortJob(j); }
+        if (id.rfind(L"31-", 0) == 0 || id.rfind(L"35-", 0) == 0) { auto j = portJobOf(37); lock(); job_ = j; unlock(); sink_->onPortJob(j); }
     }
 
     // ---- cosmetics: answered at once (the offscreen renders have no message loop); the import runs on timers
     void portCatalog(const std::wstring& build, bool) override {
         PortLoad l; l.build = build; l.stage = L"names"; l.ms = 1400; l.done = true;
         sink_->onPortLoad(l);
-        l.stage = L"list"; l.ms = 190000; l.done = id_.rfind(L"31-", 0) != 0;
+        l.stage = L"list"; l.ms = 190000; l.done = id_.rfind(L"34-", 0) != 0;
         sink_->onPortLoad(l);
         if (!l.done) return;   // loading: fn-port never finishes
         lock(); if (!cat_) cat_ = portCatalogOf(build); std::shared_ptr<const PortCatalog> c = cat_; unlock();
@@ -375,7 +392,7 @@ private:
     std::shared_ptr<PortCatalog> cat_;
     std::shared_ptr<PortJob> job_;
     int jobSeq_ = 0;
-    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 24 && n <= 32; }
+    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 35; }
 };
 
 } // namespace

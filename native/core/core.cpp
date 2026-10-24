@@ -298,6 +298,12 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
             { std::lock_guard<std::mutex> g(c->m); c->stages[k] = v; }
             c->postSession();
         };
+        s->match = [w](const wchar_t* k, const wchar_t* d) {
+            auto c = w.lock();
+            if (!c) return;
+            { std::lock_guard<std::mutex> g(c->m); c->phase = k; c->detail = d; }
+            c->postSession();
+        };
         { std::lock_guard<std::mutex> g(m); session = s; }
         if (!s->start()) {
             {

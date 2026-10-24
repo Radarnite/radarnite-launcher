@@ -62,7 +62,7 @@ public:
     const std::vector<IconPart>& icon(Icon i, float* viewBox);
 
     // Raw TTF bytes of Inter (for GDI: the native EDIT controls) and the GDI family name to use.
-    std::wstring gdiFamily = L"Segoe UI";
+    std::wstring gdiFamily = L"Segoe UI", gdiDisplayFamily = L"Segoe UI";   // Inter, Inter Tight (the bots number EDIT)
     // Logo (radarnite.png), decoded once.
     IWICBitmapSource* logo = nullptr;
     std::wstring families;   // the embedded families found (selftest report)
@@ -80,7 +80,7 @@ private:
     std::vector<float> iconBox_;
     ID2D1StrokeStyle* strokes_[3][3] = {};
     std::vector<std::vector<uint8_t>> fontData_;
-    HANDLE gdiFont_ = nullptr;
+    HANDLE gdiFont_ = nullptr, gdiFont2_ = nullptr;
 };
 
 } // namespace rn

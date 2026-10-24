@@ -367,27 +367,6 @@ App::RarBrush* App::rarBrush(const std::string& rarity) {
 }
 void App::releasePortBrushes() { for (auto& b : rarBrushes_) { release(b.bg); release(b.shade); } rarBrushes_.clear(); }
 
-// ================================================================================================ the build page's card
-void App::drawPcard(float x, float y, float w, float* hOut) {
-    const Build* b = sel();
-    Font tf{ Face::UI, 13, 600, false }, df{ Face::UI, 12, 400, false };
-    std::wstring d = pj_ ? L"Importing… " + thousands(pj_->done) + L" of " + thousands(pj_->total) + L" · "
-                   : b && b->imported ? thousands(b->imported) + L" imported · " : L"";
-    d += L"Outfits, emotes, back blings, pickaxes, gliders and more from the Fortnite installed on this PC, added as new items.";
-    float bw = button(ID_P_OPEN, 0, 0, L"Browse and import", Icon::Cos, false, false, false, false, true);
-    float tw = w - 2 - 40 - 20 - 16 - bw - 16;
-    float dh = para(d, df, 0, 0, tw, 17.4f, 0, C::muted, false);
-    float h = 2 + 32 + std::max(34.f, 18.85f + 2 + dh);
-    *hOut = h;
-    box(rc(x, y, w, h), 12, C::bg, 1, C::line2);
-    icon(Icon::Cos, x + 1 + 20, y + (h - 20) / 2, 20, C::muted);
-    float tx = x + 1 + 20 + 20 + 16, ty = y + (h - (18.85f + 2 + dh)) / 2;
-    text(L"Cosmetics from the current Fortnite", tf, tx, ty, tw, 18.85f, C::text);
-    para(d, df, tx, ty + 18.85f + 2, tw, 17.4f, 0, C::muted);
-    button(ID_P_OPEN, x + w - 1 - 20 - bw, y + (h - 34) / 2, L"Browse and import", Icon::Cos, false, false, false, false);
-    if (busy() && !hits_.empty() && hits_.back().id == ID_P_OPEN) hits_.back().flags |= F_DISABLED;
-}
-
 // ================================================================================================ the panel
 void App::drawPort(float x0, float y0, float W, float H) {
     if (pDirty_) portRebuild();
@@ -1244,6 +1223,7 @@ void App::drawPortPreview() {
 // ================================================================================================ input
 std::wstring App::portTip(int id) const {
     switch (id) {
+    case ID_P_OPEN: return pOpen_ ? L"Close the cosmetics" : L"Import cosmetics of the current Fortnite";
     case ID_P_REFRESH: return L"List again from the installed Fortnite";
     case ID_P_CLOSE: return L"Close (Esc)";
     case ID_P_NEW: return L"Only what is not imported yet";
@@ -1319,7 +1299,7 @@ void App::portActivate(int id) {
         return;
     }
     switch (id) {
-    case ID_P_OPEN: portShow(true); break;
+    case ID_P_OPEN: portShow(!pOpen_); break;   // the lobby's Cosmetics button
     case ID_P_CLOSE: portShow(false); break;
     case ID_P_REFRESH: case ID_P_RETRY: portLoad(true); break;
     case ID_P_CAT: case ID_P_FILTERS: case ID_P_SORT: {

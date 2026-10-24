@@ -4,7 +4,8 @@
 #   tools/ci-version.sh [--branch <name>] [--notes <file>]      branch default: $GITHUB_REF_NAME, else the checked out one
 # Base X.Y.Z = the highest stable tag vX.Y.Z plus one patch, or the committed VERSION file when that is higher.
 #   main         -> vX.Y.Z, a release (it becomes releases/latest: every installed launcher updates to it)
-#   other branch -> vX.Y.Z-<branch>.N, a GitHub prerelease (never releases/latest), N = 1 + the highest N already tagged
+#   other branch -> vX.Y.Z-<branch>.N, the version a branch build is stamped with; never published (publish=false),
+#                   N = 1 + the highest N already tagged
 #                   for that base and branch. <branch> = the name in lower case with every run of characters outside
 #                   [0-9a-z-] turned into one "-" (feat/3.0 -> feat-3-0): valid semver identifiers, so the updater
 #                   (native/core/update.cpp) orders them by semver precedence.
@@ -64,7 +65,9 @@ since="${prev:-${last:+v$last}}"
 # ---------------------------------------------------------------- publish or not
 publish=true; reason="new $([ "$prerelease" = true ] && echo prerelease || echo release) $tag"
 msg="$(git log -1 --format=%B HEAD)"
-if grep -qiF '[skip release]' <<<"$msg"; then
+if [ "$prerelease" = true ]; then
+  publish=false; reason="only main publishes: branch builds are checked, never released (no prereleases)"
+elif grep -qiF '[skip release]' <<<"$msg"; then
   publish=false; reason="the head commit message asks to skip the release"
 elif [ -n "$done_tags" ]; then
   publish=false; reason="HEAD is already released as ${done_tags//$'\n'/ }"

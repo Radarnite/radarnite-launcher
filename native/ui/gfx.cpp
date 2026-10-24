@@ -227,10 +227,9 @@ bool Gfx::loadFonts(HINSTANCE inst) {
         auto& keep = fontData_.back();
         IDWriteFontFile* file = nullptr;
         if (SUCCEEDED(loader->CreateInMemoryFontFileReference(dw, keep.data(), (UINT32)keep.size(), nullptr, &file))) { builder->AddFontFile(file); file->Release(); }
-        if (id == RES_FONT_INTER) {   // GDI copy for the EDIT controls
-            DWORD count = 0;
-            gdiFont_ = AddFontMemResourceEx(keep.data(), (DWORD)keep.size(), nullptr, &count);
-        }
+        DWORD count = 0;   // GDI copies for the EDIT controls
+        if (id == RES_FONT_INTER) gdiFont_ = AddFontMemResourceEx(keep.data(), (DWORD)keep.size(), nullptr, &count);
+        else gdiFont2_ = AddFontMemResourceEx(keep.data(), (DWORD)keep.size(), nullptr, &count);
     }
     IDWriteFontSet* set = nullptr;
     bool ok = SUCCEEDED(builder->CreateFontSet(&set)) && SUCCEEDED(dw->CreateFontCollectionFromFontSet(set, &fonts_));
@@ -255,6 +254,7 @@ bool Gfx::loadFonts(HINSTANCE inst) {
         sys->Release();
     }
     if (gdiFont_) gdiFamily = L"Inter";
+    gdiDisplayFamily = gdiFont2_ ? displayFamily_ : gdiFamily;
     return true;
 }
 
@@ -286,6 +286,7 @@ void Gfx::shutdown() {
     for (auto& r : strokes_) for (auto& s : r) release(s);
     release(tnum); release(logo); release(fonts_); release(wic); release(dw); release(d2d);
     if (gdiFont_) RemoveFontMemResourceEx(gdiFont_);
+    if (gdiFont2_) RemoveFontMemResourceEx(gdiFont2_);
 }
 
 Gfx::Fmt& Gfx::fmt(const Font& f) {
