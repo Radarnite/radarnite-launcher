@@ -104,7 +104,7 @@ else grep -q 'must not contain: config.json' t4.log && ok "config.json in the pa
 
 # ---- 5. LZMA hides a leak from a raw scan; the extracted scan catches it ----
 rm -rf stage5 && mkdir -p stage5/app && cp -R payload/. stage5/app/ && rm -f stage5/app/tools/cosmetics-gen/*.pdb stage5/app/tools/fn-modkit-sigfit/ThirdParty.dll
-cp in/launcher-planted.exe stage5/app/RadarniteLauncher.exe
+cp in/launcher-planted.exe stage5/app/RadarniteLauncher.exe; cp in/launcher-planted16.exe stage5/app/tools/planted16.exe
 cp "$ROOT/launcher/radarnite.ico" stage5/app/; cp "$ROOT/launcher/radarnite.ico" stage5/
 "$MAKENSIS" -V1 -DVERSION=3.0.0 -DSRC="$W/stage5" -DOUT="$W/planted-setup.exe" "$ROOT/radarnite.nsi" > t5.log 2>&1
 if "$REL" privacy-scan planted-setup.exe > t5raw.log 2>&1; then ok "raw scan of the LZMA installer sees nothing (why the gate extracts it)"; else echo "note: raw scan hit:"; cat t5raw.log; fi
