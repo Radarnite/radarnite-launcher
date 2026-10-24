@@ -5,6 +5,7 @@
 #include "util.h"
 #include "version.h"
 #include <shellapi.h>
+#include <mutex>
 
 namespace rn {
 namespace update {
@@ -295,20 +296,27 @@ bool setRegString(const wchar_t* name, const std::wstring& v) {
 
 bool httpUrl(const std::wstring& u) { return (istarts(u, L"http://") || istarts(u, L"https://")) && u.find_first_of(L" \t\r\n\"") == std::wstring::npos; }
 
-// The test feed: a test build newer than cur, or nothing (off, offline, older, broken: logged).
+// The test feed: a test build newer than cur, or nothing (off, offline, older, broken). Polled every 2 minutes, so a
+// line that repeats the last one is not logged again.
 Release checkFeed(const Version& cur) {
     std::wstring url = testFeed();
     if (url.empty()) return Release();
+    static std::mutex lastM;
+    static std::wstring last;
+    auto note = [&](const std::wstring& s) {
+        std::lock_guard<std::mutex> g(lastM);
+        if (s != last) log(s);
+        last = s;
+    };
     net::Response res = net::get(url, kUa, nullptr, kFeedTimeout);
-    if (!res.ok()) { log(L"test feed " + url + L": " + res.error); return Release(); }
+    if (!res.ok()) { note(L"test feed " + url + L": " + res.error); return Release(); }
     Release r;
     std::wstring error;
-    if (!parseFeed(res.body, url, &r, &error)) { log(L"test feed " + url + L": " + error); return Release(); }
-    if (compare(r.version, cur) <= 0) { log(L"test feed: up to date (installed " + cur.str() + L", feed " + r.version.str() + L")"); return Release(); }
-    log(L"test build available: " + r.version.str() + L" > " + cur.str());
+    if (!parseFeed(res.body, url, &r, &error)) { note(L"test feed " + url + L": " + error); return Release(); }
+    if (compare(r.version, cur) <= 0) { note(L"test feed: up to date (installed " + cur.str() + L", feed " + r.version.str() + L")"); return Release(); }
+    note(L"test build available: " + r.version.str() + L" > " + cur.str());
     return r;
 }
-
 
 } // namespace
 
