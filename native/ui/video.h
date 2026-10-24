@@ -31,7 +31,8 @@ private:
     IMFMediaEngine* engine_ = nullptr;
     Notify* notify_ = nullptr;
     std::string url_;
-    RECT r_{};
+    RECT r_{}, fit_{};          // the media area, the clip's window inside it
+    DWORD vw_ = 0, vh_ = 0;     // the clip's size
     int radius_ = 0;
     bool ready_ = false, shown_ = false, failed_ = false, visible_ = true;
     LPARAM gen_ = 0;

@@ -113,14 +113,22 @@ void Video::place(RECT r, bool visible) {
     bool moved = memcmp(&r, &r_, sizeof r) != 0;
     if (moved) {
         r_ = r;
-        SetWindowPos(hwnd_, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        // contain: the clip at its own aspect, centred (the preview's gradient shows around it)
+        RECT f = r;
+        int bw = r.right - r.left, bh = r.bottom - r.top;
+        if (vw_ && vh_ && bw > 0 && bh > 0) {
+            if ((int64_t)bw * vh_ > (int64_t)bh * vw_) { int w = (int)((int64_t)bh * vw_ / vh_); f.left = r.left + (bw - w) / 2; f.right = f.left + w; }
+            else { int h = (int)((int64_t)bw * vh_ / vw_); f.top = r.top + (bh - h) / 2; f.bottom = f.top + h; }
+        }
+        SetWindowPos(hwnd_, nullptr, f.left, f.top, f.right - f.left, f.bottom - f.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        fit_ = f;
     }
     if (moved || visible != visible_ || (ready_ && !shown_ && visible)) {
         visible_ = visible;
         bool show = visible && ready_;
         if (show && radius_ > 0) {
             // the preview's left corners are rounded: so is the video
-            int w = r.right - r.left, h = r.bottom - r.top;
+            int w = fit_.right - fit_.left, h = fit_.bottom - fit_.top;
             HRGN g = CreateRoundRectRgn(0, 0, w + 1 + radius_ * 2, h + 1, radius_ * 2, radius_ * 2);
             SetWindowRgn(hwnd_, g, FALSE);
         }
@@ -133,7 +141,11 @@ void Video::place(RECT r, bool visible) {
 void Video::onEvent(WPARAM event, LPARAM gen) {
     if (gen != gen_ || !engine_) return;
     if (event == MF_MEDIA_ENGINE_EVENT_ERROR) { RECT r = r_; std::string u = url_; stop(); url_ = u; r_ = r; failed_ = true; return; }
-    if (!ready_) { ready_ = true; RECT r = r_; r_ = {}; place(r, visible_); }
+    if (!ready_) {
+        ready_ = true;
+        engine_->GetNativeVideoSize(&vw_, &vh_);
+        RECT r = r_; r_ = {}; place(r, visible_);
+    }
 }
 
 void Video::stop() {
@@ -143,6 +155,7 @@ void Video::stop() {
     unloadMf();
     url_.clear();
     ready_ = shown_ = failed_ = false;
+    vw_ = vh_ = 0;
     visible_ = true;
 }
 
