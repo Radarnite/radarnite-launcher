@@ -138,6 +138,40 @@ int semverTable() {
     struct E { const wchar_t* a; const wchar_t* b; };
     const E equal[] = { { L"v3.0.0-rc.1", L"3.0.0-rc.1+meta" }, { L"2.3", L"v2.3.0" }, { L"3.0.0+a", L"3.0.0+b" }, { L"3.0.0-rc.01", L"3.0.0-rc.1" } };
     for (auto& e : equal) expect(update::compare(ver(e.a), ver(e.b)) == 0, fmt(L"compare(%ls, %ls) = 0", e.a, e.b));
+    // test builds (the test channel's feed): the first ones by task and build, then just publish-test's
+    // <base>-test.<N>.<tag> by publish number whatever the task, all before the final
+    const wchar_t* tests[] = { L"3.0.0-rc.1", L"3.0.0-t106.1", L"3.0.0-t106.2", L"3.0.0-t106.10", L"3.0.0-t120.3", L"3.0.0-test.1.t120",
+                               L"3.0.0-test.2.t106", L"3.0.0-test.10.t99", L"3.0.0" };
+    for (size_t i = 0; i + 1 < sizeof tests / sizeof tests[0]; i++)
+        expect(update::compare(ver(tests[i]), ver(tests[i + 1])) < 0, fmt(L"compare(%ls, %ls) < 0", tests[i], tests[i + 1]));
+
+    // feed.json (update::parseFeed): what is read and what is refused
+    const std::wstring feedUrl = L"http://192.0.2.1:8770/feed.json";
+    const std::string sha = "0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789abcdef";
+    struct F { const char* body; bool ok; const wchar_t* ver; const wchar_t* url; };
+    std::string good = "{\"version\":\"3.0.0-t120.2\",\"installer\":\"RadarniteLauncherSetup-3.0.0-t120.2.exe\",\"sha256\":\"" + sha + "\",\"notes\":\"n\"}";
+    std::string abs = "{\"version\":\"3.0.0-t120.3\",\"installer\":\"https://example.com/a/b.exe\",\"sha256\":\"" + sha + "\"}";
+    std::string noSha = "{\"version\":\"3.0.0-t120.2\",\"installer\":\"a.exe\",\"sha256\":\"abc\"}";
+    std::string longSha = "{\"version\":\"3.0.0-t120.2\",\"installer\":\"a.exe\",\"sha256\":\"" + sha + "00\"}";
+    std::string badVer = "{\"version\":\"latest\",\"installer\":\"a.exe\",\"sha256\":\"" + sha + "\"}";
+    std::string path = "{\"version\":\"3.0.0-t1.1\",\"installer\":\"../x.exe\",\"sha256\":\"" + sha + "\"}";
+    std::string noInst = "{\"version\":\"3.0.0-t1.1\",\"sha256\":\"" + sha + "\"}";
+    std::string file = "{\"version\":\"3.0.0-t1.1\",\"installer\":\"file://c:/x.exe\",\"sha256\":\"" + sha + "\"}";
+    const F feeds[] = {
+        { good.c_str(), true, L"3.0.0-t120.2", L"http://192.0.2.1:8770/RadarniteLauncherSetup-3.0.0-t120.2.exe" },
+        { abs.c_str(), true, L"3.0.0-t120.3", L"https://example.com/a/b.exe" },
+        { noSha.c_str(), false }, { longSha.c_str(), false }, { badVer.c_str(), false }, { path.c_str(), false },
+        { noInst.c_str(), false }, { file.c_str(), false }, { "[]", false }, { "<html>", false }, { "", false },
+    };
+    for (auto& f : feeds) {
+        update::Release r;
+        std::wstring error;
+        bool ok = update::parseFeed(f.body, feedUrl, &r, &error);
+        bool match = ok == f.ok && (!ok || (r.found && r.test && r.version.str() == f.ver && r.installerUrl == f.url &&
+                                            r.digest == L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));   // lower-cased
+        expect(match, L"parseFeed(" + widen(f.body).substr(0, 60) + L") -> " + (ok ? r.version.str() + L" " + r.installerUrl : L"refused: " + error));
+    }
+
     update::Version cur = update::current();
     update::Version again;
     expect(update::parseTag(cur.str(), &again) && update::compare(cur, again) == 0, L"current() = " + cur.str());

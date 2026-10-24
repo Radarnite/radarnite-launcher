@@ -5,6 +5,7 @@
 #include "util.h"
 #include "version.h"
 #include <shellapi.h>
+#include <mutex>
 
 namespace rn {
 namespace update {
@@ -218,10 +219,8 @@ Release offer(const Candidate& c, const Version& cur, const std::wstring& upToDa
     return r;
 }
 
-} // namespace
-
-Release check() {
-    Version cur = current();
+// The GitHub releases (2.x's check, then the pre-release builds' list).
+Release checkGithub(const Version& cur) {
     std::wstring repo = apiBase() + L"/repos/" + kRepo + L"/releases";
     if (cur.pre.empty()) {
         // A release build: 2.x exactly. releases/latest is never a GitHub prerelease, and its tag is read as 2.x read
@@ -278,7 +277,106 @@ Release check() {
                                 (hasB ? b.version.str() : L"-") + L")");
 }
 
-bool downloadVerifyRun(const Release& r) {
+const wchar_t* kAppKey = L"Software\\Radarnite\\Launcher";
+const DWORD kFeedTimeout = 8000;   // the feed is on the owner's own network: a few seconds or it is not there
+
+std::wstring regString(const wchar_t* name) {
+    wchar_t buf[2048];
+    DWORD size = sizeof buf;
+    if (RegGetValueW(HKEY_CURRENT_USER, kAppKey, name, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS) return L"";
+    return buf;
+}
+bool setRegString(const wchar_t* name, const std::wstring& v) {
+    if (v.empty()) {
+        LSTATUS st = RegDeleteKeyValueW(HKEY_CURRENT_USER, kAppKey, name);
+        return st == ERROR_SUCCESS || st == ERROR_FILE_NOT_FOUND;
+    }
+    return RegSetKeyValueW(HKEY_CURRENT_USER, kAppKey, name, REG_SZ, v.c_str(), (DWORD)((v.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
+bool httpUrl(const std::wstring& u) { return (istarts(u, L"http://") || istarts(u, L"https://")) && u.find_first_of(L" \t\r\n\"") == std::wstring::npos; }
+
+// The test feed: a test build newer than cur, or nothing (off, offline, older, broken). Polled every 2 minutes, so a
+// line that repeats the last one is not logged again.
+Release checkFeed(const Version& cur) {
+    std::wstring url = testFeed();
+    if (url.empty()) return Release();
+    static std::mutex lastM;
+    static std::wstring last;
+    auto note = [&](const std::wstring& s) {
+        std::lock_guard<std::mutex> g(lastM);
+        if (s != last) log(s);
+        last = s;
+    };
+    net::Response res = net::get(url, kUa, nullptr, kFeedTimeout);
+    if (!res.ok()) { note(L"test feed " + url + L": " + res.error); return Release(); }
+    Release r;
+    std::wstring error;
+    if (!parseFeed(res.body, url, &r, &error)) { note(L"test feed " + url + L": " + error); return Release(); }
+    if (compare(r.version, cur) <= 0) { note(L"test feed: up to date (installed " + cur.str() + L", feed " + r.version.str() + L")"); return Release(); }
+    note(L"test build available: " + r.version.str() + L" > " + cur.str());
+    return r;
+}
+
+} // namespace
+
+Release check(bool feedOnly) {
+    Version cur = current();
+    if (feedOnly) return checkFeed(cur);
+    Release gh, feed;
+    parallel({ [&] { gh = checkGithub(cur); }, [&] { feed = checkFeed(cur); } });
+    if (feed.found && (!gh.found || compare(feed.version, gh.version) > 0)) return feed;
+    return gh;   // a release at least as new as the test build wins
+}
+
+std::wstring testFeed() {
+    std::wstring u = trim(regString(L"TestFeed"));
+    return httpUrl(u) ? u : L"";
+}
+
+bool setTestFeed(const std::wstring& url) {
+    std::wstring u = trim(url);
+    if (ieq(u, L"off")) u.clear();
+    if (!u.empty() && !httpUrl(u)) return false;
+    return setRegString(L"TestFeed", u);
+}
+
+bool parseFeed(const std::string& body, const std::wstring& feedUrl, Release* r, std::wstring* error) {
+    *r = Release();
+    yyjson_doc* doc = json::parse(body);
+    yyjson_val* j = doc ? yyjson_doc_get_root(doc) : nullptr;
+    if (!j || !yyjson_is_obj(j)) { yyjson_doc_free(doc); *error = L"not a JSON object"; return false; }
+    std::wstring ver = json::wstr(yyjson_obj_get(j, "version")), inst = trim(json::wstr(yyjson_obj_get(j, "installer")));
+    std::wstring sha = json::wstr(yyjson_obj_get(j, "sha256"));
+    r->notes = json::wstr(yyjson_obj_get(j, "notes"));
+    yyjson_doc_free(doc);
+    if (!parseTag(ver, &r->version)) { *error = L"version is not a version: '" + ver + L"'"; return false; }
+    std::wstring hex = sha256Token(sha);
+    if (hex.empty() || trim(sha).size() != 64) { *error = L"sha256 is not 64 hex digits: '" + sha + L"'"; return false; }
+    if (inst.empty()) { *error = L"no installer"; return false; }
+    if (inst.find(L"://") == std::wstring::npos) {
+        // a file name next to feed.json (the name only: no folder, no query)
+        if (inst.find_first_of(L"/\\?#:") != std::wstring::npos || inst[0] == L'.') { *error = L"installer is not a file name: '" + inst + L"'"; return false; }
+        size_t slash = feedUrl.find_last_of(L'/');
+        inst = feedUrl.substr(0, slash + 1) + inst;
+    }
+    if (!httpUrl(inst)) { *error = L"installer is not an http(s) URL: '" + inst + L"'"; return false; }
+    r->found = true;
+    r->test = true;
+    r->tag = ver;
+    r->installerUrl = inst;
+    r->digest = L"sha256:" + hex;
+    return true;
+}
+
+std::wstring takeInstalledTest() {
+    std::wstring v = regString(L"TestInstalling");
+    if (!v.empty()) setRegString(L"TestInstalling", L"");
+    return v;
+}
+
+bool downloadVerifyRun(const Release& r, const std::wstring& argsIn, const std::function<bool(std::wstring*)>& ready) {
+    std::wstring args = argsIn;
     wchar_t tmp[MAX_PATH + 1];
     DWORD n = GetTempPathW(MAX_PATH + 1, tmp);
     std::wstring dst = join(std::wstring(tmp, n), L"RadarniteLauncherSetup-" + r.version.str() + L".exe");
@@ -302,21 +400,50 @@ bool downloadVerifyRun(const Release& r) {
         DeleteFileW(dst.c_str());
         return false;
     }
+    if (ready && !ready(&args)) { log(L"sha256 ok (" + got + L"); not installing now (busy), next check retries"); DeleteFileW(dst.c_str()); return false; }
     log(L"sha256 ok (" + got + L"); starting installer");
     SHELLEXECUTEINFOW se = { sizeof se };
     se.fMask = SEE_MASK_NOASYNC;
     se.lpVerb = L"open";
     se.lpFile = dst.c_str();
+    if (!args.empty()) se.lpParameters = args.c_str();
     se.nShow = SW_SHOWNORMAL;
     if (!ShellExecuteExW(&se)) { log(L"download/run failed: " + winError(GetLastError())); return false; }
     return true;
 }
 
-bool runInteractive(HWND owner, bool manual, bool canInstall, const std::function<void(const std::wstring&, Level)>& toast) {
+bool runInteractive(HWND owner, bool manual, bool canInstall, const std::function<void(const std::wstring&, Level)>& toast,
+                    bool testOnly, const std::function<bool(bool*)>& recheck) {
     if (manual) toast(L"Checking for updates…", Level::Info);
-    Release r = check();
+    Release r = check(testOnly);   // the periodic check reads the feed alone (GitHub's API is asked at each start)
     if (!r.found) {
         if (manual) toast(L"Radarnite Launcher is up to date (" + current().str() + L").", Level::Ok);
+        return false;
+    }
+    if (r.test) {
+        // the test channel: no question, no window of the installer; a game is never interrupted (asked again once the
+        // download is verified; the next check retries)
+        static std::wstring announced;
+        if (!canInstall) {
+            if (manual || announced != r.version.str())
+                toast(L"Test build " + r.version.str() + L" is ready: it installs once the game is closed.", Level::Info);
+            announced = r.version.str();
+            return false;
+        }
+        toast(L"Downloading test build " + r.version.str() + L"…", Level::Info);
+        bool deferred = false;
+        auto ready = [&](std::wstring* args) {
+            bool fg = true;
+            if (recheck && !recheck(&fg)) { deferred = true; return false; }
+            *args = fg ? L"/S /RELAUNCH=fg" : L"/S /RELAUNCH=bg";
+            if (!setRegString(L"TestInstalling", r.version.str())) log(L"could not note the test build being installed");
+            toast(L"Installing test build " + r.version.str() + L"… the launcher reopens in a moment.", Level::Info);
+            Sleep(1500);   // long enough to read
+            return true;
+        };
+        if (downloadVerifyRun(r, L"/S", ready)) return true;
+        setRegString(L"TestInstalling", L"");
+        if (!deferred) toast(L"Test build update failed (see launcher\\update.log).", Level::Bad);
         return false;
     }
     if (!canInstall) {

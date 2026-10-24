@@ -121,6 +121,8 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     std::vector<std::wstring> previewIds;   // lower-case ids of the last catalog (what the previews keep)
     std::mutex scanM;                  // one PushState at a time
     std::mutex launchM;                // one launch at a time, held until its game exits (2.x ran the prelude on the UI thread)
+    std::atomic<bool> updating{ false };   // an update check or install is running
+    std::atomic<int> busy{ 0 };        // long jobs running (Busy): adding a build, generating cosmetics
 
     void async(std::function<void(std::shared_ptr<Ctx>)> f) {
         auto self = shared_from_this();
@@ -344,21 +346,74 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         pushState();
     }
 
-    // Web.cs RunUpdateAsync: offered, downloaded, verified and run; never while a game runs.
-    void runUpdate(bool manual) {
-        bool canInstall;
-        {
-            std::lock_guard<std::mutex> g(m);
-            canInstall = !(session && session->running()) && state == L"idle";
+    // Web.cs RunUpdateAsync: offered, downloaded, verified and run; never while a game runs. periodic = the test
+    // channel's poll (update.h): the feed alone, and not while the window is in use (active, input in the last 2 min).
+    void runUpdate(bool manual, bool periodic = false) {
+        bool expected = false;
+        if (!updating.compare_exchange_strong(expected, true)) return;   // one check / install at a time
+        bool foreground = false;
+        bool canInstall = installAllowed(&foreground);
+        if (periodic && foreground) {
+            LASTINPUTINFO li = { sizeof li };
+            if (GetLastInputInfo(&li) && GetTickCount() - li.dwTime < 2 * 60 * 1000) { updating = false; return; }
         }
         std::weak_ptr<Ctx> w = shared_from_this();
-        if (update::runInteractive(proc::mainWindow(), manual, canInstall, [w](const std::wstring& t, Level l) { if (auto c = w.lock()) c->toast(t, l); })) {
+        auto recheck = [w](bool* fg) { auto c = w.lock(); return c && c->installAllowed(fg); };
+        if (update::runInteractive(proc::mainWindow(), manual, canInstall, [w](const std::wstring& t, Level l) { if (auto c = w.lock()) c->toast(t, l); },
+                                   periodic, recheck)) {
             std::shared_ptr<PlaySession> s;
             { std::lock_guard<std::mutex> g(m); s = session; }
             if (s) { s->stop(); stopAll([](const std::wstring&) {}); }
-            if (HWND h = proc::mainWindow()) PostMessageW(h, WM_CLOSE, 0, 0);
+            if (HWND mw = proc::mainWindow()) PostMessageW(mw, WM_CLOSE, 0, 0);
+            return;   // stays "updating": the window is closing
         }
+        updating = false;
     }
+
+    // Nothing an install would cut: no game (ours or not), no session, no import, no long job. *foreground = the
+    // window (or one of its dialogs) is the active one.
+    bool installAllowed(bool* foreground) {
+        DWORD fgPid = 0;
+        if (HWND fg = GetForegroundWindow()) GetWindowThreadProcessId(fg, &fgPid);
+        *foreground = fgPid == GetCurrentProcessId();
+        {
+            std::lock_guard<std::mutex> g(m);
+            if ((session && session->running()) || state != L"idle" || portJob) return false;
+        }
+        if (busy > 0) return false;   // a build being added, cosmetics being generated
+        for (auto& p : proc::list())
+            if (ieq(p.exe, L"FortniteClient-Win64-Shipping.exe")) return false;
+        return true;
+    }
+
+    // The test channel: the feed polled every 2 minutes while the window is open (update.h); off = no thread.
+    void startTestPoll() {
+        if (update::testFeed().empty()) return;
+        std::weak_ptr<Ctx> w = shared_from_this();
+        runAsync([w] {
+            for (;;) {
+                for (int i = 0; i < 120; i++) { Sleep(1000); if (w.expired()) return; }
+                auto c = w.lock();
+                if (!c) return;
+                c->runUpdate(false, true);
+            }
+        });
+    }
+
+    // After a test build installed by the updater: say so once (or that it did not take).
+    void reportTestInstall() {
+        std::wstring want = update::takeInstalledTest();
+        if (want.empty()) return;
+        if (want == update::current().str()) toast(L"Updated to test build " + want, Level::Ok);
+        else log(L"Test build " + want + L" did not install (still " + update::current().str() + L"; see update.log).", Level::Warn);
+    }
+
+    // RAII count of long jobs that the test channel's silent install must not cut (adding a build, cosmetics)
+    struct Busy {
+        std::atomic<int>& n;
+        explicit Busy(std::atomic<int>& x) : n(x) { n++; }
+        ~Busy() { n--; }
+    };
 
     void afterAdd(const BuildInfo& b) {
         { std::lock_guard<std::mutex> g(m); selected = b.name(); }
@@ -484,6 +539,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         case Command::AddZip:
             async([](std::shared_ptr<Ctx> c) {
                 std::wstring f;
+                Busy b_(c->busy);
                 if (!pickPath(proc::mainWindow(), L"Add a Fortnite build", false, L"", &f)) return;
                 c->log(L"Extracting " + f + L" into " + paths::root() + L" (this can take a long time)...");
                 BuildInfo b;
@@ -493,6 +549,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         case Command::AddFolder:
             async([](std::shared_ptr<Ctx> c) {
                 std::wstring d;
+                Busy b_(c->busy);
                 if (!pickPath(proc::mainWindow(), L"Build folder (the one that contains FortniteGame)", true, L"", &d)) return;
                 BuildInfo b;
                 if (builddata::addFolder(d, c->logger(), &b)) c->afterAdd(b);
@@ -506,6 +563,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
                     busy = c->state == L"launching" || c->state == L"running" || c->state == L"stopping";
                 }
                 if (busy) { c->log(L"Stop the game before changing the builds folder."); return; }
+                Busy b_(c->busy);
                 std::wstring d;
                 if (!pickPath(proc::mainWindow(), L"Folder for your Fortnite builds (one folder per build)", true, paths::root(), &d)) return;
                 LauncherConfig cfg = LauncherConfig::load();
@@ -521,6 +579,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
             async([build](std::shared_ptr<Ctx> c) {
                 BuildInfo b;
                 if (!c->sel(build, &b)) return;
+                Busy b_(c->busy);
                 c->toast(L"Generating cosmetics for " + b.version + L"… (a few minutes)", Level::Info);
                 c->log(L"Generating the cosmetics of " + b.version + L" from the build's own data...");
                 std::wstring why;
@@ -595,7 +654,11 @@ public:
                 if (h) PostMessageW(h, WM_CLOSE, 0, 0);
             });
         } else {
-            c_->async([](std::shared_ptr<Ctx> c) { c->runUpdate(false); });   // offline-first, silent without network
+            c_->async([](std::shared_ptr<Ctx> c) {
+                c->reportTestInstall();
+                c->runUpdate(false);   // offline-first, silent without network
+                c->startTestPoll();
+            });
         }
     }
 
