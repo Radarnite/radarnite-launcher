@@ -1,0 +1,292 @@
+{
+  "schema": 1,
+  "subject": "Radarnite Launcher 2.2.1: the v2.2.1 release asset (sha256 54d59b107b80ad36053a7c724c5171fc763d05f0dcc3e5f8b73e87c2e7fd4060), installed silently by its own installer into S:\\rl-release-test\\Radarnite Launcher",
+  "measuredAt": [
+    "2026-10-20T17:49:28.7579330Z",
+    "2026-10-20T18:03:03.3031630Z"
+  ],
+  "machine": {
+    "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+    "logicalCores": 12,
+    "ramGB": 31.9,
+    "os": "Microsoft Windows 11 Pro for Workstations 10.0.26200",
+    "gpu": [
+      "NVIDIA GeForce RTX 2060"
+    ],
+    "buildsDrive": "NTFS 1863 GB",
+    "webview2Runtime": "155.0.4283.62"
+  },
+  "cpuLoadPercent": {
+    "run1": [
+      37,
+      51
+    ],
+    "run2": [
+      31,
+      56
+    ],
+    "note": "the PC was in normal use (other agents, browsers); compare 3.0 against 2.2.1 measured in the same job"
+  },
+  "installer": {
+    "bytes": 107763675,
+    "silentInstallMs": [
+      15481,
+      14837
+    ]
+  },
+  "check": {
+    "command": "RadarniteLauncher.exe --check 14.30",
+    "medianMs": 348,
+    "p10Ms": 321,
+    "p90Ms": 447.8,
+    "runs": 20,
+    "run1MedianMs": 287.6,
+    "breakdownMs": {
+      "dotnetStartupFloor": 96.3,
+      "buildScan": 39.6,
+      "configLoad": 33.1,
+      "perBuildChecks": 179,
+      "perBuildChecksDetail": {
+        "firewallRulesEnumViaCom": 21.7,
+        "firewallRuleCount": 617,
+        "buildExeWalk": 45.5,
+        "buildExeCount": 8,
+        "processImagePaths": 17,
+        "processCount": 294,
+        "note": "Firewall.Check runs twice per --check (direct and inside Preflight): 2 x (COM rule enumeration + recursive *.exe walk of the build) + 1 process walk ~ 2x(22+46)+17 = 151 ms of the 179; the rest is COM interop / dynamic binder JIT. Parts timed from PowerShell, so approximate."
+      },
+      "run1": {
+        "dotnetStartupFloor": 75.2,
+        "scan": 100.9,
+        "checkNoBuild": 126.1,
+        "check": 287.6
+      }
+    },
+    "devTree210MedianMs": 326.2,
+    "plannedTodayMs": 390
+  },
+  "firstFrame": {
+    "pageReadyMs": {
+      "warmMedian": 704.8,
+      "warmRuns": [
+        717.1,
+        566.7,
+        763.4,
+        692.4
+      ],
+      "run1WarmMedian": 632,
+      "coldFreshProfile": [
+        3464.6,
+        3180.2
+      ],
+      "hiddenDesktop": [
+        532.8,
+        540.2
+      ],
+      "note": "process creation -> the page posts ready (first frame with content); compare with 3.0 firstFrameMs"
+    },
+    "windowVisibleMs": {
+      "median": 224,
+      "run1Median": 190,
+      "note": "process creation -> blank WinForms frame visible"
+    }
+  },
+  "memory": {
+    "treePrivateMBAt10s": 203.9,
+    "run1TreePrivateMBAt10s": 205.3,
+    "launcherProcessPrivateMBAt10s": 34.3,
+    "treeWorkingSetMBAt10s": 429.1,
+    "processesAt10s": 7,
+    "byProcessType": [
+      {
+        "type": "launcher",
+        "processes": 1,
+        "privateMB": 34.3,
+        "workingSetMB": 103.7
+      },
+      {
+        "type": "webview2",
+        "processes": 1,
+        "privateMB": 33.7,
+        "workingSetMB": 117.1
+      },
+      {
+        "type": "webview2-crashpad-handler",
+        "processes": 1,
+        "privateMB": 3,
+        "workingSetMB": 12.9
+      },
+      {
+        "type": "webview2-gpu-process",
+        "processes": 1,
+        "privateMB": 85.6,
+        "workingSetMB": 72.7
+      },
+      {
+        "type": "webview2-utility",
+        "processes": 2,
+        "privateMB": 18.6,
+        "workingSetMB": 55.9
+      },
+      {
+        "type": "webview2-renderer",
+        "processes": 1,
+        "privateMB": 28.7,
+        "workingSetMB": 66.9
+      }
+    ],
+    "launcherOwnReport": {
+      "memAwake": {
+        "processes": 6,
+        "privateMB": 219,
+        "workingSetMB": 392
+      },
+      "memSuspended": {
+        "processes": 6,
+        "privateMB": 183,
+        "workingSetMB": 336
+      },
+      "memReleased": {
+        "processes": 1,
+        "privateMB": 31,
+        "workingSetMB": 85
+      },
+      "note": "--selftest-ui with RADARNITE_SELFTEST_SLEEP=1, ~2 s after ready; released = the 2.2.1 minimized-for-a-minute state"
+    }
+  },
+  "idleCpu": {
+    "pctOfOneCore": 0.16,
+    "pctOfMachine": 0.013,
+    "cpuMs": 16,
+    "windowMs": 10021,
+    "run1PctOfOneCore": 0.31,
+    "note": "whole process tree, 10 s -> 20 s after start, main window awake"
+  },
+  "installed": {
+    "totalMB": 372.9,
+    "files": 752,
+    "componentsMB": {
+      "dotnetRuntime": 159.7,
+      "launcherAssembly": 0.4,
+      "webview2Sdk": 1.8,
+      "ui": 0.1,
+      "node": 89.2,
+      "backend": 0.05,
+      "tools": 118.6,
+      "gameserver": 2.5,
+      "redirect": 0.1,
+      "patches": 0.1,
+      "other": 0.2
+    },
+    "dotnet": {
+      "rootFiles": 238,
+      "satelliteDirs": [
+        "cs",
+        "de",
+        "es",
+        "fr",
+        "it",
+        "ja",
+        "ko",
+        "pl",
+        "pt-BR",
+        "ru",
+        "tr",
+        "zh-Hans",
+        "zh-Hant"
+      ],
+      "frameworks": [
+        "Microsoft.NETCore.App 8.0.31",
+        "Microsoft.WindowsDesktop.App 8.0.31"
+      ]
+    },
+    "tools": {
+      "cosmetics-gen": {
+        "MB": 104.6,
+        "files": 230,
+        "kind": "dotnet-self-contained",
+        "exes": [
+          "createdump.exe",
+          "fn-cosmetics-gen.exe"
+        ]
+      },
+      "fn-modkit-sigfit": {
+        "MB": 14,
+        "files": 35,
+        "kind": "dotnet-framework-dependent",
+        "exes": [
+          "fn-modkit.exe"
+        ]
+      }
+    },
+    "toolsLooseFiles": [
+      "sigfit-installed.ps1 (3115)"
+    ],
+    "nodeVersion": "v24.21.0",
+    "webview2": {
+      "runtime": "155.0.4283.62",
+      "profileMBAfterFirstRuns": 8.4,
+      "note": "the WebView2 runtime is the system Evergreen install (not in the folder); its processes are in memory.byProcessType"
+    },
+    "listing": "installed-2.2.1-files.tsv",
+    "estimate3xMB": {
+      "value": 122.2,
+      "note": "same tools/gameserver/redirect/patches as 2.2.1 plus two placeholder exes (tools/release-selftest.sh); the real exes add <= 6 MB. Installer: 35 MB (2.2.1: 103 MB)"
+    }
+  },
+  "backend": {
+    "command": "node\\node.exe backend\\server.mjs --build <scratch copy of 14.30> --config <config.json> --port <free>",
+    "withRealData": {
+      "readyMsMedian": 960.6,
+      "rssMB": 223.4,
+      "privateMB": 218.6,
+      "run1ReadyMsMedian": 888.5
+    },
+    "byData": {
+      "full": {
+        "dataMB": 88.6,
+        "runs": 7,
+        "readyMsMedian": 922.8,
+        "readyMsMin": 907.1,
+        "readyMsMax": 1104.9,
+        "rssMB": 223.4,
+        "privateMB": 218.8
+      },
+      "noCustomCosmetics": {
+        "dataMB": 0.4,
+        "runs": 7,
+        "readyMsMedian": 298.9,
+        "readyMsMin": 281,
+        "readyMsMax": 312.3,
+        "rssMB": 52.8,
+        "privateMB": 34.4
+      },
+      "empty": {
+        "dataMB": 0,
+        "runs": 7,
+        "readyMsMedian": 304,
+        "readyMsMin": 283.6,
+        "readyMsMax": 353.3,
+        "rssMB": 49.1,
+        "privateMB": 28
+      }
+    },
+    "nodeFloor": {
+      "emptyScriptMs": 253.9,
+      "idleHttpServerReadyMs": 262.5,
+      "idleHttpServerRssMB": 37.6
+    },
+    "note": "14.30 offline\\custom-cosmetics.json is 92 MB (23 own items): it alone costs ~620 ms and ~170 MB. Node itself is ~255 ms / ~38 MB."
+  },
+  "targets3": {
+    "checkMs": 100,
+    "firstFrameMs": 150,
+    "uiIdleRamMB": 35,
+    "idleCpuPct": 0,
+    "backendRssMB": 15,
+    "backendReadyMs": 30,
+    "exeMB": 3,
+    "installedMB": 125
+  },
+  "method": "README.md; scripts measure-2x.ps1, session-bench.ps1, measure-backend.ps1"
+}
