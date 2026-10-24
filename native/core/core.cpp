@@ -457,6 +457,12 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         int done = job->okCount();
         toast(job->cancelled ? fmt(L"Import stopped: %d imported", done) : ok ? fmt(L"%d cosmetics imported into ", done) + b.version : L"The import failed (see Activity)",
               ok ? Level::Ok : job->cancelled ? Level::Info : Level::Bad);
+        {   // its last view, marked done / stopped / failed (the window keeps it as the finished card), then no job
+            auto fin = job->view();
+            fin->phase = job->cancelled ? L"stopped" : ok ? L"done" : L"failed";
+            std::lock_guard<std::mutex> g(sinkM);
+            if (sink) sink->onPortJob(fin);
+        }
         postPortJob();
         pushState();
     }

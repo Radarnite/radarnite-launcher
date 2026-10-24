@@ -71,6 +71,7 @@ const RC kRC[] = {
     { "shadow", 0x111317, 0x5f6675 }, { "slurp", 0x0f5a52, 0x5df0dc }, { "dark", 0x4a0f3f, 0xff5be8 }, { "columbus", 0x1c3150, 0x6ea6ff },
     { "cubeseries", 0x3e1360, 0xc36dff },
 };
+const uint32_t GREEN_ = 0x3DFF6E;   // the lobby's green (.badge.ok)
 const RC& rcOf(const std::string& r) { for (auto& x : kRC) if (r == x.key) return x; return kRC[4]; }
 int rarIndex(const std::string& r) { for (int i = 0; i < NR; i++) if (r == kRAR[i].key) return i; return -1; }
 
@@ -167,6 +168,9 @@ void App::portEvent(Event& e) {
         break;
     }
     case 6: {   // the import: when it ends, the statuses are read again (the grid stays as it is meanwhile)
+        // its last view (phase done / stopped / failed) stays as the finished card until dismissed or a new import
+        if (e.job && (e.job->phase == L"done" || e.job->phase == L"stopped" || e.job->phase == L"failed")) { pjEnd_ = std::move(e.job); e.job.reset(); }
+        else if (e.job) pjEnd_.reset();
         bool ended = pj_ && !e.job;
         pj_ = std::move(e.job);
         pjAt_ = GetTickCount64();
@@ -375,17 +379,7 @@ void App::releasePortBrushes() { for (auto& b : rarBrushes_) { release(b.bg); re
 void App::drawPort(float x0, float y0, float W, float H) {
     if (pDirty_) portRebuild();
     const Build* b = sel();
-    // the season (drawn bare under it) shows through at the top and darkens under the grid: one lobby, still readable
-    if (!measuring_) {
-        // from nothing behind the tabs to .32 at the title, .86 from ~360 DIPs under it
-        float L = 76 + std::max(360.f, std::min(H, 520.f));
-        const D2D1_GRADIENT_STOP ss[] = { { 0, rgb(C::bg, 0) }, { 76 / L, rgb(C::bg, .32f) }, { 256 / L, rgb(C::bg, .62f) }, { 436 / L, rgb(C::bg, .80f) }, { 1, rgb(C::bg, .86f) } };
-        ID2D1GradientStopCollection* gs = nullptr; ID2D1LinearGradientBrush* sb = nullptr;
-        if (SUCCEEDED(rt_->CreateGradientStopCollection(ss, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
-            SUCCEEDED(rt_->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, y0 - 76), D2D1::Point2F(0, y0 - 76 + L)), gs, &sb)))
-            rt_->FillRectangle({ x0, y0 - 76, x0 + W, y0 + H }, sb);
-        release(sb); release(gs);
-    }
+    // under it: the season without the skin, darkening towards the grid (baked in the stage: App::drawStage)
     float px = 24, x = x0 + px, w = W - 2 * px;
     glassChips_ = true;
     // ---- header: title, sub, Refresh, Close
@@ -474,7 +468,7 @@ void App::drawPort(float x0, float y0, float W, float H) {
     float by = 12;   // body coordinates: 0 = top of the scrolled content
     float gw = w;
     // ---- the running import (scrolls with the grid: at the minimum size the grid stays reachable)
-    if (pj_) { float jh = drawPortJob(x, by, gw); pJobR_ = rc(x, by + oy_, gw, jh); by += jh + 20; }
+    if (pj_ || (pjEnd_ && (pjEndFor_.empty() || pjEndFor_ == pBuild_))) { float jh = drawPortJob(x, by, gw); pJobR_ = rc(x, by + oy_, gw, jh); by += jh + 20; }
     else pJobR_ = {};
     if (pCat_ && !pCat_->error.empty()) {
         std::wstring html = L"**The cosmetics of the current Fortnite cannot be listed.** " + pCat_->error + L".";
@@ -750,10 +744,14 @@ float App::drawPortLoad(float x, float y, float w, bool draw) {
     return h;
 }
 
-// The import box: what runs now, its progress and time, the steps, the item being converted, the last items, the log.
+// The import card, in the lobby's style (glass on the season): a big title with the count and the times, a thick
+// progress bar with a glow, the phases as pills (the current one pulses), the item being converted shown large, the
+// last items as mini cards that wrap, the importer's output behind a toggle. Once it ends (pjEnd_): done, stopped or
+// failed, with what to do next.
 float App::drawPortJob(float x, float y, float w) {
-    const PortJob& j = *pj_;
-    int64_t dt = (int64_t)(GetTickCount64() - pjAt_);
+    const bool end = !pj_;
+    const PortJob& j = end ? *pjEnd_ : *pj_;
+    int64_t dt = end ? 0 : (int64_t)(GetTickCount64() - pjAt_);
     auto itemOf = [&](const std::wstring& p) -> const PortItem* {
         if (!pCat_) return nullptr;
         if (pPath_.empty() && !pCat_->items.empty()) { pPath_.reserve(pCat_->items.size()); for (size_t i = 0; i < pCat_->items.size(); i++) if (!pCat_->items[i].path.empty()) pPath_[pCat_->items[i].path] = (int)i; }
@@ -761,136 +759,281 @@ float App::drawPortJob(float x, float y, float w) {
         return f == pPath_.end() ? nullptr : &pCat_->items[f->second];
     };
     auto nm = [&](const std::wstring& p) { const PortItem* it = itemOf(p); return it && !it->name.empty() ? it->name : tail(p); };
-    Font af{ Face::UI, 12.5f, 600, false }, mf{ Face::UI, 12.5f, 400, false, true }, sf{ Face::UI, 12, 400, false };
-    float ix = x + 1 + 14, iw = w - 2 - 28, yy = y + 1 + 12;
-    // measure first: the details' height
-    int recent = pLogOpen_ ? std::min<int>((int)j.recent.size(), 9) : 0;
-    bool hasItems = !j.items.empty();
-    float h = 1 + 12 + 28 + 10 + 4 + 10 + 17.4f + 10 + (16 + 34) + (hasItems ? 10 + 28 : 0) + 10 + 17.4f + (pLogOpen_ ? 6 + 16 + recent * 17.25f : 0) + 12 + 1;
-    box(rc(x, y, w, h), 12, C::bg2, 1, C::line);
-    // head
-    spinner(ix, yy + 7, 14);
-    std::wstring a = L"Importing into " + j.build + L" · " + thousands(j.done) + L" of " + thousands(j.total) + (j.failed ? L" · " + thousands(j.failed) + L" not converted" : L"");
-    int64_t eta = j.etaMs ? std::max<int64_t>(0, j.etaMs - dt) : 0;
-    std::wstring tm = L" · " + fmtS(j.elapsedMs + dt) + L" elapsed" + (eta ? L" · ~" + fmtS(eta) + L" left" : L"");
-    float sw = button(ID_P_STOP, 0, 0, L"Stop", Icon::X, true, false, false, false, true);
-    float aw = std::min(textW(a, af) + 1, iw - 24 - sw - 10);
-    text(a, af, ix + 24, yy, aw, 28, C::text);
-    text(tm, mf, ix + 24 + aw, yy, std::max(0.f, iw - 24 - sw - 10 - aw), 28, C::muted);
-    button(ID_P_STOP, ix + iw - sw, yy, L"Stop", Icon::X, true, false, false, false);
-    yy += 28 + 10;
-    fill(rc(ix, yy, iw, 4), C::line, 1, 2);
-    if (j.total) fill(rc(ix, yy, iw * std::min(1.f, (float)j.done / j.total), 4), C::ok, 1, 2);
-    yy += 4 + 10;
-    // phase steps
-    struct Ph { const wchar_t* k; const wchar_t* l; };
-    const Ph ph[] = { { L"wait", L"CPU check" }, { L"load", L"Reading the current Fortnite" }, { L"convert", L"Converting" }, { L"install", L"Installing" }, { L"sign", L"Signing paks" } };
-    std::wstring curPh = j.phase == L"cpu" ? L"wait" : j.phase;
-    int ci = -1;
-    for (int i = 0; i < 5; i++) if (curPh == ph[i].k) ci = i;
-    float px = ix;
-    for (int i = 0; i < 5; i++) {
-        Font f{ Face::UI, 12, i == ci ? 500 : 400, false };
-        float lw = textW(ph[i].l, f);
-        if (px + (i ? 26 : 0) + 18 + lw > ix + iw) break;   // the steps that do not fit are left out
-        if (i) { fill(rc(px + 6, yy + 8.7f, 14, 1), C::line); px += 6 + 14 + 6; }
-        if (i < ci) { icon(Icon::Check, px, yy + 2.7f, 12, C::ok); px += 12 + 6; }
-        else if (i == ci) { spinner(px, yy + 3.2f, 11); px += 11 + 6; }
-        else { dot(px + 3, yy + 8.7f, 6, C::l2); px += 6 + 6; }
-        text(ph[i].l, f, px, yy, lw + 1, 17.4f, i == ci ? C::text : i < ci ? C::muted : C::dim);
-        px += lw;
-    }
-    yy += 17.4f + 10;
-    // now: the item being converted, or what the importer does
-    const PortItem* it = j.current.empty() ? nullptr : itemOf(j.current);
-    std::wstring w0, w1;
-    std::wstring cpu = j.cpu >= 0 ? fmt(L" · now %d %%", j.cpu) : L"";
-    if (j.phase == L"start") { w0 = L"Starting…"; w1 = L"Preparing the list of items"; }
-    else if (j.phase == L"wait") { w0 = L"Checking the CPU before the next batch"; w1 = L"Imports pause while the PC is above 70 %" + cpu; }
-    else if (j.phase == L"cpu") { w0 = L"Waiting for the CPU to drop below 70 %" + cpu; w1 = L"Waiting " + fmtS(j.phaseMs + dt) + L" · it checks again every 20 s; closing heavy apps lets it continue sooner (gives up after 20 min)"; }
-    else if (j.phase == L"load") { w0 = fmt(L"Batch %d of %d: reading the current Fortnite's files", j.batch, j.batches); w1 = L"fn-port loads the installed game before converting · " + fmtS(j.phaseMs + dt); }
-    else if (j.phase == L"convert") {
-        w0 = j.current.empty() ? L"Converting" : L"Converting " + nm(j.current);
-        if (!j.current.empty()) w1 = (it ? std::wstring(kPT1[(int)it->type]) + L" · " : L"") + L"meshes, textures, animations and sounds into a 14.30 pak · " + fmtS(j.currentMs + dt);
-    }
-    else if (j.phase == L"install") { w0 = L"Installing into " + j.build; w1 = L"Copying the new paks and registering the items in custom-cosmetics.json"; }
-    else if (j.phase == L"sign") { w0 = L"Signing the new paks"; w1 = L"Fitting the pak signatures so " + j.build + L" accepts them · " + fmtS(j.phaseMs + dt); }
-    else w0 = j.line;
-    D2D1_RECT_F nr = rc(ix, yy, iw, 16 + 34);
-    fill(nr, C::surface, 1, 9);
-    ID2D1Bitmap* ib = it && !it->icon.empty() ? img_.get(it->icon, (UINT)lroundf(34 * scale_), (UINT)lroundf(34 * scale_), Images::Cover) : nullptr;
-    if (ib) {
+    // an item's icon on its rarity's gradient, rounded
+    auto tile = [&](const PortItem* it, D2D1_RECT_F r, float rad) {
+        if (measuring_) return;
+        RarBrush* rb = it ? rarBrush(it->rarity) : nullptr;
+        if (rb && rb->bg) {
+            rb->bg->SetStartPoint(D2D1::Point2F(0, r.top)); rb->bg->SetEndPoint(D2D1::Point2F(0, r.bottom)); rb->bg->SetOpacity(alpha_);
+            rt_->FillRoundedRectangle(D2D1::RoundedRect(r, rad, rad), rb->bg);
+        } else fill(r, C::white, .08f, rad);
+        ID2D1Bitmap* ib = it && !it->icon.empty() ? img_.get(it->icon, (UINT)lroundf((r.right - r.left) * scale_), (UINT)lroundf((r.bottom - r.top) * scale_), Images::Cover) : nullptr;
+        if (!ib) return;
         ID2D1BitmapBrush* bb = nullptr;
         if (SUCCEEDED(rt_->CreateBitmapBrush(ib, &bb))) {
-            bb->SetTransform(D2D1::Matrix3x2F::Scale(1 / scale_, 1 / scale_) * D2D1::Matrix3x2F::Translation(ix + 10, yy + 8));
-            rt_->FillRoundedRectangle(D2D1::RoundedRect(rc(ix + 10, yy + 8, 34, 34), 7, 7), bb);
+            bb->SetTransform(D2D1::Matrix3x2F::Scale(1 / scale_, 1 / scale_) * D2D1::Matrix3x2F::Translation(r.left, r.top));
+            bb->SetOpacity(alpha_);
+            rt_->FillRoundedRectangle(D2D1::RoundedRect(r, rad, rad), bb);
             bb->Release();
         }
-    } else spinner(ix + 10 + 8, yy + 8 + 8, 18);
-    text(w0, af, ix + 10 + 34 + 10, yy + 8, iw - 20 - 44, 18.125f, C::text);
-    text(w1, sf, ix + 10 + 34 + 10, yy + 8 + 18.125f, iw - 20 - 44, 17.4f, C::muted);
-    yy += 16 + 34;
-    // the last items (the end of the row shows, like scrollLeft = scrollWidth)
-    if (hasItems) {
-        yy += 10;
-        float rx = ix + iw;
-        Font itf{ Face::UI, 12, 400, false };
-        D2D1_RECT_F saved = clip_;
-        D2D1_RECT_F ic = rc(ix, yy + oy_, iw, 28);
-        if (!measuring_) rt_->PushAxisAlignedClip(rc(ix, yy, iw, 28), D2D1_ANTIALIAS_MODE_ALIASED);
-        for (int i = (int)j.items.size() - 1; i >= 0 && rx > ix; i--) {
-            const PortJobItem& x2 = j.items[i];
-            const PortItem* t = itemOf(x2.path);
-            std::wstring n = nm(x2.path);
-            bool okS = x2.st == L"ok", bad = x2.st == L"failed", conv = x2.st == L"converting";
-            float glyph = okS || bad ? 12 : conv ? 10 : 0;
-            float cwid = 4 + (t && !t->icon.empty() ? 20 + 6 : 0) + (glyph ? glyph + 6 : 0) + textW(n, itf) + 9 + 2;
-            rx -= cwid;
-            D2D1_RECT_F cr = rc(rx, yy, cwid, 28);
-            box(cr, 8, 0, 0, conv ? C::white : C::line);
-            float cx = rx + 1 + 4;
-            if (t && !t->icon.empty()) {
-                ID2D1Bitmap* tb = img_.get(t->icon, (UINT)lroundf(20 * scale_), (UINT)lroundf(20 * scale_), Images::Cover);
-                if (tb && !measuring_) {
-                    ID2D1BitmapBrush* bb = nullptr;
-                    if (SUCCEEDED(rt_->CreateBitmapBrush(tb, &bb))) {
-                        bb->SetTransform(D2D1::Matrix3x2F::Scale(1 / scale_, 1 / scale_) * D2D1::Matrix3x2F::Translation(cx, yy + 4));
-                        rt_->FillRoundedRectangle(D2D1::RoundedRect(rc(cx, yy + 4, 20, 20), 5, 5), bb);
-                        bb->Release();
-                    }
-                }
-                cx += 26;
+    };
+    const bool done = end && j.phase == L"done", failed = end && j.phase == L"failed", stopped = end && !done && !failed;
+    const float pad = w < 640 ? 16.f : 22.f, ix = x + pad, iw = w - 2 * pad;
+    const bool narrow = iw < 560;
+    auto body = [&]() -> float {
+        float yy = y + pad;
+        // ---- head: title + count/times on the left; the percentage and Stop (or the end's buttons) on the right
+        Font tf{ Face::Display, narrow ? 20.f : 26.f, 900, true }, pf{ Face::Display, narrow ? 20.f : 26.f, 900, true };
+        Font sf{ Face::UI, 13, 400, false, true }, sb{ Face::UI, 13, 700, false, true };
+        float th = narrow ? 22.f : 28.f;
+        std::wstring title = done ? L"IMPORTED INTO " + j.build : failed ? L"IMPORT FAILED" : stopped ? L"IMPORT STOPPED" : L"IMPORTING INTO " + j.build;
+        int pct = j.total ? (int)floorf(100.f * j.done / j.total) : 0;
+        std::wstring pctS = fmt(L"%d%%", pct);
+        // the right side
+        float rw = 0;
+        if (!end) rw = chip(ID_P_STOP, 0, 0, 36, L"Stop", (int)Icon::X, L"", false, false, true);
+        else {
+            rw = gbutton(ID_P_JOBX, 0, 0, 36, L"Dismiss", Icon::X, true, true);
+            if (done || failed) rw += 8 + chip(ID_P_JOBGO, 0, 0, 36, done ? L"Launch " + j.build : L"Show Activity", done ? (int)Icon::Play : -1, L"", true, false, true);
+        }
+        float pw = end ? 0 : textW(pctS, pf, -.3f) + 6;
+        float rx = ix + iw - rw;
+        float lw = iw - rw - (pw ? pw + 18 : 0) - 16;
+        float ty = yy;
+        float tx = ix;
+        if (done || failed) {   // a round mark before the title
+            float d = th;
+            if (!measuring_) {
+                fill(rc(tx, ty, d, d), done ? GREEN_ : C::bad, .18f, d / 2);
+                icon(done ? Icon::Check : Icon::X, tx + d / 2 - 8, ty + d / 2 - 8, 16, done ? GREEN_ : C::bad);
             }
-            if (okS) { icon(Icon::Check, cx, yy + 8, 12, C::ok); cx += 18; }
-            else if (bad) { icon(Icon::X, cx, yy + 8, 12, C::bad); cx += 18; }
-            else if (conv) { spinner(cx, yy + 9, 10); cx += 16; }
-            text(n, itf, cx, yy, cwid, 28, okS || conv ? C::text : C::muted);
-            rx -= 6;
+            tx += d + 10; lw -= d + 10;
+        } else if (!end) { spinner(tx, ty + (th - 18) / 2, 18); tx += 18 + 12; lw -= 18 + 12; }
+        text(title, tf, tx, ty, std::max(0.f, lw), th, failed ? C::badText : C::white, 0, -.3f);
+        if (!end) {
+            // the percentage: big, beside Stop
+            text(pctS, pf, rx - 18 - pw, ty, pw, th, C::white, 2, -.3f);
+            // Stop: a secondary danger button
+            D2D1_RECT_F sr = rc(rx, ty + (th - 36) / 2, rw, 36);
+            bool hov = hover_ == ID_P_STOP;
+            float hv = fx(K_HOVER | ID_P_STOP, hov ? 1.f : 0.f, sr, 150);
+            box(sr, 10, C::bad, .12f + .14f * hv, C::bad, .45f + .3f * hv);
+            Font bf{ Face::UI, 12.5f, 600, false };
+            icon(Icon::X, sr.left + 12, sr.top + 10, 16, C::badText);
+            text(L"Stop", bf, sr.left + 12 + 16 + 8, sr.top, rw - 36, 36, C::badText);
+            hit(ID_P_STOP, sr, F_FOCUS | F_HAND, 10);
+        } else {
+            float bx = ix + iw;
+            bx -= 36; gbutton(ID_P_JOBX, bx, ty + (th - 36) / 2, 36, L"Dismiss", Icon::X, true);
+            if (done || failed) {
+                std::wstring l = done ? L"Launch " + j.build : L"Show Activity";
+                float cw = chip(ID_P_JOBGO, 0, 0, 36, l, done ? (int)Icon::Play : -1, L"", true, false, true);
+                bx -= 8 + cw; chip(ID_P_JOBGO, bx, ty + (th - 36) / 2, 36, l, done ? (int)Icon::Play : -1, L"", true, false);
+            }
         }
-        if (!measuring_) rt_->PopAxisAlignedClip();
-        (void)saved; (void)ic;
-        yy += 28;
-    }
-    // details: what the importer is printing
-    yy += 10;
-    Font lf{ Face::UI, 12, 400, false };
-    std::wstring sum = std::wstring(pLogOpen_ ? L"▾ " : L"▸ ") + L"What the importer is printing";
-    float sumW = textW(sum, lf) + 2;
-    text(sum, lf, ix, yy, sumW, 17.4f, hover_ == ID_P_LOG ? C::text : C::muted);
-    hit(ID_P_LOG, rc(ix, yy, sumW, 17.4f), F_FOCUS | F_HAND, 4);
-    yy += 17.4f;
-    if (pLogOpen_) {
-        yy += 6;
-        D2D1_RECT_F pr = rc(ix, yy, iw, 16 + recent * 17.25f);
-        fill(pr, C::bg, 1, 8);
-        Font mono{ Face::Mono, 11.5f, 400, false };
-        float ly = yy + 8;
-        for (int i = (int)j.recent.size() - recent; i < (int)j.recent.size(); i++) {
-            text(j.recent[i].first + L"  " + j.recent[i].second, mono, ix + 10, ly, iw - 20, 17.25f, C::ink2);
-            ly += 17.25f;
+        yy += th + 6;
+        // the count and the times
+        int64_t el = j.elapsedMs + dt;
+        int64_t eta = j.etaMs ? std::max<int64_t>(0, j.etaMs - dt) : (j.done > 0 && j.done < j.total ? el * (j.total - j.done) / j.done : 0);
+        float cx = ix;
+        auto part = [&](const std::wstring& s, const Font& f, uint32_t c) { float tw = textW(s, f); text(s, f, cx, yy, std::max(0.f, ix + iw - cx), 18, c); cx += tw; };
+        if (end) {
+            part(thousands(j.ok) + L" imported", sb, C::white);
+            if (j.failed) part(L" · " + thousands(j.failed) + L" not converted", sf, C::badText);
+            part(L" · " + fmtS(el), sf, C::muted);
+        } else {
+            part(thousands(j.done) + L" / " + thousands(j.total), sb, C::white);
+            part(L" items", sf, C::muted);
+            if (j.failed) part(L" · " + thousands(j.failed) + L" not converted", sf, C::badText);
+            part(L" · " + fmtS(el) + L" elapsed", sf, C::muted);
+            if (eta) part(L" · about " + fmtS(eta) + L" left", sf, C::white);
         }
-        yy += 16 + recent * 17.25f;
-    }
+        yy += 18 + 14;
+        // ---- the bar: 10 high, rounded, a glow under the filled part
+        {
+            D2D1_RECT_F tr = rc(ix, yy, iw, 10);
+            fill(tr, C::white, .10f, 5);
+            float k = j.total ? std::min(1.f, (float)j.done / j.total) : 0;
+            if (done) k = 1;
+            uint32_t bc = failed ? C::bad : stopped ? C::muted : GREEN_;
+            if (k > 0) {
+                D2D1_RECT_F fr = rc(ix, yy, std::max(10.f, iw * k), 10);
+                if (!stopped && !measuring_) shadow(fr, 5, 18, 0, .55f, bc);
+                fill(fr, bc, 1, 5);
+                fill(rc(fr.left + 4, fr.top + 2, fr.right - fr.left - 8, 2), C::white, .35f, 1);   // a highlight along the top
+            }
+            yy += 10 + 18;
+        }
+        // ---- the phases as pills (while it runs)
+        if (!end) {
+            struct Ph { const wchar_t* k; const wchar_t* l; };
+            const Ph ph[] = { { L"wait", L"CPU check" }, { L"load", L"Reading the game" }, { L"convert", L"Converting" }, { L"install", L"Installing" }, { L"sign", L"Signing paks" } };
+            std::wstring curPh = j.phase == L"cpu" ? L"wait" : j.phase == L"start" ? L"" : j.phase;
+            int ci = j.phase == L"start" ? 0 : -1;
+            for (int i = 0; i < 5; i++) if (curPh == ph[i].k) ci = i;
+            Font pfnt{ Face::UI, 12, 600, false };
+            float px = ix, py = yy, ph_ = 30;
+            float pulse = .5f + .5f * sinf((float)(GetTickCount64() % 1600) / 1600.f * 6.2831853f);
+            for (int i = 0; i < 5; i++) {
+                float lw2 = textW(ph[i].l, pfnt);
+                float pw2 = 12 + 14 + 7 + lw2 + 14;
+                float gap = i ? 22.f : 0.f;
+                if (px + gap + pw2 > ix + iw && px > ix) { px = ix; py += ph_ + 8; gap = 0; }   // wraps
+                if (gap) { fill(rc(px + 4, py + ph_ / 2 - .5f, 14, 1), C::white, i <= ci ? .45f : .15f); px += gap; }
+                D2D1_RECT_F r = rc(px, py, pw2, ph_);
+                if (i < ci) {
+                    box(r, ph_ / 2, GREEN_, .14f, GREEN_, .35f);
+                    icon(Icon::Check, px + 12, py + 8, 14, GREEN_);
+                    text(ph[i].l, pfnt, px + 12 + 14 + 7, py, lw2 + 1, ph_, C::white, 0, 0, .85f);
+                } else if (i == ci) {
+                    if (!measuring_) {
+                        rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(r, 2.5f), ph_ / 2 + 2.5f, ph_ / 2 + 2.5f), br(C::white, .10f + .22f * pulse), 2);
+                        spinRects_.push_back({ r.left - 5, r.top - 5 + oy_, r.right + 5, r.bottom + 5 + oy_ });   // keeps the pulse moving
+                    }
+                    box(r, ph_ / 2, C::white, .16f, C::white, .55f);
+                    spinner(px + 12, py + 8, 14);
+                    text(ph[i].l, pfnt, px + 12 + 14 + 7, py, lw2 + 1, ph_, C::white);
+                } else {
+                    box(r, ph_ / 2, 0, 0, C::white, .14f);
+                    dot(px + 12 + 7, py + ph_ / 2, 6, C::white);
+                    text(ph[i].l, pfnt, px + 12 + 14 + 7, py, lw2 + 1, ph_, C::white, 0, 0, .45f);
+                }
+                px += pw2;
+            }
+            yy = py + ph_ + 16;
+        }
+        // ---- now: the item being converted, large; else what the importer does
+        if (!end) {
+            const PortItem* it = j.current.empty() ? nullptr : itemOf(j.current);
+            std::wstring w0, w1;
+            std::wstring cpu = j.cpu >= 0 ? fmt(L" · now %d %%", j.cpu) : L"";
+            if (j.phase == L"start") { w0 = L"Starting…"; w1 = L"Preparing the list of items"; }
+            else if (j.phase == L"wait") { w0 = L"Checking the CPU before the next batch"; w1 = L"Imports pause while the PC is above 70 %" + cpu; }
+            else if (j.phase == L"cpu") { w0 = L"Waiting for the CPU to drop below 70 %" + cpu; w1 = L"Waiting " + fmtS(j.phaseMs + dt) + L" · it checks again every 20 s; closing heavy apps lets it continue sooner (gives up after 20 min)"; }
+            else if (j.phase == L"load") { w0 = fmt(L"Batch %d of %d: reading the game's files", j.batch, j.batches); w1 = L"fn-port loads the installed game before converting · " + fmtS(j.phaseMs + dt); }
+            else if (j.phase == L"convert") { w0 = j.current.empty() ? L"Converting" : nm(j.current); w1 = L"Meshes, textures, animations and sounds into a " + j.build + L" pak · " + fmtS(j.currentMs + dt); }
+            else if (j.phase == L"install") { w0 = L"Installing into " + j.build; w1 = L"Copying the new paks and registering the items in custom-cosmetics.json"; }
+            else if (j.phase == L"sign") { w0 = L"Signing the new paks"; w1 = L"Fitting the pak signatures so " + j.build + L" accepts them · " + fmtS(j.phaseMs + dt); }
+            else w0 = j.line;
+            bool big = j.phase == L"convert" && it;
+            float nh = big ? (narrow ? 84.f : 104.f) : 72.f;
+            D2D1_RECT_F nr = rc(ix, yy, iw, nh);
+            fill(nr, 0x000000, .28f, 14);
+            float ax = ix + 12, ay = yy + 12, as = nh - 24;
+            float tx2 = ax + as + 16, tw2 = ix + iw - 16 - tx2;
+            if (big) {
+                const RC& rcl = rcOf(it->rarity);
+                if (!measuring_) shadow(rc(ax, ay, as, as), 12, 24, 6, .5f, rcl.light);
+                tile(it, rc(ax, ay, as, as), 12);
+                Font kf{ Face::UI, 10.5f, 700, false };
+                text(L"CONVERTING · " + fmtS(j.currentMs + dt), kf, tx2, ay + 2, tw2, 14, C::white, 0, .8f, .6f);
+                Font nf{ Face::Display, narrow ? 18.f : 24.f, 900, true };
+                text(w0, nf, tx2, ay + 18, tw2, narrow ? 22.f : 28.f, C::white, 0, -.2f);
+                float ry = ay + 18 + (narrow ? 22.f : 28.f) + 6;
+                // rarity pill (skewed, its color) + type
+                std::wstring rl = !it->series.empty() ? it->series : cap(it->rarity);
+                for (auto& c : rl) c = (wchar_t)towupper(c);
+                Font rf{ Face::Display, 11, 900, true };
+                float rpw = textW(rl, rf, .1f) + 16;
+                D2D1_MATRIX_3X2_F saved = base_;
+                base_ = D2D1::Matrix3x2F::Skew(-8, 0, D2D1::Point2F(tx2 + rpw / 2, ry + 10)) * base_;
+                rt_->SetTransform(base_);
+                fill(rc(tx2, ry, rpw, 20), rcl.light, 1, 5);
+                base_ = saved; rt_->SetTransform(base_);
+                text(rl, rf, tx2 + 8, ry, rpw, 20, C::white, 0, .1f);
+                Font mf{ Face::UI, 12.5f, 400, false };
+                text(std::wstring(kPT1[(int)it->type]) + L" · meshes, textures, animations and sounds into a " + j.build + L" pak", mf,
+                     tx2 + rpw + 10, ry, std::max(0.f, ix + iw - 16 - (tx2 + rpw + 10)), 20, C::white, 0, 0, .7f);
+            } else {
+                fill(rc(ax, ay, as, as), C::white, .06f, as / 2);
+                spinner(ax + as / 2 - 12, ay + as / 2 - 12, 24);
+                Font af{ Face::UI, 15, 700, false }, mf{ Face::UI, 12.5f, 400, false };
+                text(w0, af, tx2, ay + as / 2 - 21, tw2, 21, C::white);
+                text(w1, mf, tx2, ay + as / 2 + 1, tw2, 18, C::white, 0, 0, .65f);
+            }
+            yy += nh + 18;
+        } else {
+            // what next
+            Font mf{ Face::UI, 13, 400, false };
+            std::wstring m = done ? L"Launch " + j.build + L" to see them in the locker."
+                           : failed ? (j.line.empty() ? L"Nothing could be imported. Activity has the reason." : j.line)
+                           : L"What was imported before the stop stays in " + j.build + L".";
+            text(m, mf, ix, yy, iw, 18, failed ? C::badText : C::white, 0, 0, failed ? 1.f : .75f);
+            yy += 18 + 18;
+        }
+        // ---- the last items: mini cards that wrap (newest first), two rows at most
+        std::vector<const PortJobItem*> last;
+        for (int i = (int)j.items.size() - 1; i >= 0; i--) if (j.items[i].st != L"queued") last.push_back(&j.items[i]);
+        if (!last.empty()) {
+            Font kf{ Face::UI, 10.5f, 700, false };
+            text(!end ? L"LATEST" : j.ok ? L"IMPORTED" : L"TRIED", kf, ix, yy, 200, 14, C::white, 0, .8f, .55f);
+            yy += 14 + 10;
+            const float tw0 = 210, tg = 8, tH = 56;
+            int cols = std::max(1, (int)floorf((iw + tg) / (tw0 + tg)));
+            float tw3 = (iw - (cols - 1) * tg) / cols;
+            int n = std::min((int)last.size(), cols * 2);
+            Font nf{ Face::UI, 12.5f, 700, false }, stf{ Face::UI, 11.5f, 500, false };
+            for (int i = 0; i < n; i++) {
+                const PortJobItem& e = *last[i];
+                const PortItem* t = itemOf(e.path);
+                D2D1_RECT_F r = rc(ix + (i % cols) * (tw3 + tg), yy + (i / cols) * (tH + tg), tw3, tH);
+                bool okS = e.st == L"ok", bad = e.st == L"failed", conv = e.st == L"converting";
+                fill(r, C::white, conv ? .10f : .05f, 12);
+                if (conv) box(r, 12, 0, 0, C::white, .35f);
+                tile(t, rc(r.left + 6, r.top + 6, tH - 12, tH - 12), 9);
+                float nx = r.left + 6 + tH - 12 + 10, nw = r.right - 10 - nx;
+                text(nm(e.path), nf, nx, r.top + 9, nw, 18, C::white);
+                float sy = r.top + 9 + 18 + 2;
+                if (okS) { icon(Icon::Check, nx, sy + 1.5f, 13, GREEN_); text(t ? std::wstring(kPT1[(int)t->type]) : L"Imported", stf, nx + 18, sy, nw - 18, 16, C::white, 0, 0, .6f); }
+                else if (bad) { icon(Icon::X, nx, sy + 1.5f, 13, C::bad); text(L"Not converted", stf, nx + 18, sy, nw - 18, 16, C::badText); }
+                else if (conv) { spinner(nx, sy + 2, 12); text(L"Converting…", stf, nx + 18, sy, nw - 18, 16, C::white, 0, 0, .8f); }
+            }
+            yy += ((n + cols - 1) / cols) * (tH + tg) - tg + 18;
+        }
+        // ---- the importer's output, behind a quiet toggle
+        {
+            Font lf{ Face::UI, 12, 500, false };
+            std::wstring sum = std::wstring(pLogOpen_ ? L"Hide the importer's output" : L"Show the importer's output");
+            float sumW = textW(sum, lf) + 2 + 16;
+            D2D1_RECT_F tr = rc(ix, yy, sumW, 18);
+            bool hov = hover_ == ID_P_LOG;
+            if (!measuring_) {   // a chevron: right while closed, down while open
+                ID2D1SolidColorBrush* cb = br(C::white, hov ? .9f : .5f);
+                float cx = ix + 6, cy = yy + 9;
+                if (pLogOpen_) { rt_->DrawLine(D2D1::Point2F(cx - 3.5f, cy - 1.75f), D2D1::Point2F(cx, cy + 1.75f), cb, 1.5f); rt_->DrawLine(D2D1::Point2F(cx, cy + 1.75f), D2D1::Point2F(cx + 3.5f, cy - 1.75f), cb, 1.5f); }
+                else { rt_->DrawLine(D2D1::Point2F(cx - 1.75f, cy - 3.5f), D2D1::Point2F(cx + 1.75f, cy), cb, 1.5f); rt_->DrawLine(D2D1::Point2F(cx + 1.75f, cy), D2D1::Point2F(cx - 1.75f, cy + 3.5f), cb, 1.5f); }
+            }
+            text(sum, lf, ix + 16, yy, sumW - 16, 18, C::white, 0, 0, hov ? .9f : .5f);
+            hit(ID_P_LOG, tr, F_FOCUS | F_HAND, 4);
+            if (!end && j.batches > 1) {
+                std::wstring bt = fmt(L"batch %d of %d", j.batch, j.batches) + (j.cpu >= 0 ? fmt(L" · CPU %d %%", j.cpu) : L"");
+                float bw2 = textW(bt, lf) + 1;
+                text(bt, lf, ix + iw - bw2, yy, bw2, 18, C::white, 0, 0, .45f);
+            }
+            yy += 18;
+            if (pLogOpen_) {
+                int recent = std::min<int>((int)j.recent.size(), 9);
+                yy += 8;
+                fill(rc(ix, yy, iw, 16 + recent * 17.25f), 0x000000, .35f, 10);
+                Font mono{ Face::Mono, 11.5f, 400, false };
+                float ly = yy + 8;
+                for (int i = (int)j.recent.size() - recent; i < (int)j.recent.size(); i++) {
+                    text(j.recent[i].first + L"  " + j.recent[i].second, mono, ix + 12, ly, iw - 24, 17.25f, C::ink2);
+                    ly += 17.25f;
+                }
+                yy += 16 + recent * 17.25f;
+            }
+        }
+        return yy + pad - y;
+    };
+    bool m0 = measuring_;
+    measuring_ = true;
+    float h = body();
+    measuring_ = m0;
+    D2D1_RECT_F card = rc(x, y, w, h);
+    if (!measuring_) shadow(card, 18, 40, 14, .45f);
+    glass(card, 18, .74f, .14f);
+    body();
     return h;
 }
 
@@ -1247,6 +1390,7 @@ void App::drawPortPreview() {
 std::wstring App::portTip(int id) const {
     switch (id) {
     case ID_P_OPEN: return pOpen_ ? L"Close the cosmetics" : L"Import cosmetics of the current Fortnite";
+    case ID_P_JOBX: return L"Dismiss";
     case ID_P_CELL: return L"Read from the build's own data. Import more from the current Fortnite";
     case ID_P_REFRESH: return L"List again from the installed Fortnite";
     case ID_P_CLOSE: return L"Close (Esc)";
@@ -1356,12 +1500,18 @@ void App::portActivate(int id) {
         for (int i : pPending_) paths.push_back(pCat_->items[i].path);
         pDlg_ = false; pPv_ = -1;
         std::fill(pSel_.begin(), pSel_.end(), 0); pSelN_ = 0;
+        pjEndFor_ = pBuild_;   // the build it runs on, kept for its finished card
         core_->portImport(pBuild_, paths);
         focus_ = 0;
         invalidate();
         break;
     }
     case ID_P_STOP: core_->portCancel(); break;
+    case ID_P_JOBX: pjEnd_.reset(); pLogOpen_ = false; break;
+    case ID_P_JOBGO:
+        if (pjEnd_ && pjEnd_->phase == L"done") { std::wstring bn = pjEndFor_.empty() ? pBuild_ : pjEndFor_; pjEnd_.reset(); portShow(false); core_->command(Command::Launch, bn); }   // to the lobby, launching
+        else openActivity(true);
+        break;
     case ID_P_LOG: pLogOpen_ = !pLogOpen_; invalidate(); break;
     case ID_P_PV_CLOSE: pPv_ = -1; focus_ = 0; invalidate(); break;
     case ID_P_PV_SELECT: toggle(pPv_); break;

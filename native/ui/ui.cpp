@@ -1023,6 +1023,15 @@ void App::drawStage(float top, float bottom) {
                 SUCCEEDED(t->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(W, 0)), gs, &lb)))
                 t->FillRectangle(D2D1::RectF(0, 0, W, sh), lb);
             release(lb); release(gs);
+            if (k.bare) {
+                // the cosmetics panel: from nothing behind the tabs to .32 at its title, .86 some 360 DIPs under it
+                float L = 76 + std::max(360.f, std::min(sh - 76, 520.f));
+                const D2D1_GRADIENT_STOP ps[] = { { 0, rgb(C::bg, 0) }, { 76 / L, rgb(C::bg, .32f) }, { 256 / L, rgb(C::bg, .62f) }, { 436 / L, rgb(C::bg, .80f) }, { 1, rgb(C::bg, .86f) } };
+                if (SUCCEEDED(t->CreateGradientStopCollection(ps, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
+                    SUCCEEDED(t->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, L)), gs, &lb)))
+                    t->FillRectangle(D2D1::RectF(0, 0, W, sh), lb);
+                release(lb); release(gs);
+            }
             if (SUCCEEDED(t->EndDraw())) bgRT_->GetBitmap(&bg_);
         }
         bgKey_ = k;
@@ -1122,11 +1131,11 @@ void App::drawTop(float y, float W) {
         if (cosId == ID_P_OPEN && !pOpen_) {
             // cosmetics of the current game can be imported: a brighter ring and, once listed, how many are new
             box(rc(cx, y + 6, cw, 40), 12, 0, 0, C::white, .42f);
-            std::wstring n = pNewAll_ > 0 && pBuild_ == selected_ ? (pNewAll_ > 9999 ? fmt(L"%dk", pNewAll_ / 1000) : thousands(pNewAll_)) : L"NEW";
+            // the count once listed for this build (nothing new: no badge)
+            std::wstring n = pNewAll_ > 0 && pBuild_ == selected_ ? (pNewAll_ > 9999 ? fmt(L"%dk", pNewAll_ / 1000) : thousands(pNewAll_)) : L"";
             Font nf{ Face::UI, 10.5f, 700, false, true };
             float nw = std::max(20.f, textW(n, nf) + 12), nx = cx + cw - nw + 6, ny = y + 6 - 8;
-            fill(rc(nx, ny, nw, 20), C::white, 1, 10);
-            text(n, nf, nx, ny, nw, 20, INK, 1);
+            if (!n.empty()) { fill(rc(nx, ny, nw, 20), C::white, 1, 10); text(n, nf, nx, ny, nw, 20, INK, 1); }
         }
         if (menu_ == 3) menuAnchor_ = rc(cx, y + 6, cw, 40);
         gbutton(ID_BUILDMENU, bx, y + 6, 40, L"Build", Icon::More, compact);

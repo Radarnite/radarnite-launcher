@@ -124,7 +124,7 @@ struct PortLoad {
 struct PortJobItem { std::wstring path; std::wstring st; };   // queued | converting | ok | failed
 struct PortJob {
     std::wstring build, line, current;
-    std::wstring phase;         // start | wait | cpu | load | convert | install | sign
+    std::wstring phase;         // start | wait | cpu | load | convert | install | sign; its last view: done | stopped | failed
     int total = 0, done = 0, ok = 0, failed = 0, batch = 0, batches = 0, cpu = -1;
     int64_t elapsedMs = 0, phaseMs = 0, currentMs = 0, etaMs = 0;
     std::vector<PortJobItem> items;                         // the last 40 that left "pending"

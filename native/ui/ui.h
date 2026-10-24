@@ -300,6 +300,8 @@ private:
     std::wstring pBuild_, pQ_;
     std::shared_ptr<const PortCatalog> pCat_;
     std::shared_ptr<const PortJob> pj_;
+    std::shared_ptr<const PortJob> pjEnd_;       // the last import, finished (done / stopped / failed): its card until dismissed
+    std::wstring pjEndFor_;                      // the build (name) the last import was started on: its finished card shows only on that build's panel
     ULONGLONG pjAt_ = 0, pLoadT0_ = 0;
     std::vector<PortRow> pRows_;
     uint32_t pTypes_ = 0, pSts_ = 0, pRars_ = 0;   // filter bit sets (PortType, PortStatus, rarity index)

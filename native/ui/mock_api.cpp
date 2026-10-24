@@ -118,6 +118,11 @@ const MockScenario kScenarios[] = {
     { L"35-port-importing-1920", 1920, 1040, 1.0f, false, 0, 0, 1 },
     { L"36-port-catalog-2560x1380-125", 2048, 1104, 1.25f, false, 0, 0, 1 },
     { L"37-port-catalog-1280x800", 1280, 800, 1.0f, false, 0, 0, 1 },
+    // the import card: converting at 2560x1380 (125 %), signing, finished, failed
+    { L"38-port-importing-2560x1380-125", 2048, 1104, 1.25f, false, 0, 0, 1 },
+    { L"39-port-signing-1280x800", 1280, 800, 1.0f, false, 0, 0, 1 },
+    { L"40-port-import-done", 1280, 800, 1.0f, false, 0, 0, 1 },
+    { L"41-port-import-failed", 1280, 800, 1.0f, false, 0, 0, 1 },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -173,6 +178,26 @@ std::shared_ptr<PortJob> portJobOf(int done) {
                                L"ok Character_CargoLying (12.4 s)", L"converting Backpack_CargoLying", L"ok Backpack_CargoLying (3.1 s)" };
     int k = 0;
     for (auto l : lines) { wchar_t ts[16]; swprintf(ts, 16, L"22:4%d:%02d", k / 4, (k * 13) % 60); j->recent.push_back({ ts, l }); k++; }
+    return j;
+}
+
+// The end of a 39-item import: signing, its finished view, or a failed one (3 tried, none converted).
+std::shared_ptr<PortJob> portJobEnd(const wchar_t* phase) {
+    auto j = portJobOf(37);
+    std::wstring ph = phase;
+    j->phase = ph; j->total = 39; j->batch = 2; j->batches = 2; j->current.clear(); j->etaMs = 0; j->cpu = -1;
+    j->elapsedMs = 6 * 60000 + 17000; j->phaseMs = 43000;
+    if (ph == L"failed") {
+        j->done = 3; j->ok = 0; j->failed = 3; j->elapsedMs = 72000;
+        j->line = L"fn-port stopped: the game's files could not be read (is the game updating?)";
+        j->items.resize(3);
+        for (auto& x : j->items) x.st = L"failed";
+    } else {
+        j->done = 39; j->failed = 1; j->ok = 38;
+        std::vector<PortJobItem> keep;
+        for (auto& x : j->items) { if (x.st == L"converting") x.st = L"ok"; if (x.st != L"queued") keep.push_back(x); }
+        j->items = keep;
+    }
     return j;
 }
 
@@ -247,7 +272,10 @@ public:
         for (auto& l : post) sink_->onLog(l);
         if (hasSession) { lock(); session_ = se; unlock(); sink_->onSession(se); }
         if (id.rfind(L"22-", 0) == 0) sink_->onToast(L"Desktop shortcut created", Level::Ok);
-        if (id.rfind(L"31-", 0) == 0 || id.rfind(L"35-", 0) == 0) { auto j = portJobOf(37); lock(); job_ = j; unlock(); sink_->onPortJob(j); }
+        if (id.rfind(L"31-", 0) == 0 || id.rfind(L"35-", 0) == 0 || id.rfind(L"38-", 0) == 0) { auto j = portJobOf(37); lock(); job_ = j; unlock(); sink_->onPortJob(j); }
+        if (id.rfind(L"39-", 0) == 0) { auto j = portJobEnd(L"sign"); lock(); job_ = j; unlock(); sink_->onPortJob(j); }
+        if (id.rfind(L"40-", 0) == 0) sink_->onPortJob(portJobEnd(L"done"));
+        if (id.rfind(L"41-", 0) == 0) sink_->onPortJob(portJobEnd(L"failed"));
     }
 
     // ---- cosmetics: answered at once (the offscreen renders have no message loop); the import runs on timers
@@ -276,7 +304,12 @@ public:
         });
     }
     void portCancel() override {
-        after(150, [this] { lock(); job_.reset(); jobSeq_++; unlock(); sink_->onPortJob(nullptr); log(L"Import stopped: 3 imported"); });
+        after(150, [this] {
+            lock(); auto last = job_; job_.reset(); jobSeq_++; unlock();
+            if (last) { auto f = std::make_shared<PortJob>(*last); f->phase = L"stopped"; sink_->onPortJob(f); }   // like the core: its last view, then none
+            sink_->onPortJob(nullptr);
+            log(L"Import stopped: 3 imported");
+        });
     }
     void portPreview(const std::wstring& id) override {
         // radarnite.com's catalog.json for some of the scenarios' items (the rest: made up, without a clip)
@@ -394,7 +427,7 @@ private:
     std::shared_ptr<PortCatalog> cat_;
     std::shared_ptr<PortJob> job_;
     int jobSeq_ = 0;
-    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 37; }
+    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 41; }
 };
 
 } // namespace
