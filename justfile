@@ -99,6 +99,7 @@ release version="3.0.0-rc.1":
     #!/usr/bin/env bash
     set -euo pipefail
     RN_VERSION='{{version}}' just build
+    just build-play
     just _sync-mac   # the exes in out/ are the ones shipped, wherever they were built
     just _wait-cpu windows
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
