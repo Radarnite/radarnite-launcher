@@ -28,6 +28,12 @@ const logs = (n) => Array.from({ length: n }, (_, i) => {
   return { type: 'log', text: t, level: lv, ts: `22:${String(10 + (i / 60 | 0) % 50).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}` };
 });
 
+// cosmetics catalog (Porter): 42 real items of the current game, padded to the real size of the list (12,352 to import)
+const cat = JSON.parse(fs.readFileSync(new URL('./ui-port-catalog.json', import.meta.url)));
+const catAll = cat.concat(Array.from({ length: 12352 - cat.filter((x) => x.status === 'new').length }, (_, i) => ({ ...cat[i % cat.length], path: `/pad/${i}`, status: 'new' })));
+const b1430 = mk('14.30', 14, 30, 14456520, '4.26', { match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 4025, matchServer: true, port: true, imported: 21 });
+const portMsgs = [{ type: 'state', builds: [b1430, b1750], config: cfg, selected: '14.30', root: 'S:\\FortniteBuilds' }];
+const portCat = { type: 'portCatalog', catalog: { build: '14.30', items: catAll, slotsFree: 7979 } };
 const scenarios = [
   { id: '01-one-build-practice-100', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: cfg, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
   { id: '02-many-builds-bots-activity-125', vp: [960, 640], dpr: 1.25, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots', bots: 35 }, selected: '17.50', root: 'S:\\FortniteBuilds' }, ...logs(400)], open: true },
@@ -51,10 +57,14 @@ const scenarios = [
       config: cfg, selected: '3.6-CL-4019403', root: 'S:\\FortniteBuilds' },
       { type: 'log', text: 'Not a build, ignored: S:\\FortniteBuilds\\14.30-damaged (FortniteGame\\Binaries\\Win64\\FortniteClient-Win64-Shipping.exe is missing (incomplete extraction?)).', level: 'warn' }], open: true },
   { id: '19-state-without-config', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: {}, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
+  { id: '20-port-card', vp: [1200, 800], dpr: 1, msgs: portMsgs },
+  { id: '21-port-catalog', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat] },
+  { id: '22-port-import-all-dialog', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, "$('[data-cmd=portImportAll]').click()"] },
+  { id: '23-port-importing-760x520', vp: [760, 520], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, { type: 'portJob', job: { build: '14.30', total: 240, done: 87, ok: 85, failed: 2, line: 'batch 4: 85 ok, 2 not ported so far (21 min)' } }] },
   { id: '11-large-1920x1080', vp: [1920, 1040], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'lobby' }, selected: '7.40', root: 'S:\\FortniteBuilds' }, ...logs(60)], open: true },
 ];
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.PW_CHANNEL || undefined }); // PW_CHANNEL=chrome: an installed Chrome
 const report = [];
 try {
   for (const s of scenarios) {
@@ -65,6 +75,8 @@ try {
     await page.goto('file://' + path.resolve(ui, 'index.html'));
     await page.evaluate(() => document.fonts.ready);
     await page.evaluate((msgs) => { window.__dbg = 1; msgs.forEach((m) => window.__fnoffline(m)); }, s.msgs);
+    for (const a of s.act || []) await page.evaluate((a) => (typeof a === 'string' ? (0, eval)(a) : window.__fnoffline(a)), a);
+    if (s.act) await page.waitForTimeout(1500); // catalog icons
     if (s.open) await page.click('#actBtn');
     await page.waitForTimeout(120);
     // layout checks: nothing overflows the viewport horizontally, no clipped text in key controls
