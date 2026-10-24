@@ -5,6 +5,7 @@
 #pragma once
 #include "anim.h"
 #include "api.h"
+#include "art.h"
 #include "gfx.h"
 #include <deque>
 
@@ -46,13 +47,14 @@ public:
     void timer(UINT_PTR id);
     void editCommand(int id, int code);         // WM_COMMAND from an EDIT
     void editKey(int id, UINT vk, bool ctrl, bool shift);   // keys the EDIT subclass hands over
-    HBRUSH editBrush() const { return editBrush_; }
+    HBRUSH editBrush(HWND edit, HDC dc);       // WM_CTLCOLOREDIT: the field's colors (the EDITs are opaque)
     void openActivity(bool open);
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
     // Transitions on/off (Windows "Show animations"; off without a window, so offscreen renders are the rest state)
     void setMotion(bool on);
     bool motion() const { return anim_.motion; }
     bool animating() const { return anim_.running(); }
+    bool artPending() const { return art_.pending(); }   // season art still downloading or decoding (selftest)
     int animTicks = 0;                          // animation timer ticks (selftest)
     D2D1_RECT_F actButtonRect() const;          // selftest: where the Activity button is (hover check)
     // Selftest in the live window: frame hit-testing (WM_NCHITTEST), no system frame, Escape in the search EDIT.
@@ -77,7 +79,11 @@ private:
     struct LogEntry { std::wstring ts, text, lower; int lvl; bool key; int wrapCols = 0, lines = 1; };
     struct Toast { std::wstring text; Level level; ULONGLONG until; uint32_t seq; };
     struct EditBox { HWND hwnd = nullptr; int id = 0; D2D1_RECT_F r{}; bool show = false; D2D1_RECT_F clip{}; HFONT font = nullptr; Font f; int textH = 16;
-                     RECT applied{}; bool shown = false; bool clipped = false; };
+                     RECT applied{}; bool shown = false; bool clipped = false;
+                     bool lazy = false, want = false;   // lazy: the EDIT only shows while it has the focus (drawn text otherwise)
+                     uint32_t bg = C::bg2; };
+    struct Thumb { std::wstring skin; ArtImage img; UINT req = 0; ID2D1Bitmap* bmp = nullptr; ID2D1BitmapBrush* brush = nullptr; };
+    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; };
 
     void invalidate();
     void dirty(D2D1_RECT_F r);             // repaint only r (client DIPs)
@@ -119,7 +125,10 @@ private:
     void icon(Icon i, float x, float y, float size, uint32_t c, float a = 1.f);
     void spinner(float x, float y, float size);
     void skeleton(int i, D2D1_RECT_F r);
-    void shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha);
+    void shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha, uint32_t color = 0x000000);
+    void glass(D2D1_RECT_F r, float radius, float fillA = .62f, float borderA = .12f);
+    float pill(float x, float y, const std::wstring& s, int dot, bool measure = false);   // .badge; dot -1 none, 0-2 level, 3 spinner
+    float gbutton(int id, float x, float y, float h, const wchar_t* label, Icon ic, bool iconOnly, bool measure = false);
     float textW(const std::wstring& s, const Font& f, float tracking = 0);
     bool text(const std::wstring& s, const Font& f, float x, float top, float w, float lh, uint32_t c, int align = 0, float tracking = 0, float a = 1.f);
     float rich(const std::wstring& s, const Font& f, float x, float top, float w, float lh, uint32_t c, uint32_t boldC, int align = 0, bool draw = true);
@@ -130,10 +139,18 @@ private:
 
     // parts
     void drawTitle(float W);
-    void drawRail(float x, float y, float w, float h);
-    float drawContent(float x, float y, float w, float viewH);  // returns content height
+    void drawStage(float top, float bottom);                   // season gradient, rays, skin and fades (cached bitmap)
+    void drawTop(float y, float W);                             // build tabs, +, Cosmetics, Build
+    void drawHero(float x, float right, float top, float bottom);
+    void drawLaunch(D2D1_RECT_F pr, uint32_t glow);
+    void drawPanel(float x, float y, float w, float h);
+    float panelBody(float x, float y, float w);                 // returns the height
     void drawActivity(float x, float y, float w, float h);
-    void drawBar(float x, float y, float w);
+    // season art
+    void ensureArt(const wchar_t* skin, UINT px);
+    void takeArt();
+    ID2D1BitmapBrush* thumb(const wchar_t* skin);
+    void releaseArt();                                          // the Direct2D side (target change)
     void drawMenu();
     void drawToasts(float W, float H);
     void drawScrollbar(int id, float x, float y, float h, float scroll, float total, float view);
@@ -185,7 +202,7 @@ private:
     float contentScroll_ = 0, contentH_ = 0, contentView_ = 0;
     std::vector<Toast> toasts_;
     std::vector<D2D1_RECT_F> spinRects_;   // where spinners were drawn (the spin timer repaints only those)
-    int menu_ = 0;              // 0 none, 1 add, 2 build
+    int menu_ = 0;              // 0 none, 1 add, 2 build, 3 cosmetics
     D2D1_RECT_F menuAnchor_{};
     int botsDrag_ = -1;
 
@@ -197,7 +214,25 @@ private:
     int drag_ = 0;              // id being dragged (range, grip, scrollbars)
     float dragY0_ = 0, dragV0_ = 0;
     EditBox edits_[3];
-    HBRUSH editBrush_ = nullptr;
+    HBRUSH editBrush_ = nullptr, fieldBrush_ = nullptr;
+    // lobby screen
+    ArtLoader art_;
+    ArtImage artImg_;           // the selected build's skin, decoded at the size it is drawn (the only full art kept)
+    std::wstring artWant_;
+    UINT artReqPx_ = 0;
+    uint32_t artGen_ = 0;
+    std::vector<Thumb> thumbs_; // the tabs' small skins
+    ID2D1BitmapRenderTarget* bgRT_ = nullptr;
+    ID2D1Bitmap* bg_ = nullptr;
+    BgKey bgKey_{};
+    ID2D1LinearGradientBrush* modeBr_[2] = {};
+    ID2D1LinearGradientBrush* rangeBr_ = nullptr;
+    float tabScroll_ = 0, tabMax_ = 0;
+    D2D1_RECT_F tabClip_{};
+    int tabEnsure_ = -1;        // build index to scroll into view on the next frame
+    D2D1_RECT_F playRect_{};
+    bool playShown_ = false, playDisabled_ = false;
+    float toastRight_ = 0, toastBottom_ = 0;
     HWND tip_ = nullptr;        // one comctl32 tooltip, its tool = the hovered control
     bool spinning_ = false;
     bool pendingEnsure_ = false;

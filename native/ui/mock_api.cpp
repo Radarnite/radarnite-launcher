@@ -40,6 +40,14 @@ std::vector<Build> many() {
     e.match = Support::No; e.matchWhy = kNoServer; e.cosmetics = 0; v.push_back(e);
     return v;
 }
+// The lobby screen's mockup: 3.6, 14.30 and 17.50 with the match server, 14.30 selected
+std::vector<Build> lobby() {
+    Build a = mk(L"3.6", 3, 6, 4019403, L"4.20"); a.match = Support::Yes; a.matchWhy = kS3; a.cosmetics = 2210;
+    Build b = mk(L"14.30", 14, 30, 14456520, L"4.26"); b.match = Support::Yes; b.matchWhy = kS3; b.cosmetics = 4025;
+    std::vector<Build> v = { a, b, b1750() };
+    for (auto& x : v) x.matchServer = true;
+    return v;
+}
 Config cfg() {
     Config c; c.has = true; c.displayName = L"testingacc"; c.mode = L"practice"; c.bots = 20;
     c.botsAI = false; c.infiniteMaterials = true; c.infiniteAmmo = false; c.lateGame = false;
@@ -93,6 +101,10 @@ const MockScenario kScenarios[] = {
     { L"21-match-server-ai-on-900-125", 900, 640, 1.25f, false },
     { L"22-build-menu-toast", 1200, 800, 1.0f, false, 2 },
     { L"23-keyboard-focus-switch", 1200, 800, 1.0f, false, 0, 18 },
+    // the lobby screen at the mockup's size, at 125 % and at the minimum window size
+    { L"24-lobby-1280x800", 1280, 800, 1.0f, false },
+    { L"25-lobby-1280x800-125", 1280, 800, 1.25f, false },
+    { L"26-lobby-760x520", 760, 520, 1.0f, false },
 };
 
 // Timer-queue callback carrying a std::function (thread-pool thread).
@@ -154,6 +166,11 @@ public:
         else if (id.rfind(L"23-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.selected = L"17.50"; }
         else if (id.rfind(L"21-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.botsAI = true; st.selected = L"17.50"; }
         else if (id.rfind(L"22-", 0) == 0) { st.builds = withServer(many()); st.selected = L"12.41"; post = logs(5); }
+        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0) {
+            st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86";
+            LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
+            l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
+        }
         lock(); state_ = st; unlock();
         sink_->onState(st);
         for (auto& l : pre) sink_->onLog(l);
