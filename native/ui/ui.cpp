@@ -1222,7 +1222,7 @@ void App::drawTop(float y, float W) {
         if (loaded_) {
             const Build& bd = st_.builds[i];
             std::wstring s = small(bd);
-            lw[i] = 16 + textW(verLabel(bd), vf) + 2 + (s.empty() ? 0 : 8 + textW(s, sf)) + 16;
+            lw[i] = 16 + textW(verLabel(bd), vf) + (s.empty() ? 0 : 8 + textW(s, sf)) + 16;
         }
         total += lw[i] + (i ? 6 : 0);
     }
@@ -1269,7 +1269,7 @@ void App::drawTop(float y, float W) {
         std::wstring v = verLabel(bd), s = small(bd);
         float vw = textW(v, vf);
         text(v, vf, r.left + 16, y, vw + 4, ah, C::white, 0, 0, a);
-        if (!s.empty()) text(s, sf, r.left + 16 + vw + 2 + 8, y + 1, lw[i] - 32 - vw - 10 + 2, ah, C::white, 0, 0, a * .8f);
+        if (!s.empty()) text(s, sf, r.left + 16 + vw + 8, y + 1, lw[i] - 32 - vw - 8 + 2, ah, C::white, 0, 0, a * .8f);
         if (on) fill(rc(r.left, r.bottom - 3, lw[i], 3), C::white);
         hit(id, r, F_FOCUS | F_HAND, 8);
     }
@@ -1578,8 +1578,8 @@ float App::summary(float x, float y, float w, bool withChips) {
     // .md: what the match is (modes are picked in the game: Practice or Battle Royale)
     std::wstring t = hasMatch ? L"LOCAL MATCH" : L"LOBBY ONLY";
     float tw30 = textW(t, Font{ Face::Display, 30, 900, true }), avail = brr.left - 12 - lx;
-    float ts = std::max(16.f, std::min(30.f, tw30 > 0 ? (avail - 4) / tw30 * 30 : 30.f));
-    text(t, Font{ Face::Display, ts, 900, true }, lx, ty, avail, 34, C::white);
+    float ts = std::max(14.f, std::min(30.f, tw30 > 0 ? (avail - 8) / tw30 * 30 : 30.f));
+    text(t, Font{ Face::Display, ts, 900, true }, lx, ty, avail + 4, 34, C::white);
     float chy = ty + 34 + 12;
     for (size_t i = 0; i < chips.size(); i++) {
         D2D1_RECT_F q = cr[i];
@@ -1678,10 +1678,10 @@ float App::sheetBody(float x, float y0, float w) {
     }
     y += 74 + 14;
 
-    auto row = [&](const wchar_t* label) { fill(rc(x, y, w, 1), C::white, .1f); text(label, rf, x, y, w * .55f, 44, C::white); };
+    auto row = [&](const wchar_t* label, float rightW) { fill(rc(x, y, w, 1), C::white, .1f); text(label, rf, x, y, w - rightW - 12, 44, C::white); };
     if (hasMatch) {
         // bots: the slider, then the number (an EDIT while it has the focus)
-        row(L"Bots");
+        row(L"Bots", std::min(280.f, w - textW(L"Bots", rf) - 24));
         int bots = botsDrag_ >= 0 ? botsDrag_ : c.bots;
         float gw = std::min(280.f, w - textW(L"Bots", rf) - 24), gx = x + w - gw;
         const float numW = 34;
@@ -1714,7 +1714,7 @@ float App::sheetBody(float x, float y0, float w) {
         };
         for (int i = 0; i < 4; i++) {
             int id = ID_TG0 + i;
-            row(tg[i].label);
+            row(tg[i].label, 30);
             float sx = x + w - 30, sy = y + (44 - 17) / 2;
             // background and the knob 180 ms var(--ease)
             float v = fx(K_SWITCH | id, tg[i].on ? 1.f : 0.f, rc(sx, sy, 30, 17), T2, Curve::Ui);
@@ -1735,7 +1735,7 @@ float App::sheetBody(float x, float y0, float w) {
     }
 
     // player name (a native EDIT on an opaque field)
-    row(L"Player name");
+    row(L"Player name", std::min(220.f, w - textW(L"Player name", rf) - 24));
     {
         EditBox& e = edits_[0];
         bool foc = hwnd_ && GetFocus() == e.hwnd;
@@ -1808,7 +1808,7 @@ void App::drawLaunch(D2D1_RECT_F pr, uint32_t glow) {
     float cx = pr.left + (bw - cw) / 2, cy = (pr.top + pr.bottom) / 2;
     icon(stopStyle ? Icon::X : Icon::Play, cx - g0, cy - iconS / 2, iconS, pc);
     if (text(pl, pf, cx + gw + gap, pr.top, ptw + 4, bh, pc)) issues.push_back(L"clipped play");
-    if (stw > 0) text(ver, sf, cx + gw + gap + ptw + gap, pr.top + 2 * k, stw + 2, bh, disabled ? 0x6B7080 : INK, 0, 0, disabled ? 1.f : .6f);
+    if (stw > 0) text(ver, sf, cx + gw + gap + ptw + gap, pr.top, stw + 2, bh, disabled ? 0x6B7080 : INK, 0, 0, disabled ? 1.f : .6f);
     base_ = saved;
     rt_->SetTransform(base_);
 }

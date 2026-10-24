@@ -66,31 +66,6 @@ bool safeId(const std::wstring& s) {
     return true;
 }
 
-// Separable box blur of an 8-bit plane, radius r, in place (tmp = scratch of the same size).
-void boxBlur(std::vector<uint8_t>& p, std::vector<uint8_t>& tmp, int w, int h, int r) {
-    if (r < 1) return;
-    int d = 2 * r + 1;
-    for (int y = 0; y < h; y++) {   // horizontal: p -> tmp
-        const uint8_t* s = &p[(size_t)y * w]; uint8_t* o = &tmp[(size_t)y * w];
-        int sum = 0;
-        for (int x = -r; x <= r; x++) sum += (x >= 0 && x < w) ? s[x] : 0;
-        for (int x = 0; x < w; x++) {
-            o[x] = (uint8_t)(sum / d);
-            int a = x + r + 1, b = x - r;
-            sum += (a < w ? s[a] : 0) - (b >= 0 ? s[b] : 0);
-        }
-    }
-    for (int x = 0; x < w; x++) {   // vertical: tmp -> p
-        int sum = 0;
-        for (int y = -r; y <= r; y++) sum += (y >= 0 && y < h) ? tmp[(size_t)y * w + x] : 0;
-        for (int y = 0; y < h; y++) {
-            p[(size_t)y * w + x] = (uint8_t)(sum / d);
-            int a = y + r + 1, b = y - r;
-            sum += (a < h ? tmp[(size_t)a * w + x] : 0) - (b >= 0 ? tmp[(size_t)b * w + x] : 0);
-        }
-    }
-}
-
 // The file decoded at px rows (never above its own size) into 32bpp premultiplied BGRA.
 bool decode(const std::wstring& file, UINT px, ArtImage* out) {
     IWICImagingFactory* wic = nullptr;
@@ -128,34 +103,6 @@ void fadeLeft(ArtImage& im) {
             for (int k = 0; k < 4; k++) p[k] = (uint8_t)lroundf(p[k] * f);
         }
     }
-}
-
-// img.art filter: drop-shadow(0 30px 60px rgba(0,0,0,.55)) at an art height of 760px, baked under the skin once.
-// The image grows by the shadow's reach; pad* say where the skin's own box is inside it.
-void dropShadow(ArtImage& im, int* padL, int* padT, int* padR, int* padB) {
-    float k = im.h / 760.f;
-    float sigma = 30 * k;   // CSS blur radius 60px = 2 sigma
-    int oy = (int)lroundf(30 * k), reach = (int)ceilf(3 * sigma);
-    *padL = *padR = reach; *padT = std::max(0, reach - oy); *padB = reach + oy;
-    int W = (int)im.w + *padL + *padR, H = (int)im.h + *padT + *padB;
-    std::vector<uint8_t> a((size_t)W * H, 0), tmp((size_t)W * H);
-    for (UINT y = 0; y < im.h; y++)
-        for (UINT x = 0; x < im.w; x++) a[(size_t)(y + *padT + oy) * W + x + *padL] = im.px[((size_t)y * im.w + x) * 4 + 3];
-    int r = std::max(1, (int)lroundf(sigma));
-    for (int i = 0; i < 3; i++) boxBlur(a, tmp, W, H, r);   // three boxes ~ a Gaussian of sigma r
-    std::vector<uint8_t> o((size_t)W * H * 4);
-    for (int y = 0; y < H; y++)
-        for (int x = 0; x < W; x++) {
-            uint8_t* d = &o[((size_t)y * W + x) * 4];
-            int s = (int)lroundf(a[(size_t)y * W + x] * 0.55f);
-            int ix = x - *padL, iy = y - *padT;
-            if (ix >= 0 && iy >= 0 && ix < (int)im.w && iy < (int)im.h) {
-                const uint8_t* p = &im.px[((size_t)iy * im.w + ix) * 4];
-                d[0] = p[0]; d[1] = p[1]; d[2] = p[2];
-                d[3] = (uint8_t)(p[3] + (255 - p[3]) * s / 255);   // premultiplied black under the skin
-            } else { d[0] = d[1] = d[2] = 0; d[3] = (uint8_t)s; }
-        }
-    im.px.swap(o); im.w = W; im.h = H;
 }
 
 } // namespace
@@ -196,8 +143,7 @@ struct ArtLoader::Shared {
             if (!ok) DeleteFileW(file.c_str());   // a broken file is fetched again next time
         }
         if (!ok) { Guard g(g_failLock); g_failed.insert(r.skin); return false; }
-        if (r.thumb) fadeLeft(*out);
-        else dropShadow(*out, &out->padL, &out->padT, &out->padR, &out->padB);
+        if (r.thumb) fadeLeft(*out);   // the full art is drawn as it is (the poster's skin has no shadow)
         return true;
     }
 
