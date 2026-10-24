@@ -1,7 +1,7 @@
 /*
  * fnredirect.dll - keeps an old Fortnite build talking ONLY to the local offline backend.
  *
- * Injected by the offline launcher into FortniteClient-Win64-Shipping.exe (only the build under S:\FortniteBuilds,
+ * Injected by the offline launcher into FortniteClient-Win64-Shipping.exe (only the build under S:\Fortnite\FortniteBuilds,
  * never the real install). It finds libcurl's curl_easy_setopt inside the game executable (statically linked by
  * Unreal's HTTP module) and hooks it:
  *   - CURLOPT_URL: every URL whose host is not 127.0.0.1/localhost is rewritten to http://127.0.0.1:<port><path>.
