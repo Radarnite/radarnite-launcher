@@ -35,7 +35,10 @@ struct Font {
 
 enum class Icon {
     Play, Plus, More, Chev, Lobby, Build, Bots, Match, Cos, Fw, Zip, Folder, Refresh, Link, Cog, Log, Copy, Trash, Warn,
-    Check, X, WMin, WMax, WRes, WClose, Count
+    Check, X, WMin, WMax, WRes, WClose,
+    // the cosmetics panel (radarnite.com's icons, the page's PIC)
+    PAll, POutfit, PEmote, PPickaxe, PBackpack, PGlider, PWrap, PLoading, PSpray, PEmoji, PFilters, PNew, PSort, PSearch, PChk,
+    Count
 };
 
 class Gfx {
