@@ -134,6 +134,7 @@ private:
     void skeleton(int i, D2D1_RECT_F r);
     void shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha, uint32_t color = 0x000000);
     void glass(D2D1_RECT_F r, float radius, float fillA = .62f, float borderA = .12f);
+    void frost(D2D1_RECT_F r, float radius);    // the dock's blurred glass
     float pill(float x, float y, const std::wstring& s, int dot, bool measure = false);   // .badge; dot -1 none, 0-2 level, 3 spinner
     float gbutton(int id, float x, float y, float h, const wchar_t* label, Icon ic, bool iconOnly, bool measure = false);
     float textW(const std::wstring& s, const Font& f, float tracking = 0);
@@ -151,7 +152,7 @@ private:
     void drawPoster(float x, float right, float top, float bottom);   // the season's title (bottom left)
     float drawDock(float x, float w, float top, float bottom);  // summary or sheet, status line, Launch; returns its top
     float okline(float x, float y, float w);                    // the status line; returns the height
-    float summary(float x, float y, float w);                   // returns the height
+    float summary(float x, float y, float w, bool withChips);   // returns the height
     float drawSheet(float x, float w, float top, float bottom); // returns its top
     float sheetBody(float x, float y, float w);                 // returns the bottom
     void drawLaunch(D2D1_RECT_F pr, uint32_t glow);
@@ -235,6 +236,8 @@ private:
     std::vector<Thumb> thumbs_; // the tabs' small skins
     ID2D1BitmapRenderTarget* bgRT_ = nullptr;
     ID2D1Bitmap* bg_ = nullptr;
+    ID2D1Bitmap* blur_ = nullptr;           // the stage at 1/16, the frost's backdrop
+    ID2D1BitmapBrush* blurBr_ = nullptr;
     BgKey bgKey_{};
     ID2D1LinearGradientBrush* modeBr_[2] = {};
     ID2D1LinearGradientBrush* rangeBr_ = nullptr;

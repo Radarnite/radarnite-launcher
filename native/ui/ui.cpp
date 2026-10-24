@@ -913,6 +913,17 @@ void App::paint(float W, float H) {
 // .glass: rgba(9,13,28,.62) with a 1px rgba(255,255,255,.12) border (no backdrop blur)
 void App::glass(D2D1_RECT_F r, float radius, float fillA, float borderA) { box(r, radius, GLASS, fillA, C::white, borderA); }
 
+// .frost: the blurred stage under rgba(12,17,38,.55) with a 1px rgba(255,255,255,.14) border
+void App::frost(D2D1_RECT_F r, float radius) {
+    if (measuring_) return;
+    if (blurBr_) {
+        blurBr_->SetTransform(D2D1::Matrix3x2F::Translation(0, TB));
+        blurBr_->SetOpacity(alpha_);
+        rt_->FillRoundedRectangle(D2D1::RoundedRect(r, radius, radius), blurBr_);
+    }
+    box(r, radius, FROST, .55f, C::white, .14f);
+}
+
 // .badge: a black pill skewed -12deg, italic 900 11px uppercase (+.02em); a level dot (.ok::before: 7px with a 2px
 // ring) or a spinner before the text. Returns its width (21 DIPs tall).
 float App::pill(float x, float y, const std::wstring& s, int lvl, bool measure) {
@@ -953,7 +964,7 @@ float App::gbutton(int id, float x, float y, float h, const wchar_t* label, Icon
 
 // ------------------------------------------------------------------------------------------------ season art
 void App::releaseArt() {
-    release(bg_); release(bgRT_);
+    release(blurBr_); release(blur_); release(bg_); release(bgRT_);
     for (auto& t : thumbs_) { release(t.brush); release(t.bmp); }
 }
 
@@ -1031,7 +1042,7 @@ void App::drawStage(float top, float bottom) {
     bool same = bg_ && k.w == bgKey_.w && k.top == bgKey_.top && k.bottom == bgKey_.bottom && k.scale == bgKey_.scale && k.sa == bgKey_.sa &&
                 k.artGen == bgKey_.artGen && k.rt == bgKey_.rt && k.bare == bgKey_.bare && k.ghost == bgKey_.ghost;
     if (!same) {
-        release(bg_); release(bgRT_);
+        release(blurBr_); release(blur_); release(bg_); release(bgRT_);
         D2D1_SIZE_U px = D2D1::SizeU((UINT32)ceilf(W * scale_ - 0.01f), (UINT32)ceilf(sh * scale_ - 0.01f));
         if (px.width && px.height && SUCCEEDED(rt_->CreateCompatibleRenderTarget(D2D1::SizeF(px.width / scale_, px.height / scale_), px, &bgRT_))) {
             ID2D1RenderTarget* t = bgRT_;
@@ -1129,6 +1140,25 @@ void App::drawStage(float top, float bottom) {
                 release(lb); release(gs);
             }
             if (SUCCEEDED(t->EndDraw())) bgRT_->GetBitmap(&bg_);
+        }
+        // .frost's backdrop-filter: blur(28px): the stage halved four times (each a 2x2 average), drawn back stretched
+        // with linear filtering under the summary and the sheet
+        if (bg_) {
+            ID2D1Bitmap* src = bg_; src->AddRef();
+            D2D1_SIZE_U px = bg_->GetPixelSize();
+            for (int i = 0; i < 4 && src; i++) {
+                px = D2D1::SizeU(std::max(1u, px.width / 2), std::max(1u, px.height / 2));
+                ID2D1BitmapRenderTarget* h = nullptr; ID2D1Bitmap* out = nullptr;
+                if (SUCCEEDED(rt_->CreateCompatibleRenderTarget(D2D1::SizeF(W, sh), px, &h))) {
+                    h->BeginDraw();
+                    h->DrawBitmap(src, D2D1::RectF(0, 0, W, sh), 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    if (SUCCEEDED(h->EndDraw())) h->GetBitmap(&out);
+                }
+                release(h); release(src);
+                src = out;
+            }
+            blur_ = src;
+            if (blur_) rt_->CreateBitmapBrush(blur_, D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_CLAMP, D2D1_EXTEND_MODE_CLAMP, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR), &blurBr_);
         }
         bgKey_ = k;
     }
@@ -1390,18 +1420,27 @@ float App::drawDock(float x, float w, float top, float bottom) {
     const Build* b = sel();
     if (!b) return bottom;
     const SeasonArt& sa = seasonArt(b->major, b->minor);
+    // the summary as it fits: with its chips, without them, or only a Match settings button on the status line
     measuring_ = true;
-    float oh = okline(x + 4, 0, w - 4);
+    float oh = okline(x + 4, 0, w - 4), full = summary(x, 0, w, true), compact = summary(x, 0, w, false);
+    int mode = sheetOpen_ ? 0 : pr.top - 12 - oh - 14 - full >= top ? 2 : pr.top - 12 - oh - 14 - compact >= top ? 1 : 3;
+    const float cog = 28;
+    if (mode == 3) oh = std::max(cog, okline(x + 4, 0, w - 4 - cog - 10));
     measuring_ = false;
     float okTop = pr.top - 12 - oh;
-    okline(x + 4, okTop, w - 4);
+    okline(x + 4, okTop, w - 4 - (mode == 3 ? cog + 10 : 0));
     float dockTop = okTop;
-    if (sheetOpen_) dockTop = drawSheet(x, w, top, okTop - 6);
-    else {
-        measuring_ = true;
-        float ch = summary(x, 0, w);
-        measuring_ = false;
-        if (okTop - 14 - ch >= top) { summary(x, okTop - 14 - ch, w); dockTop = okTop - 14 - ch; }
+    if (sheetOpen_) dockTop = drawSheet(x, w, top, okTop + 1);   // .sheet{bottom:190px}: on the status line's top
+    else if (mode == 3) {
+        D2D1_RECT_F cr = rc(x + w - cog, okTop + (oh - cog) / 2, cog, cog);
+        float hv = fx(K_HOVER | ID_SHEET, hover_ == ID_SHEET ? 1.f : 0.f, cr);
+        fill(cr, C::white, .12f + .08f * hv, 8);
+        icon(Icon::Cog, cr.left + 6, cr.top + 6, 16, C::white);
+        hit(ID_SHEET, cr, F_FOCUS | F_HAND | (b->lobby == Support::No ? F_DISABLED : 0), 8);
+    } else {
+        float ch = mode == 2 ? full : compact;
+        summary(x, okTop - 14 - ch, w, mode == 2);
+        dockTop = okTop - 14 - ch;
     }
     drawLaunch(pr, sa.c[0]);
     return dockTop;
@@ -1497,7 +1536,7 @@ float App::okline(float x, float y, float w) {
 }
 
 // .sum: what Launch starts (title, the switches as chips) and the Match settings button. Returns the height.
-float App::summary(float x, float y, float w) {
+float App::summary(float x, float y, float w, bool withChips) {
     const Build* b = sel();
     const Config& c = st_.config;
     bool dis = b->lobby == Support::No, hasMatch = matchOk(b);
@@ -1521,11 +1560,12 @@ float App::summary(float x, float y, float w) {
         cr.push_back(rc(cx, cy, cw, 28));
         cx += cw + 6;
     }
-    float h = 1 + 16 + 34 + 12 + cy + 28 + 16 + 1;
+    if (!withChips) chips.clear();
+    float h = 1 + 16 + 34 + (chips.empty() ? 0 : 12 + cy + 28) + 16 + 1;
     if (measuring_) return h;
     D2D1_RECT_F r = rc(x, y, w, h);
     if (dis) { alpha_ = .5f; noHit_ = true; }
-    box(r, 18, FROST, .55f, C::white, .14f);
+    frost(r, 18);
     float ty = y + 17, lx = x + 1 + px;
     Font bf{ Face::UI, 13, 600, false };
     float bw = 12 + 16 + 8 + textW(L"Match settings", bf) + 12;
@@ -1557,14 +1597,14 @@ float App::summary(float x, float y, float w) {
 // content scrolls when the window is short. Returns its top.
 float App::drawSheet(float x, float w, float top, float bottom) {
     measuring_ = true;
-    float ch = sheetBody(x + 23, 0, w - 46) + 20;
+    float ch = sheetBody(x + 23, 20, w - 46) + 20;   // padding 20 22 (+ the 1px border)
     measuring_ = false;
     float h = std::min(ch + 2, std::max(80.f, bottom - top));
     D2D1_RECT_F r = rc(x, bottom - h, w, h);
     sheetRect_ = r;
     float a = tw(K_SHEET, 1, grow(r, 2));   // fades in when it opens (180 ms)
     alpha_ = a;
-    box(r, 20, FROST, .55f, C::white, .14f);
+    frost(r, 20);
     float viewTop = r.top + 1, viewBottom = r.bottom - 1, viewH = std::max(0.f, viewBottom - viewTop);
     contentView_ = viewH;
     contentH_ = ch;
@@ -1577,7 +1617,7 @@ float App::drawSheet(float x, float w, float top, float bottom) {
     base_ = D2D1::Matrix3x2F::Translation(0, oy_);
     rt_->SetTransform(base_);
     inContent_ = true;
-    sheetBody(x + 23, 19, w - 46);
+    sheetBody(x + 23, 20, w - 46);
     inContent_ = false;
     base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0;
     rt_->SetTransform(base_);
@@ -2336,12 +2376,20 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
         if (d) { logScroll_ = std::max(0.f, std::min(logMax_, logScroll_ + d)); logFollow_ = logScroll_ >= logMax_ - 8; invalidate(); return true; }
     }
     // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above)
-    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_) { stepBuild(vk == VK_RIGHT ? 1 : -1); return true; }
+    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !sheetOpen_ && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_CLEAR)) {
+        stepBuild(vk == VK_RIGHT ? 1 : -1);
+        return true;
+    }
     if (vk == VK_RETURN || vk == VK_SPACE) {
         const Hit* h = hitById(f);
+        // Enter launches unless a control was reached with the keyboard (never stops: that stays on the button and
+        // Ctrl+Enter)
+        if (vk == VK_RETURN && (!h || !focusVisible_) && !menu_ && !pOpen_ && !busy()) {
+            const Hit* p = hitById(ID_PLAY);
+            if (p && !(p->flags & F_DISABLED)) activate(ID_PLAY);
+            return true;
+        }
         if (h && !(h->flags & F_DISABLED) && f != ID_LINES) { focusVisible_ = true; activate(f); return true; }
-        // Enter with nothing focused launches (never stops: that stays on the button and Ctrl+Enter)
-        if (vk == VK_RETURN && !h && !menu_ && !pOpen_ && !busy()) { const Hit* p = hitById(ID_PLAY); if (p && !(p->flags & F_DISABLED)) activate(ID_PLAY); return true; }
     }
     if (vk == VK_PRIOR || vk == VK_NEXT) { contentScroll_ += (vk == VK_NEXT ? 1 : -1) * contentView_ * 0.9f; invalidate(); return true; }
     return false;
@@ -2479,9 +2527,11 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     check(L"icon buttons, build items and status cells have the page's tooltips",
           tips && sb && tooltip(ID_CELL0) == sb->lobbyWhy && tooltip(ID_CELL0 + 1) == (sb->matchServer ? sb->matchWhy : L"launcher\\gameserver\\radarnite-server.dll is missing"));
 
-    openSheet(false); focus_ = 0; frame();
+    openSheet(false); frame();
+    size_t ci = 0; for (size_t i = 0; i < st_.builds.size(); i++) if (st_.builds[i].name == selected_) ci = i;
+    click(ID_BUILD0 + (int)ci);
     key(VK_RETURN, false, false); drain(); frame();
-    check(L"Enter with nothing focused launches the selected build", se_.state == SessionState::Launching);
+    check(L"Enter after a click on the build launches it", se_.state == SessionState::Launching);
     return out;
 }
 
