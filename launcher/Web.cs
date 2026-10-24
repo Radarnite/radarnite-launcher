@@ -356,7 +356,7 @@ sealed class WebHost : Form
 
     bool _closing;          // closing once the running import has stopped
     Porter.Job? _port; // a running cosmetics import (Porter): one at a time, never while a game runs
-    void PostPort() => Post(new { type = "portJob", job = _port == null ? null : new { build = _port.Build, total = _port.Total, done = _port.Done, ok = _port.Ok, failed = _port.Failed, line = _port.Line } });
+    void PostPort() => Post(new { type = "portJob", job = _port?.View() });
 
     BuildInfo? _sessionBuild;
     (string phase, string detail) _match = ("", "");
@@ -460,7 +460,13 @@ sealed class WebHost : Form
                 {
                     var refresh = m["refresh"]?.GetValue<bool>() == true;
                     JsonObject cat;
-                    try { cat = await Task.Run(() => Porter.CatalogAsync(pb, refresh, s => Log(s))); }
+                    var catBuild = pb.Name;
+                    try
+                    {
+                        cat = await Task.Run(() => Porter.CatalogAsync(pb, refresh, s => Log(s),
+                            (stage, ms, done) => Post(new { type = "portLoad", build = catBuild, stage, ms, done }),
+                            early => { early["build"] = catBuild; Post(new { type = "portCatalog", catalog = early }); }));
+                    }
                     catch (Exception e) { cat = new JsonObject { ["error"] = e.Message }; }
                     cat["build"] = pb.Name;
                     Post(new { type = "portCatalog", catalog = cat });
