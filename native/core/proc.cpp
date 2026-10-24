@@ -205,6 +205,7 @@ int run(Start s, const std::function<void(const std::wstring&, bool)>& onLine, s
     CloseHandle(outW);
     CloseHandle(errW);
     if (!p.ok()) { CloseHandle(outR); CloseHandle(errR); return -1; }
+    if (s.started) s.started(pid);
     LineReader re{ errR, true, &onLine }, ro{ outR, false, &onLine };
     HANDLE t = CreateThread(nullptr, 0, readerProc, &re, 0, nullptr);
     ro();

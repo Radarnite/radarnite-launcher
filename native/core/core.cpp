@@ -6,6 +6,7 @@
 #include "config.h"
 #include "firewall.h"
 #include "paths.h"
+#include "port.h"
 #include "proc.h"
 #include "session.h"
 #include "update.h"
@@ -13,6 +14,7 @@
 #include <knownfolders.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -113,6 +115,10 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     bool hasSessionBuild = false;
     BuildInfo sessionBuild;
     std::set<std::wstring> skippedSeen;
+    std::shared_ptr<port::Job> portJob;   // a running cosmetics import (one at a time, never while a game runs)
+    std::mutex previewM;               // held while catalog.json loads: a preview asked meanwhile waits for it
+    port::Previews previews;
+    std::vector<std::wstring> previewIds;   // lower-case ids of the last catalog (what the previews keep)
     std::mutex scanM;                  // one PushState at a time
     std::mutex launchM;                // one launch at a time, held until its game exits (2.x ran the prelude on the UI thread)
 
@@ -216,6 +222,8 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
             x.matchServer = server;
             x.cosmetics = cosmeticsCount(b.dir);
             x.firewall = orOk(firewall::check(rules, b.dir));
+            x.port = port::supports(b);
+            x.imported = x.port ? port::importedCount(b.dir) : 0;
             st.builds.push_back(x);
         }
         st.config.has = true;
@@ -251,10 +259,16 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         // session and backend on the same port
         std::unique_lock<std::mutex> one(launchM, std::try_to_lock);
         if (!one.owns_lock()) return;
+        bool importing = false;
         {
             std::lock_guard<std::mutex> g(m);
             if (state == L"launching" || state == L"running") return;
-            selected = b.name();
+            if (portJob) { importing = true; }
+            else selected = b.name();
+        }
+        if (importing) { log(L"Wait for the cosmetics import to finish (or stop it) before launching.", Level::Warn); return; }
+        {
+            std::lock_guard<std::mutex> g(m);
             sessionVersion = b.version;
             sessionBuild = b;
             hasSessionBuild = true;
@@ -354,6 +368,96 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
                         L"Radarnite Launcher", MB_YESNO) == IDYES)
             proc::runElevated(L"--firewall \"" + b.name() + L"\"");
         pushState();
+    }
+
+    // ---- cosmetics of the current game (Web.cs portCatalog / portImport / portCancel)
+    void postPortJob() {
+        std::shared_ptr<port::Job> j;
+        { std::lock_guard<std::mutex> g(m); j = portJob; }
+        std::shared_ptr<const PortJob> v = j ? j->view() : nullptr;
+        std::lock_guard<std::mutex> g(sinkM);
+        if (sink) sink->onPortJob(v);
+    }
+    void postCatalog(std::shared_ptr<const PortCatalog> c) {
+        std::lock_guard<std::mutex> g(sinkM);
+        if (sink) sink->onPortCatalog(c);
+    }
+    void rememberIds(const PortCatalog& c) {
+        std::vector<std::wstring> ids;
+        ids.reserve(c.items.size());
+        for (auto& it : c.items) {
+            std::wstring l = it.id;
+            for (auto& ch : l) if (ch >= L'A' && ch <= L'Z') ch = (wchar_t)(ch - L'A' + L'a');
+            ids.push_back(std::move(l));
+        }
+        std::lock_guard<std::mutex> g(m);
+        previewIds.swap(ids);
+    }
+    std::vector<std::wstring> idsCopy() { std::lock_guard<std::mutex> g(m); return previewIds; }
+
+    void portCatalog(const std::wstring& build, bool refresh) {
+        BuildInfo b;
+        if (!sel(build, &b)) return;
+        std::wstring name = b.name();
+        std::weak_ptr<Ctx> w = shared_from_this();
+        auto cat = port::catalog(b, refresh, logger(), [w, name](const wchar_t* stage, int64_t ms, bool done) {
+            auto c = w.lock();
+            if (!c) return;
+            PortLoad l; l.build = name; l.stage = stage; l.ms = ms; l.done = done;
+            std::lock_guard<std::mutex> g(c->sinkM);
+            if (c->sink) c->sink->onPortLoad(l);
+        }, [w](std::shared_ptr<PortCatalog> early) {
+            if (auto c = w.lock()) { c->rememberIds(*early); c->postCatalog(early); }
+        });
+        rememberIds(*cat);
+        postCatalog(cat);
+        postPortJob();
+        // the previews (radarnite.com's catalog.json, a day), only once the grid is on screen
+        if (!cat->error.empty()) return;
+        std::lock_guard<std::mutex> g(previewM);
+        previews.load(idsCopy(), logger());
+    }
+    void portPreview(const std::wstring& id) {
+        std::lock_guard<std::mutex> g(previewM);
+        if (!previews.loaded()) previews.load(idsCopy(), logger());
+        PortPreview p = previews.get(id);
+        std::lock_guard<std::mutex> g2(sinkM);
+        if (sink) sink->onPortPreview(p);
+    }
+
+    void portImport(const std::wstring& build, const std::vector<std::wstring>& paths) {
+        BuildInfo b;
+        if (!sel(build, &b)) return;
+        std::shared_ptr<port::Job> job;
+        bool running = false, game = false;
+        {
+            std::lock_guard<std::mutex> g(m);
+            running = portJob != nullptr;
+            game = state == L"launching" || state == L"running" || state == L"stopping";
+            if (!running && !game && !paths.empty()) portJob = job = std::make_shared<port::Job>();
+        }
+        if (running) { log(L"A cosmetics import is already running.", Level::Warn); return; }
+        if (game) { log(L"Stop the game before importing cosmetics.", Level::Warn); return; }
+        if (!job) return;
+        postPortJob();
+        std::weak_ptr<Ctx> w = shared_from_this();
+        auto last = std::make_shared<std::atomic<ULONGLONG>>(0);
+        bool ok = port::importItems(b, paths, job, logger(), [w, last] {
+            ULONGLONG now = GetTickCount64(), was = *last;
+            if (now - was < 400 || !last->compare_exchange_strong(was, now)) return;
+            if (auto c = w.lock()) c->postPortJob();
+        });
+        { std::lock_guard<std::mutex> g(m); portJob.reset(); }
+        int done = job->okCount();
+        toast(job->cancelled ? fmt(L"Import stopped: %d imported", done) : ok ? fmt(L"%d cosmetics imported into ", done) + b.version : L"The import failed (see Activity)",
+              ok ? Level::Ok : job->cancelled ? Level::Info : Level::Bad);
+        postPortJob();
+        pushState();
+    }
+    void portCancel() {
+        std::shared_ptr<port::Job> j;
+        { std::lock_guard<std::mutex> g(m); j = portJob; }
+        if (j) j->cancel();
     }
 
     void command(Command cmd, const std::wstring& build) {
@@ -458,6 +562,10 @@ public:
         std::shared_ptr<PlaySession> s;
         { std::lock_guard<std::mutex> g(c_->m); s = c_->session; }
         if (s) { s->stop(); stopAll([](const std::wstring&) {}); }
+        // a cosmetics import stops after the batch being installed (importing again continues), like 2.x's close
+        std::shared_ptr<port::Job> j;
+        { std::lock_guard<std::mutex> g(c_->m); j = c_->portJob; }
+        if (j) j->cancelAndWait(120000);
     }
 
     void ready(UiSink* sink) override {
@@ -493,6 +601,16 @@ public:
         if (p.fields & ConfigPatch::LateGame) c.lateGame = v.lateGame;
         c.save();
     }
+
+    void portCatalog(const std::wstring& build, bool refresh) override {
+        c_->async([build, refresh](std::shared_ptr<Ctx> c) { c->portCatalog(build, refresh); });
+    }
+    void portImport(const std::wstring& build, const std::vector<std::wstring>& paths) override {
+        c_->async([build, paths](std::shared_ptr<Ctx> c) { c->portImport(build, paths); });
+    }
+    void portCancel() override { c_->async([](std::shared_ptr<Ctx> c) { c->portCancel(); }); }
+    void portPreview(const std::wstring& id) override { c_->async([id](std::shared_ptr<Ctx> c) { c->portPreview(id); }); }
+    std::wstring imageCacheDir() override { return join(port::work(), L"img"); }
 
     std::wstring uiPref(const wchar_t* key) override { return ::rn::uiPref(key); }
     void setUiPref(const wchar_t* key, const std::wstring& value) override { ::rn::setUiPref(key, value); }

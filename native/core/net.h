@@ -21,6 +21,10 @@ Response get(const std::wstring& url, const wchar_t* userAgent, const wchar_t* h
 bool download(const std::wstring& url, const wchar_t* userAgent, DWORD timeoutMs, const std::wstring& file,
               std::wstring* sha256Hex, std::wstring* error);
 
+// GET url into file (streamed, written to file + ".part" then moved over it) with gzip/deflate accepted: the large
+// JSON lists of the cosmetics import (fortnite-api.com's BR list, radarnite.com's catalog.json).
+bool fetchFile(const std::wstring& url, const wchar_t* userAgent, DWORD timeoutMs, const std::wstring& file, std::wstring* error);
+
 // Lower-case hex SHA-256 of a buffer ("" when BCrypt fails).
 std::wstring sha256(const void* data, size_t n);
 

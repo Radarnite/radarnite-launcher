@@ -9,7 +9,9 @@
 // must return quickly (long work goes to the core's own threads, results come back through UiSink).
 #pragma once
 #include <stdint.h>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rn {
@@ -31,6 +33,8 @@ struct Build {
     bool matchServer = false;   // launcher\gameserver\radarnite-server.dll present
     int cosmetics = 0;          // items in offline\cosmetics.json (0 = missing)
     std::wstring firewall;      // L"OK" or the reason the rules are missing
+    bool port = false;          // cosmetics of the current game can be imported into it (Porter.Supports)
+    int imported = 0;           // items it already got from them (custom-cosmetics.json "fn-port:" sources)
 };
 
 // config.json fields the window shows/edits. has* = the key was present (a missing config shows the defaults).
@@ -88,12 +92,63 @@ enum class Command {
     Cosmetics, Firewall, Shortcut, OpenLogs, OpenConfig,
 };
 
+// ---- cosmetics of the current game imported into a build (launcher/Port.cs; Web.cs portCatalog/portImport/portCancel)
+enum class PortType : uint8_t { Outfit, Emote, Backpack, Pickaxe, Glider, Wrap, LoadingScreen, Spray, Emoji, Count };
+enum class PortStatus : uint8_t { New, Imported, Build, Failed };   // "new" | "imported" | "build" (already in it) | "failed"
+
+// One cosmetic of the current game (fn-port list + fortnite-api names). Several thousand of them: lean on purpose.
+struct PortItem {
+    std::wstring path;          // fn-port source path ("" = fortnite-api only: shown, not importable yet)
+    std::wstring id;            // "EID_LoneStar"
+    std::wstring name, set, series;   // "" = unknown
+    std::string rarity;         // lower-case value ("legendary", "icon", "gaminglegends"...), "" = unknown
+    std::string icon, featured; // image URLs ("" = none)
+    std::string added;          // ISO date ("2024-01-23T13:34:48Z"), "" = unknown; sorts as text
+    PortType type = PortType::Outfit;
+    PortStatus status = PortStatus::New;
+};
+struct PortCatalog {
+    std::wstring build;         // the build it was listed for
+    bool partial = false;       // fortnite-api's list while fn-port still reads the game (no paths yet)
+    std::wstring error;         // why it cannot be listed ("" = fine)
+    std::vector<PortItem> items;
+    int slotsFree = 0;          // pak chunks left in the build (one per item)
+};
+// A loading step of the catalog: "names" (fortnite-api) or "list" (fn-port reading the game), estimated ms.
+struct PortLoad {
+    std::wstring build, stage;
+    int64_t ms = 0;
+    bool done = false;
+};
+// A running import (Porter.Job.View): times in ms at the moment it was taken, the window keeps counting.
+struct PortJobItem { std::wstring path; std::wstring st; };   // queued | converting | ok | failed
+struct PortJob {
+    std::wstring build, line, current;
+    std::wstring phase;         // start | wait | cpu | load | convert | install | sign
+    int total = 0, done = 0, ok = 0, failed = 0, batch = 0, batches = 0, cpu = -1;
+    int64_t elapsedMs = 0, phaseMs = 0, currentMs = 0, etaMs = 0;
+    std::vector<PortJobItem> items;                         // the last 40 that left "pending"
+    std::vector<std::pair<std::wstring, std::wstring>> recent;   // ("HH:mm:ss", text), the last 14
+};
+// What radarnite.com's catalog.json says about one item (the preview on click). Empty fields = unknown.
+struct PortPreview {
+    std::wstring id;            // as asked
+    bool found = false;
+    std::wstring description, introduced;   // introduced: "C5 S1"
+    std::string video, videoHd, page;       // mp4 URLs, fortnite.gg page
+};
+
 // Implemented by the UI. Any thread.
 struct UiSink {
     virtual void onState(const State& s) = 0;
     virtual void onSession(const Session& s) = 0;
     virtual void onLog(const LogLine& l) = 0;
     virtual void onToast(const std::wstring& text, Level level) = 0;
+    // Cosmetics import. The catalog and the job are shared, never copied per message; job null = no import running.
+    virtual void onPortCatalog(std::shared_ptr<const PortCatalog> c) = 0;
+    virtual void onPortLoad(const PortLoad& l) = 0;
+    virtual void onPortJob(std::shared_ptr<const PortJob> j) = 0;
+    virtual void onPortPreview(const PortPreview& p) = 0;
 protected:
     ~UiSink() = default;
 };
@@ -109,6 +164,16 @@ struct Core {
     // The core decides where they live; "" = not set.
     virtual std::wstring uiPref(const wchar_t* key) = 0;
     virtual void setUiPref(const wchar_t* key, const std::wstring& value) = 0;
+
+    // Cosmetics import (Web.cs portCatalog / portImport / portCancel). The catalog comes back through onPortLoad
+    // (steps) and onPortCatalog (a partial one first when the game is still being read); the job through onPortJob.
+    virtual void portCatalog(const std::wstring& build, bool refresh) = 0;
+    virtual void portImport(const std::wstring& build, const std::vector<std::wstring>& paths) = 0;
+    virtual void portCancel() = 0;
+    // The preview data of an item (radarnite.com catalog.json, cached a day): answered with onPortPreview.
+    virtual void portPreview(const std::wstring& id) = 0;
+    // Folder for the window's image cache (downscaled card images).
+    virtual std::wstring imageCacheDir() = 0;
 };
 
 // Mock core with the scenarios of tests/ui-scenarios.mjs (ids "01-one-build-practice-100" ... ; null = interactive

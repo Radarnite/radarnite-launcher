@@ -75,7 +75,7 @@ std::wstring transportError(DWORD code) {
 
 // GET url: status and headers checked, then the body handed to sink in chunks. false = error set.
 bool fetch(const std::wstring& url, const wchar_t* ua, const wchar_t* headers, DWORD timeoutMs, int* status,
-           std::wstring* error, const std::function<bool(const char*, DWORD)>& sink) {
+           std::wstring* error, const std::function<bool(const char*, DWORD)>& sink, bool decompress = false) {
     URL_COMPONENTS u = { sizeof u };
     u.dwSchemeLength = u.dwHostNameLength = u.dwUrlPathLength = u.dwExtraInfoLength = (DWORD)-1;
     if (!WinHttpCrackUrl(url.c_str(), (DWORD)url.size(), 0, &u)) { *error = L"Invalid URI: " + url; return false; }
@@ -96,6 +96,10 @@ bool fetch(const std::wstring& url, const wchar_t* ua, const wchar_t* headers, D
     r.h = WinHttpOpenRequest(c.h, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                              u.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
     if (!r.h) { *error = transportError(GetLastError()); return false; }
+    if (decompress) {
+        DWORD d = WINHTTP_DECOMPRESSION_FLAG_ALL;   // Windows 8.1+: Accept-Encoding gzip, deflate and inflated reads
+        WinHttpSetOption(r.h, WINHTTP_OPTION_DECOMPRESSION, &d, sizeof d);
+    }
     if (headers && *headers) WinHttpAddRequestHeaders(r.h, headers, (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
     if (!WinHttpSendRequest(r.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(r.h, nullptr)) {
         *error = transportError(GetLastError());
@@ -141,6 +145,23 @@ bool download(const std::wstring& url, const wchar_t* ua, DWORD timeoutMs, const
         return WriteFile(f, p, n, &w, nullptr) && w == n;
     });
     if (ok && sha) *sha = h.done();
+    return ok;
+}
+
+bool fetchFile(const std::wstring& url, const wchar_t* ua, DWORD timeoutMs, const std::wstring& file, std::wstring* error) {
+    std::wstring part = file + L".part";
+    bool ok;
+    {
+        Handle f(CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        if (!f.ok()) { *error = ioError(GetLastError(), part); return false; }
+        int status = 0;
+        ok = fetch(url, ua, nullptr, timeoutMs, &status, error, [&](const char* p, DWORD n) {
+            DWORD w = 0;
+            return WriteFile(f, p, n, &w, nullptr) && w == n;
+        }, true);
+    }
+    if (ok && !MoveFileExW(part.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) { *error = ioError(GetLastError(), file); ok = false; }
+    if (!ok) DeleteFileW(part.c_str());
     return ok;
 }
 
