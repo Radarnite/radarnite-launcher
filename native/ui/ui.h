@@ -7,6 +7,7 @@
 #include "api.h"
 #include "gfx.h"
 #include "images.h"
+#include "video.h"
 #include <deque>
 #include <memory>
 #include <unordered_map>
@@ -220,6 +221,8 @@ public:
     void portScene(int what);
     Images& images() { return img_; }
     void imagesArrived();                       // WM_APP_IMG
+    void videoEvent(WPARAM w, LPARAM l) { video_.onEvent(w, l); invalidate(); }   // WM_APP_VIDEO
+    bool videoShown() const { return video_.shown(); }
     // Selftest: clicks and keys on the panel (needs a render target and the mock's catalog)
     std::vector<std::pair<std::wstring, bool>> portCheck(float width, float height);
 
@@ -256,6 +259,7 @@ private:
     void releasePortBrushes();
 
     Images img_;
+    Video video_;               // the preview's clip (live window only)
     int layer_ = 0;             // overlay level of the hits being recorded (Tab stays inside the topmost one)
     bool pOpen_ = false, pLoading_ = false, pDirty_ = true, pLogOpen_ = false, pPvWait_ = false, pDlg_ = false, pDlgAll_ = false;
     std::wstring pBuild_, pQ_;

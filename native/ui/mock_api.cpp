@@ -260,11 +260,25 @@ public:
         after(150, [this] { lock(); job_.reset(); jobSeq_++; unlock(); sink_->onPortJob(nullptr); log(L"Import stopped: 3 imported"); });
     }
     void portPreview(const std::wstring& id) override {
-        PortPreview p; p.id = id; p.found = true; p.introduced = L"C6 S4";
-        if (!_wcsnicmp(id.c_str(), L"Character_CargoLying", 20)) p.description = L"Wishes do come true, if you're willing to pay the price.";
-        else if (!_wcsnicmp(id.c_str(), L"Backpack_CargoLying", 19)) p.description = L"Make a wish. Any wish.";
-        else p.description = L"A cosmetic of the current season, converted into a new item of the build.";
-        p.page = "https://fortnite.gg/cosmetics?id=21934";
+        // radarnite.com's catalog.json for some of the scenarios' items (the rest: made up, without a clip)
+        struct Pv { const wchar_t* id; int gg; const wchar_t* desc; };
+        static const Pv known[] = {
+            { L"EID_LoneStar", 24945, L"It ain't your first rodeo." }, { L"Backpack_AsideDepot", 24930, L"It's showtime!" },
+            { L"Character_AsideDepot", 24932, L"Say his name three times." }, { L"EID_AsideDepot", 24933, L"A dance for the recently deceased." },
+            { L"Character_CargoLying", 24916, L"Be Careful What You Wish For" }, { L"Backpack_CargoLying", 24915, L"You only get one wish." },
+            { L"EID_CargoLying", 24917, L"Don't do that!" }, { L"Character_AcidWhale", 24883, L"Also known as the Radio Demon." },
+            { L"EID_AcidWhale", 24896, L"Alastor pulls all the strings." },
+        };
+        PortPreview p; p.id = id; p.found = true; p.introduced = L"C7 S4";
+        p.description = L"A cosmetic of the current season, converted into a new item of the build.";
+        for (auto& k : known)
+            if (!_wcsicmp(id.c_str(), k.id)) {
+                char u[96];
+                p.description = k.desc;
+                snprintf(u, sizeof u, "https://fnggcdn.com/items/%d/video-sd.mp4", k.gg); p.video = u;
+                snprintf(u, sizeof u, "https://fnggcdn.com/items/%d/video.mp4", k.gg); p.videoHd = u;
+                snprintf(u, sizeof u, "https://fortnite.gg/cosmetics?id=%d", k.gg); p.page = u;
+            }
         sink_->onPortPreview(p);
     }
     std::wstring imageCacheDir() override {

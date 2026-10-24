@@ -142,6 +142,7 @@ void App::portEvent(Event& e) {
         }
         pCat_ = std::move(e.cat);
         pLoading_ = pCat_->partial;
+        anim_.stop(K_SHIMMER | 10);
         pRi_.clear();
         std::unordered_map<std::wstring, int>().swap(pPath_);
         pSel_.assign(pCat_->items.size(), 0); pSelN_ = 0;
@@ -218,11 +219,13 @@ void App::portShow(bool open) {
         focus_ = 0;
     } else {
         pPop_ = 0; pDlg_ = false; pPv_ = -1;
+        anim_.stop(K_SHIMMER | 10);
         if (hwnd_) SetWindowTextW(edits_[3].hwnd, L"");
         pQ_.clear(); pDirty_ = true;
         std::unordered_map<std::wstring, int>().swap(pPath_);
         std::vector<int>().swap(pList_);
         img_.setTarget(rt_);   // the decoded images go too (the disk cache stays)
+        HeapCompact(GetProcessHeap(), 0);   // and the heap gives their pages back
         focus_ = ID_P_OPEN;
     }
     updateSpinTimer();
@@ -459,10 +462,6 @@ void App::drawPort(float x0, float y0, float W, float H) {
     if (pPop_ == 3) pPopAnchor_ = rc(sortX, y, sortW, bh);
     y += bh + 12;
 
-    // ---- the running import
-    if (pj_) { float jh = drawPortJob(x, y, w); pJobR_ = rc(x, y, w, jh); y += jh + 4; }
-    else pJobR_ = {};
-
     // ---- the body: scrolls on its own; only the visible rows of the grid are drawn
     float bodyTop = y, bodyH = y0 + H - y;
     pBody_ = rc(x0, bodyTop, W, bodyH);
@@ -479,7 +478,10 @@ void App::drawPort(float x0, float y0, float W, float H) {
     base_ = D2D1::Matrix3x2F::Translation(0, oy_);
     rt_->SetTransform(base_);
     float by = 12;   // body coordinates: 0 = top of the scrolled content
-    float gw = w - (sb ? 0 : 0);
+    float gw = w;
+    // ---- the running import (scrolls with the grid: at the minimum size the grid stays reachable)
+    if (pj_) { float jh = drawPortJob(x, by, gw); pJobR_ = rc(x, by + oy_, gw, jh); by += jh + 20; }
+    else pJobR_ = {};
     if (pCat_ && !pCat_->error.empty()) {
         std::wstring html = L"**The cosmetics of the current Fortnite cannot be listed.** " + pCat_->error + L".";
         Font nf{ Face::UI, 12.5f, 400, false };
@@ -787,13 +789,13 @@ float App::drawPortJob(float x, float y, float w) {
     for (int i = 0; i < 5; i++) if (curPh == ph[i].k) ci = i;
     float px = ix;
     for (int i = 0; i < 5; i++) {
-        if (i) { fill(rc(px + 6, yy + 8.7f, 14, 1), C::line); px += 6 + 14 + 6; }
         Font f{ Face::UI, 12, i == ci ? 500 : 400, false };
+        float lw = textW(ph[i].l, f);
+        if (px + (i ? 26 : 0) + 18 + lw > ix + iw) break;   // the steps that do not fit are left out
+        if (i) { fill(rc(px + 6, yy + 8.7f, 14, 1), C::line); px += 6 + 14 + 6; }
         if (i < ci) { icon(Icon::Check, px, yy + 2.7f, 12, C::ok); px += 12 + 6; }
         else if (i == ci) { spinner(px, yy + 3.2f, 11); px += 11 + 6; }
         else { dot(px + 3, yy + 8.7f, 6, C::l2); px += 6 + 6; }
-        float lw = textW(ph[i].l, f);
-        if (px + lw > ix + iw) break;
         text(ph[i].l, f, px, yy, lw + 1, 17.4f, i == ci ? C::text : i < ci ? C::muted : C::dim);
         px += lw;
     }
@@ -893,6 +895,7 @@ float App::drawPortJob(float x, float y, float w) {
 
 // ================================================================================================ overlays
 void App::drawPortOverlays() {
+    if ((!pOpen_ || pPv_ < 0) && !video_.url().empty()) video_.stop();
     if (!pOpen_) return;
     if (pPop_) drawPortPop();
     if (pPv_ >= 0) drawPortPreview();
@@ -1136,6 +1139,12 @@ void App::drawPortPreview() {
     } else if (url.empty() || failed) text(it.id, Font{ Face::Mono, 12, 500, false }, m.left, m.top, mw, h, C::white, 1, 0, .55f);
     else spinner((m.left + m.right) / 2 - 9, (m.top + m.bottom) / 2 - 9, 18);
     hit(ID_P_PV_MEDIA, m, 0, 15);
+    // the clip over it (a child window: live only), once the details say there is one; hidden under the dialog
+    if (hwnd_ && !pPvWait_ && !pPvData_.video.empty() && !measuring_) {
+        RECT px = { lroundf(m.left * scale_), lroundf(m.top * scale_), lroundf(m.right * scale_), lroundf(m.bottom * scale_) };
+        if (video_.url() != pPvData_.video) video_.play(hwnd_, pPvData_.video, px, lroundf(15 * scale_), rcOf(it.rarity).dark);
+        video_.place(px, !pDlg_);
+    }
     // close
     button(ID_P_PV_CLOSE, x + w - 1 - 12 - 28, y + 1 + 12, nullptr, Icon::X, true, true, true);
     // details
@@ -1276,7 +1285,8 @@ void App::portCursor(int idx, bool keyboard) {
     int cols = std::max(1, (int)floorf((gw + 10) / (168 + 10)));
     float cardW = (gw - (cols - 1) * 10) / cols, pitch = cardW * 258 / 198 + 30;
     float top = pGrid_.top - (pBody_.top - pScroll_) + (pCursor_ / cols) * pitch;   // content coordinates
-    if (top - 12 < pScroll_) pScroll_ = top - 12;
+    if (pCursor_ < cols) pScroll_ = 0;   // the first row: the top of the panel with it
+    else if (top - 12 < pScroll_) pScroll_ = top - 12;
     else if (top + pitch - 30 + 12 > pScroll_ + pView_) pScroll_ = top + pitch - 30 + 12 - pView_;
     focusVisible_ = keyboard;
     invalidate();
@@ -1415,9 +1425,10 @@ void App::portScene(int what) {
     drain();
     if (what == 2) pPop_ = 2;
     if (what == 3) { std::vector<int> v; for (int i : pList_.empty() ? (portRebuild(), pList_) : pList_) if (importable(pCat_->items[i])) v.push_back(i); portConfirm(v, true); }
-    if (what == 4 || what == 5) {
+    if (what == 4 || what == 5 || what == 7) {
         if (pDirty_) portRebuild();
         if (what == 4 && !pList_.empty()) { portPreviewOpen(pList_[1 < pList_.size() ? 1 : 0]); drain(); }
+        if (what == 7 && !pList_.empty()) { portPreviewOpen(pList_[0]); drain(); }
         if (what == 5 && pCat_) {
             pSel_.assign(pCat_->items.size(), 0);
             int n = 0;
