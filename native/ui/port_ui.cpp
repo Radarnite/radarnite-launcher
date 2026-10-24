@@ -972,6 +972,7 @@ float App::drawPortJob(float x, float y, float w) {
             int cols = std::max(1, (int)floorf((iw + tg) / (tw0 + tg)));
             float tw3 = (iw - (cols - 1) * tg) / cols;
             int n = std::min((int)last.size(), cols * 2);
+            if (n > cols) n -= n % cols;   // full rows only (the oldest left out)
             Font nf{ Face::UI, 12.5f, 700, false }, stf{ Face::UI, 11.5f, 500, false };
             for (int i = 0; i < n; i++) {
                 const PortJobItem& e = *last[i];
