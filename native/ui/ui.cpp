@@ -1024,9 +1024,9 @@ void App::drawStage(float top, float bottom) {
                 t->FillRectangle(D2D1::RectF(0, 0, W, sh), lb);
             release(lb); release(gs);
             if (k.bare) {
-                // the cosmetics panel: from nothing behind the tabs to .32 at its title, .86 some 360 DIPs under it
+                // the cosmetics panel: from .2 behind the tabs to .55 at its title, .92 some 360 DIPs under it
                 float L = 76 + std::max(360.f, std::min(sh - 76, 520.f));
-                const D2D1_GRADIENT_STOP ps[] = { { 0, rgb(C::bg, 0) }, { 76 / L, rgb(C::bg, .32f) }, { 256 / L, rgb(C::bg, .62f) }, { 436 / L, rgb(C::bg, .80f) }, { 1, rgb(C::bg, .86f) } };
+                const D2D1_GRADIENT_STOP ps[] = { { 0, rgb(C::bg, .2f) }, { 76 / L, rgb(C::bg, .55f) }, { 256 / L, rgb(C::bg, .78f) }, { 436 / L, rgb(C::bg, .88f) }, { 1, rgb(C::bg, .92f) } };
                 if (SUCCEEDED(t->CreateGradientStopCollection(ps, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
                     SUCCEEDED(t->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, L)), gs, &lb)))
                     t->FillRectangle(D2D1::RectF(0, 0, W, sh), lb);
