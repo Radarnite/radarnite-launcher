@@ -8,6 +8,7 @@
 # CPU inside it, right before the job, so never wrap them in flock. Everything on the PC lives in pc_dir (just clean-remote).
 # RN_WIN_LANE: optional queue wrapper for PC jobs (a script taking the cmd.exe line as its argument).
 # RN_PC_DIR: another PC work folder than pc_dir's default (an environment variable, so the nested `just` calls get it).
+# RN_MAC_PROJ: another Mac mirror than rl-launcher (two trees building at once must not share one).
 # RN_VERSION: the version the core and the window are built as (native/core/version.sh), default version.h's;
 # `just release <version>` sets it.
 
@@ -17,7 +18,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # backend-build in this tree's Mac mirror instead of the backend agent's own folder.
 import 'backend-rs/justfile'
 
-mac_proj := "rl-launcher"
+mac_proj := env_var_or_default("RN_MAC_PROJ", "rl-launcher")
 mac_dir := "agent-work/mirror/" + mac_proj
 pc_dir := env_var_or_default("RN_PC_DIR", 'S:\rl-integ-test')
 pc_fwd := replace(pc_dir, '\', '/')
@@ -111,6 +112,30 @@ release version="3.0.0-rc.1":
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe.sha256 dist/RadarniteLauncherSetup-{{version}}.exe.sha256
     [ "$(cat dist/RadarniteLauncherSetup-{{version}}.exe.sha256)" = "$(tools/release.sh sha256-line dist/RadarniteLauncherSetup-{{version}}.exe)" ]
     ls -l dist/RadarniteLauncherSetup-{{version}}.exe*
+
+# Test build for the owner's installed launcher (test channel, native/core/update.h): `just publish-test 3.0.0-t120.2`
+# builds the installer with `release` and publishes it to the feed (tools/test-feed.py; folder, address and port in
+# ~/.config/rn-test-feed.env, served by the rn-test-feed user service). Launchers with the channel on install it by
+# themselves within 2 minutes, never during a game. The version must sort after the feed's current one.
+publish-test version notes="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env=~/.config/rn-test-feed.env
+    [ -f "$env" ] || { echo "no $env (RN_FEED_DIR, RN_FEED_BIND, RN_FEED_PORT)" >&2; exit 1; }
+    . "$env"
+    cur=$(tools/test-feed.py current "$RN_FEED_DIR")
+    if [ -n "$cur" ] && ! tools/test-feed.py newer '{{version}}' "$cur"; then
+      echo "{{version}} is not newer than the feed's $cur: the launcher would never install it" >&2; exit 1
+    fi
+    setup=dist/RadarniteLauncherSetup-{{version}}.exe
+    [ -f "$setup" ] || just release '{{version}}'
+    notes='{{notes}}'
+    tools/test-feed.py publish "$RN_FEED_DIR" "$setup" '{{version}}' "${notes:-$(git log -1 --format=%s)}"
+    url="http://$RN_FEED_BIND:$RN_FEED_PORT"
+    served=$(curl -sSf "$url/feed.json")
+    [ "$(jq -r .version <<< "$served")" = '{{version}}' ]
+    [ "$(curl -sSf "$url/$(jq -r .installer <<< "$served")" | sha256sum | cut -d' ' -f1)" = "$(jq -r .sha256 <<< "$served")" ]
+    echo "published {{version}}: $url/feed.json"
 
 # tools/release-selftest.sh on the Mac: placeholder exes, the privacy gate, the 2.x .sha256 format, the version check
 release-selftest: (_wait-cpu "mac") _sync-mac

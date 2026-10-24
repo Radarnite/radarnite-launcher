@@ -103,6 +103,21 @@ Function .onInit
   ${EndIf}
 FunctionEnd
 
+; A silent update started by the launcher (its test channel: /S /RELAUNCH=fg|bg) opens it again once installed;
+; bg = the window was not in use, so it comes back minimized without taking the focus.
+Function .onInstSuccess
+  IfSilent 0 done
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/RELAUNCH=" $1
+  IfErrors done
+  ${If} $1 != "bg"
+    StrCpy $1 "fg"
+  ${EndIf}
+  Exec '"$INSTDIR\${EXE}" --updated $1'
+  done:
+FunctionEnd
+
 ; GetDrives callback: remember the fixed drive with the most free space (in MB, $3).
 Function PickDrive
   ${DriveSpace} $9 "/D=F /S=M" $0

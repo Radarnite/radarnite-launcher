@@ -14,9 +14,12 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
   stdout (`log:`, `stage:`, `match:`, `playlist:`, `pid:`, `error:`); `launch_stub.cpp` is the fallback without it
 - `net`, `update`: WinHTTP + BCrypt SHA-256 self-update, same assets and `.sha256` check as `Update.cs`; versions
   compared as semver with pre-releases. A release build asks `releases/latest` only, like 2.x; a pre-release build
-  (`3.0.0-rc.N`, a GitHub prerelease) also reads the newest entry of `/releases` and is offered the newer of the two
+  (`3.0.0-rc.N`, a GitHub prerelease) also reads the newest entry of `/releases` and is offered the newer of the two.
+  Test channel (off unless `--test-channel <feed.json URL>` was run once; `off` removes it): the feed is also read, at
+  start and every 2 minutes, and a newer test build is installed silently (`/S /RELAUNCH=fg|bg`), never during a game;
+  `just publish-test <version>` publishes one
 - `builddata`: AES keys and mappings download, `fn-cosmetics-gen`, add a build from a zip (Windows `tar.exe`) or a folder
-- `cli`: `--check --scan --set-builds-folder --firewall --firewall-remove --update-check --cosmetics --stop --selftest-inject`
+- `cli`: `--check --scan --set-builds-folder --firewall --firewall-remove --update-check --test-channel --cosmetics --stop --selftest-inject`
 - `core`: `rn::createCore()` implements `api.h`; `rn::core::ForwardToRunningInstance()` signals an open window
 
 ## Build

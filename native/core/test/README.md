@@ -18,7 +18,7 @@ only read, and the real firewall group is only counted.
   token; one launch for a double click (a second Launch never starts a second session)
 - `coretest.cpp`: harness for `rn::Core` with a printing `UiSink`, for `builddata::addZip`/`addFolder`, the updater's
   download and SHA-256 (`fetch`, `sha`), and `coretest semver`: the updater's tag parsing and semver precedence
-  against a table
+  against a table, test builds (`3.0.0-t106.2`) included, and the test feed's `feed.json` parsing
 
 Layout the scripts expect in `-Dir`: `rlcoretest-ref\` (the extracted 2.2.1; `parity2.ps1` creates its config with
 `--set-builds-folder S:\FortniteBuilds`), `rn-core-cli.exe`, `coretest.exe` (`RN_CORETEST=1 build.sh`) and, for

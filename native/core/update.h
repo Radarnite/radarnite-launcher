@@ -6,6 +6,10 @@
 // never answers with a prerelease. A pre-release build (3.0.0-rc.N, published as a GitHub prerelease) also reads the
 // newest release of the list (/releases, first non-draft) and is offered whichever of the two is newer: the next rc
 // or the final.
+// Test channel (the owner's own installs, off for everyone else): HKCU\Software\Radarnite\Launcher "TestFeed" holds
+// the URL of a feed.json ({"version", "installer", "sha256", "notes"}), set once with --test-channel <url>. check()
+// then also reads that feed and offers whichever is newer; a test build found there is installed without asking
+// (silent installer, launcher relaunched without taking the focus), never while a game runs.
 #pragma once
 #include "../ui/api.h"
 #include <windows.h>
@@ -35,17 +39,31 @@ struct Release {
     bool found = false;              // false = up to date, offline or any error (Updater.CheckAsync returned null)
     Version version;
     std::wstring tag, installerUrl, sha256Url, digest, notes;
+    bool test = false;               // from the test feed: installed silently, without asking
 };
-Release check();
+// feedOnly: the test feed alone (the test channel's periodic check; nothing when it is off).
+Release check(bool feedOnly = false);
+
+// The test channel's feed URL ("" = off) and its setter ("" or "off" turns it off). false = not http(s) or not saved.
+std::wstring testFeed();
+bool setTestFeed(const std::wstring& url);
+// feed.json read into r (version, installer resolved against feedUrl, digest "sha256:<hex>", notes). false = *error.
+bool parseFeed(const std::string& body, const std::wstring& feedUrl, Release* r, std::wstring* error);
+// A test build was just installed by the updater: the version it was meant to be ("" = none); cleared once read.
+std::wstring takeInstalledTest();
 // The digest in a .sha256 asset: the first white-space separated token that starts with 64 hex digits, lower-cased
 // ("" = none).
 std::wstring sha256Token(const std::wstring& text);
-// Download, verify, start the installer. true = it was started (the launcher must exit so NSIS can replace it).
-bool downloadVerifyRun(const Release& r);
+// Download, verify, start the installer (with args, e.g. "/S /RELAUNCH=bg"). true = it was started (the launcher must
+// exit so NSIS can replace it).
+bool downloadVerifyRun(const Release& r, const std::wstring& args = L"");
 
 // The whole window flow (Updater.RunInteractiveAsync): check, ask (MessageBox owned by owner), download, run.
 // true = an install was started, the caller exits. canInstall = false while a game runs (only announced).
-bool runInteractive(HWND owner, bool manual, bool canInstall, const std::function<void(const std::wstring&, Level)>& toast);
+// testOnly (the test channel's periodic check): only the test feed is read; GitHub is asked at each start. foreground = the launcher's window is the active one (the relaunch after a test install takes the focus back
+// only then).
+bool runInteractive(HWND owner, bool manual, bool canInstall, const std::function<void(const std::wstring&, Level)>& toast,
+                    bool testOnly = false, bool foreground = true);
 
 } // namespace update
 } // namespace rn

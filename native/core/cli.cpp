@@ -93,9 +93,19 @@ int removeFirewall() {
 int updateCheck() {
     update::Release r = update::check();
     std::wstring cur = update::current().str();
-    if (!r.found) { out(L"Up to date (installed " + cur + L"; repo " + update::kRepo + L")."); return 0; }
-    out(L"Update available: " + r.version.str() + L" (installed " + cur + L"); installer " + r.installerUrl);
+    std::wstring feed = update::testFeed();
+    std::wstring where = std::wstring(L"repo ") + update::kRepo + (feed.empty() ? L"" : L", test feed " + feed);
+    if (!r.found) { out(L"Up to date (installed " + cur + L"; " + where + L")."); return 0; }
+    out(std::wstring(r.test ? L"Test build available: " : L"Update available: ") + r.version.str() + L" (installed " + cur + L"); installer " + r.installerUrl);
     return 10;
+}
+
+// --test-channel [<feed.json URL>|off]: the owner's test builds (update.h); no argument = show it.
+int testChannel(const wchar_t* arg) {
+    if (arg && !update::setTestFeed(arg)) { err(L"Error: the test feed must be an http(s) URL, or off."); return 2; }
+    std::wstring feed = update::testFeed();
+    out(feed.empty() ? L"Test channel: off." : L"Test channel: " + feed);
+    return 0;
 }
 
 int cosmetics(const wchar_t* arg) {
@@ -116,6 +126,7 @@ int run(int argc, wchar_t** argv, bool* handled) {
     if (cmd == L"--set-builds-folder") return setBuildsFolder(arg);
     if (cmd == L"--firewall-remove") return removeFirewall();
     if (cmd == L"--update-check") return updateCheck();
+    if (cmd == L"--test-channel") return testChannel(arg);
     if (cmd == L"--scan") return scan(arg);
     if (cmd == L"--check") return check(arg);
     if (cmd == L"--selftest-inject") { out(L"game launch not implemented in this core"); return 1; }

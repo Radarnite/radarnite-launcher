@@ -680,7 +680,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         if (handled) { LocalFree(argv); CoUninitialize(); return rc; }
     }
     std::wstring scenario, selftestDir, probeSuffix, autoPlay;
-    bool selftestMode = false, newInstance = false, probe = false;
+    bool selftestMode = false, newInstance = false, probe = false, quietStart = false;
     int exitAfter = 0;
     for (int i = 1; i < argc; i++) {
         std::wstring a = argv[i];
@@ -691,6 +691,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--exit-after" && i + 1 < argc) exitAfter = _wtoi(argv[++i]);
         else if (a == L"--snapshot" && i + 1 < argc) g_snapshot = argv[++i];
         else if (a == L"--new-instance") newInstance = true;
+        else if (a == L"--updated" && i + 1 < argc) quietStart = std::wstring(argv[++i]) == L"bg";   // relaunched by a silent update
         else if (a == L"--selftest-single-instance" && i + 1 < argc) { probe = true; probeSuffix = argv[++i]; }   // selftest only
     }
     LocalFree(argv);
@@ -713,7 +714,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         single::listen(h, L"");
         g_app->attach(h);
         g_app->start();
-        ShowWindow(h, SW_SHOWNORMAL);
+        // after a test build's silent update made while the window was not in use: back in the taskbar, no focus taken
+        ShowWindow(h, quietStart ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
         UpdateWindow(h);
         if (exitAfter > 0) SetTimer(h, 99, exitAfter, nullptr);
         MSG m;
