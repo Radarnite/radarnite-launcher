@@ -73,7 +73,7 @@ build-pc:
     tar -c native/core/*.cpp native/core/*.h native/core/build.cmd native/core/vendor native/ui/*.cpp native/ui/*.h native/ui/app.rc \
       native/ui/app.manifest native/ui/build.rsp native/ui/build.cmd launcher/ui/fonts launcher/ui/radarnite.png launcher/radarnite.ico \
       "${vtar[@]}" | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\src'
-    pc sh "$vset"'set "ZIG=%LOCALAPPDATA%\fp-tools\zig\zig.exe" && {{pc_dir}}\src\native\core\build.cmd out && {{pc_dir}}\src\native\ui\build.cmd {{pc_dir}}\src\native\ui\out\RadarniteLauncher.exe'
+    pc sh "$vset"'set "ZIG=%LOCALAPPDATA%\fp-tools\zig\zig.exe" && {{pc_dir}}\src\native\core\build.cmd out && mkdir {{pc_dir}}\src\native\ui\out && {{pc_dir}}\src\native\ui\build.cmd {{pc_dir}}\src\native\ui\out\RadarniteLauncher.exe'
     mkdir -p native/core/out native/ui/out
     for f in core/out/librncore.a core/out/rn-core-cli.exe ui/out/RadarniteLauncher.exe; do scp -q "windows:{{pc_fwd}}/src/native/$f" "native/$f"; done
     ls -l native/core/out/librncore.a native/core/out/rn-core-cli.exe native/ui/out/RadarniteLauncher.exe
@@ -129,7 +129,7 @@ publish-test version notes="":
     fi
     setup=dist/RadarniteLauncherSetup-{{version}}.exe
     [ -f "$setup" ] || just release '{{version}}'
-    notes='{{notes}}'
+    notes={{quote(notes)}}
     tools/test-feed.py publish "$RN_FEED_DIR" "$setup" '{{version}}' "${notes:-$(git log -1 --format=%s)}"
     url="http://$RN_FEED_BIND:$RN_FEED_PORT"
     served=$(curl -sSf "$url/feed.json")
