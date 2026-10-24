@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <functional>
 #include <map>
+#include <memory>
 #include <stdio.h>
 
 namespace rn {
@@ -105,7 +106,73 @@ const MockScenario kScenarios[] = {
     { L"24-lobby-1280x800", 1280, 800, 1.0f, false },
     { L"25-lobby-1280x800-125", 1280, 800, 1.25f, false },
     { L"26-lobby-760x520", 760, 520, 1.0f, false },
+    // the cosmetics panel (14.30): the lobby with its Cosmetics button, then the panel in its states
+    { L"27-port-lobby-button", 1200, 800, 1.0f, false },
+    { L"28-port-catalog-125", 1200, 800, 1.25f, false, 0, 0, 1 },
+    { L"29-port-filters", 1200, 800, 1.0f, false, 0, 0, 2 },
+    { L"30-port-import-all-dialog", 1200, 800, 1.0f, false, 0, 0, 3 },
+    { L"31-port-importing-760x520", 760, 520, 1.0f, false, 0, 0, 1 },
+    { L"32-port-selected-hover", 1200, 800, 1.0f, false, 0, 0, 5 },
+    { L"33-port-preview", 1200, 800, 1.0f, false, 0, 0, 4 },
+    { L"34-port-loading", 1200, 800, 1.0f, false, 0, 0, 1 },
+    { L"35-port-importing-1920", 1920, 1040, 1.0f, false, 0, 0, 1 },
 };
+
+// ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
+struct PortSrc { const wchar_t *path, *id, *name, *set, *series; const char *rarity, *icon, *featured, *added; PortType type; PortStatus status; };
+const PortSrc kPort[] = {
+#include "mock_port.inc"
+};
+const int NPORT = (int)(sizeof kPort / sizeof kPort[0]), PORT_TOTAL = 12352;
+Build b1430() {
+    Build b = mk(L"14.30", 14, 30, 15341163, L"4.26");
+    b.match = Support::Yes; b.matchWhy = kS3; b.cosmetics = 4100; b.port = true; b.imported = 21;
+    return b;
+}
+std::shared_ptr<PortCatalog> portCatalogOf(const std::wstring& build) {
+    auto c = std::make_shared<PortCatalog>();
+    c->build = build; c->slotsFree = 7979;
+    c->items.reserve(PORT_TOTAL);
+    const char* rars[] = { "legendary", "epic", "rare", "uncommon", "common", "marvel", "dc", "icon", "gaminglegends", "starwars", "frozen", "lava", "dark", "shadow", "slurp" };
+    char date[32];
+    for (int i = 0; i < PORT_TOTAL; i++) {
+        const PortSrc& s = kPort[i % NPORT];
+        PortItem it;
+        it.path = s.path; it.id = s.id; it.name = s.name; it.set = s.set; it.series = s.series;
+        it.rarity = s.rarity; it.icon = s.icon; it.featured = s.featured; it.added = s.added; it.type = s.type; it.status = s.status;
+        if (i >= NPORT) {
+            std::wstring n = std::to_wstring(i);
+            it.path += L"_" + n; it.id += L"_" + n; it.name += L" " + n;
+            it.rarity = rars[i % 15];
+            it.series.clear();
+            snprintf(date, sizeof date, "20%02d-%02d-%02dT10:00:00Z", 18 + i % 8, 1 + i % 12, 1 + i % 28);
+            it.added = date;
+            it.status = i % 23 == 0 ? PortStatus::Build : i % 41 == 0 ? PortStatus::Failed : i % 9 == 0 ? PortStatus::Imported : PortStatus::New;
+            if (i % 17 == 0) it.type = PortType::Glider;
+            else if (i % 19 == 0) it.type = PortType::LoadingScreen;
+        }
+        c->items.push_back(std::move(it));
+    }
+    return c;
+}
+// An import half-way: batch 2 of 5, an item converting, the ones before it done (one failed).
+std::shared_ptr<PortJob> portJobOf(int done) {
+    auto j = std::make_shared<PortJob>();
+    j->build = L"14.30"; j->phase = L"convert"; j->total = 120; j->done = done; j->failed = done > 30 ? 1 : 0; j->ok = done - j->failed;
+    j->batch = 2; j->batches = 5; j->cpu = 41;
+    j->elapsedMs = 9 * 60000 + 12000; j->currentMs = 6000; j->etaMs = (120 - done) * 14000LL;
+    j->current = kPort[(done + 1) % NPORT].path;
+    for (int i = std::max(0, done - 8); i <= done + 3; i++) {
+        PortJobItem x; x.path = kPort[i % NPORT].path;
+        x.st = i <= done ? (i == done - 3 ? L"failed" : L"ok") : i == done + 1 ? L"converting" : L"queued";
+        j->items.push_back(x);
+    }
+    const wchar_t* lines[] = { L"batch 2/5: 25 items", L"loading the game files (2,048 paks)", L"loaded in 41 s", L"converting Character_CargoLying",
+                               L"ok Character_CargoLying (12.4 s)", L"converting Backpack_CargoLying", L"ok Backpack_CargoLying (3.1 s)" };
+    int k = 0;
+    for (auto l : lines) { wchar_t ts[16]; swprintf(ts, 16, L"22:4%d:%02d", k / 4, (k * 13) % 60); j->recent.push_back({ ts, l }); k++; }
+    return j;
+}
 
 // Timer-queue callback carrying a std::function (thread-pool thread).
 struct Later { std::function<void()> f; HANDLE timer = nullptr; };
@@ -128,7 +195,7 @@ public:
         auto one = [] { return std::vector<Build>{ b1750() }; };
         const std::wstring& id = id_;
         auto withServer = [](std::vector<Build> v) { for (auto& b : v) b.matchServer = true; return v; };
-        if (id.empty()) { st.builds = withServer(many()); st.selected = L"17.50"; st.config.mode = L"bots"; post = logs(8); }
+        if (id.empty()) { st.builds = withServer(many()); st.builds.push_back(b1430()); st.selected = L"17.50"; st.config.mode = L"bots"; post = logs(8); }
         else if (id.rfind(L"01-", 0) == 0) { st.builds = one(); st.selected = L"17.50"; }
         else if (id.rfind(L"02-", 0) == 0) { st.builds = many(); st.config.mode = L"bots"; st.config.bots = 35; st.selected = L"17.50"; post = logs(400); }
         else if (id.rfind(L"03-", 0) == 0) {
@@ -171,12 +238,69 @@ public:
             LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
             l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
         }
+        else if (portScenario()) { st.builds = { b1750(), b1430() }; st.selected = L"14.30"; }
         lock(); state_ = st; unlock();
         sink_->onState(st);
         for (auto& l : pre) sink_->onLog(l);
         for (auto& l : post) sink_->onLog(l);
         if (hasSession) { lock(); session_ = se; unlock(); sink_->onSession(se); }
         if (id.rfind(L"22-", 0) == 0) sink_->onToast(L"Desktop shortcut created", Level::Ok);
+        if (id.rfind(L"31-", 0) == 0 || id.rfind(L"35-", 0) == 0) { auto j = portJobOf(37); lock(); job_ = j; unlock(); sink_->onPortJob(j); }
+    }
+
+    // ---- cosmetics: answered at once (the offscreen renders have no message loop); the import runs on timers
+    void portCatalog(const std::wstring& build, bool) override {
+        PortLoad l; l.build = build; l.stage = L"names"; l.ms = 1400; l.done = true;
+        sink_->onPortLoad(l);
+        l.stage = L"list"; l.ms = 190000; l.done = id_.rfind(L"34-", 0) != 0;
+        sink_->onPortLoad(l);
+        if (!l.done) return;   // loading: fn-port never finishes
+        lock(); if (!cat_) cat_ = portCatalogOf(build); std::shared_ptr<const PortCatalog> c = cat_; unlock();
+        sink_->onPortCatalog(c);
+    }
+    void portImport(const std::wstring& build, const std::vector<std::wstring>& paths) override {
+        lock(); bool busy = job_ != nullptr; unlock();
+        if (busy || paths.empty()) return;
+        auto j = std::make_shared<PortJob>();
+        j->build = build; j->phase = L"start"; j->total = (int)paths.size(); j->batches = ((int)paths.size() + 24) / 25;
+        lock(); job_ = j; int seq = ++jobSeq_; unlock();
+        sink_->onPortJob(j);
+        after(700, [this, seq] {
+            lock(); bool same = jobSeq_ == seq && job_; unlock();
+            if (!same) return;
+            auto x = portJobOf(3);
+            lock(); job_ = x; unlock();
+            sink_->onPortJob(x);
+        });
+    }
+    void portCancel() override {
+        after(150, [this] { lock(); job_.reset(); jobSeq_++; unlock(); sink_->onPortJob(nullptr); log(L"Import stopped: 3 imported"); });
+    }
+    void portPreview(const std::wstring& id) override {
+        // radarnite.com's catalog.json for some of the scenarios' items (the rest: made up, without a clip)
+        struct Pv { const wchar_t* id; int gg; const wchar_t* desc; };
+        static const Pv known[] = {
+            { L"EID_LoneStar", 24945, L"It ain't your first rodeo." }, { L"Backpack_AsideDepot", 24930, L"It's showtime!" },
+            { L"Character_AsideDepot", 24932, L"Say his name three times." }, { L"EID_AsideDepot", 24933, L"A dance for the recently deceased." },
+            { L"Character_CargoLying", 24916, L"Be Careful What You Wish For" }, { L"Backpack_CargoLying", 24915, L"You only get one wish." },
+            { L"EID_CargoLying", 24917, L"Don't do that!" }, { L"Character_AcidWhale", 24883, L"Also known as the Radio Demon." },
+            { L"EID_AcidWhale", 24896, L"Alastor pulls all the strings." },
+        };
+        PortPreview p; p.id = id; p.found = true; p.introduced = L"C7 S4";
+        p.description = L"A cosmetic of the current season, converted into a new item of the build.";
+        for (auto& k : known)
+            if (!_wcsicmp(id.c_str(), k.id)) {
+                char u[96];
+                p.description = k.desc;
+                snprintf(u, sizeof u, "https://fnggcdn.com/items/%d/video-sd.mp4", k.gg); p.video = u;
+                snprintf(u, sizeof u, "https://fnggcdn.com/items/%d/video.mp4", k.gg); p.videoHd = u;
+                snprintf(u, sizeof u, "https://fortnite.gg/cosmetics?id=%d", k.gg); p.page = u;
+            }
+        sink_->onPortPreview(p);
+    }
+    std::wstring imageCacheDir() override {
+        wchar_t t[MAX_PATH]; GetTempPathW(MAX_PATH, t);
+        return std::wstring(t) + L"rn-ui-mock-img";
     }
 
     void command(Command c, const std::wstring& build) override {
@@ -265,6 +389,10 @@ private:
     State state_;
     Session session_;
     std::map<std::wstring, std::wstring> prefs_;
+    std::shared_ptr<PortCatalog> cat_;
+    std::shared_ptr<PortJob> job_;
+    int jobSeq_ = 0;
+    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 35; }
 };
 
 } // namespace

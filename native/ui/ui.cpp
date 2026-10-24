@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "port_ui.h"
 #include <commctrl.h>
 #include <math.h>
 #include <stdio.h>
@@ -158,6 +159,7 @@ App::App(Gfx& g, Core* core) : g_(g), core_(core) {
     edits_[0].id = ID_NAME; edits_[0].f = { Face::UI, 13, 600, false }; edits_[0].bg = FIELD;
     edits_[1].id = ID_BOTS; edits_[1].f = { Face::Display, 26, 900, true }; edits_[1].bg = FIELD; edits_[1].lazy = true;
     edits_[2].id = ID_SEARCH; edits_[2].f = { Face::UI, 12, 400, false };
+    edits_[3].id = ID_P_SEARCH; edits_[3].f = { Face::UI, 13, 400, false };
     float h = 0;
     std::wstring v = core_->uiPref(L"activityHeight");
     if (!v.empty() && (h = (float)_wtof(v.c_str())) >= 140) actH_ = h;
@@ -178,6 +180,7 @@ void App::attach(HWND hwnd) {
     fieldBrush_ = CreateSolidBrush(RGB((FIELD >> 16) & 255, (FIELD >> 8) & 255, FIELD & 255));
     art_.startAsync(hwnd, WM_APP_SINK);   // the season art arrives like a core message
     createEdits();
+    img_.setNotify(hwnd, WM_APP_IMG);
 }
 
 void App::start() { core_->ready(this); }
@@ -235,6 +238,7 @@ void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
     releaseArt();
     release(modeBr_[0]); release(modeBr_[1]); release(rangeBr_);
     release(shimmer_); release(sheen_); release(logoBrush_); release(logo_); release(brush2_); release(brush_);
+    releasePortBrushes(); img_.setTarget(rt);
     rt_ = rt;
     dpi_ = dpi; scale_ = dpi / 96.f;
     if (!rt_) return;
@@ -292,6 +296,7 @@ void App::createEdits() {
         SendMessageW(e.hwnd, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
         SendMessageW(e.hwnd, EM_LIMITTEXT, e.id == ID_NAME ? 24 : e.id == ID_BOTS ? 2 : 200, 0);
         if (e.id == ID_SEARCH) SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)L"Filter");
+        if (e.id == ID_P_SEARCH) SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search name or ID (EID_\u2026)");
         SetWindowSubclass(e.hwnd, editProc, (UINT_PTR)e.id, 0);
     }
     setDpi((float)GetDpiForWindow(hwnd_));
@@ -340,6 +345,7 @@ void App::apply(Event& e) {
     }
     case 2: addLog(e.log); break;
     case 3: toast(e.text, e.level); break;
+    default: portEvent(e); break;
     }
     invalidate();
 }
@@ -395,6 +401,7 @@ void App::timer(UINT_PTR id) {
         setToastTimer();
         return;
     }
+    if (id == T_PORT) { invalidate(); return; }
     if (id == T_ANIM) {
         animTicks++;
         anim_.tick([&](D2D1_RECT_F r) { dirty(r); });
@@ -406,6 +413,10 @@ void App::updateSpinTimer() {
     bool run = se_.state == SessionState::Launching || se_.state == SessionState::Stopping ||
                (se_.state == SessionState::Running && se_.phase == MatchPhase::None &&
                 (se_.backend == Stage::Run || se_.game == Stage::Run || se_.server == Stage::Run));
+    // the cosmetics panel's spinners and elapsed times, only while it shows a load or an import
+    bool port = pOpen_ && (pLoading_ || pj_ || pPvWait_);
+    if (hwnd_) { if (port) SetTimer(hwnd_, T_PORT, 1000, nullptr); else KillTimer(hwnd_, T_PORT); }
+    run = run || port;
     if (run == spinning_ || !hwnd_) { spinning_ = run && hwnd_; return; }
     spinning_ = run;
     if (run) SetTimer(hwnd_, T_SPIN, 33, nullptr); else KillTimer(hwnd_, T_SPIN);
@@ -441,6 +452,7 @@ void App::select(const std::wstring& name, bool click) {
     if (busy()) return;
     if (click) greet();   // the page greets on every click on a build, also the selected one
     if (name == selected_) return;
+    if (pOpen_) portShow(false);
     selected_ = name;
     for (size_t i = 0; i < st_.builds.size(); i++) if (st_.builds[i].name == name) tabEnsure_ = (int)i;
     core_->command(Command::Select, name);
@@ -490,6 +502,10 @@ void App::commitEdit(int id) {
 void App::editCommand(int id, int code) {
     if (code == EN_SETFOCUS) { focus_ = id; invalidate(); }
     else if (code == EN_KILLFOCUS) { for (auto& e : edits_) if (e.id == id) e.want = false; commitEdit(id); invalidate(); }
+    else if (code == EN_CHANGE && id == ID_P_SEARCH) {
+        wchar_t buf[256] = L""; GetWindowTextW(edits_[3].hwnd, buf, 256);
+        pQ_ = lower(buf); portRefilter();
+    }
     else if (code == EN_CHANGE && id == ID_SEARCH) {
         wchar_t buf[256] = L""; GetWindowTextW(edits_[2].hwnd, buf, 256);
         q_ = lower(buf); rowsDirty_ = true; invalidate();
@@ -501,7 +517,8 @@ void App::editKey(int id, UINT vk, bool ctrl, bool shift) {
     if (ctrl && (vk == 'L' || vk == VK_RETURN)) { key(vk, true, shift); return; }
     if (vk == VK_RETURN) { commitEdit(id); return; }
     if (vk == VK_ESCAPE) {   // search: clear it; name/bots: back to the saved value
-        if (id == ID_SEARCH) SetWindowTextW(edits_[2].hwnd, L"");
+        if (id == ID_P_SEARCH) { if (pQ_.empty()) key(VK_ESCAPE, false, false); else SetWindowTextW(edits_[3].hwnd, L""); }
+        else if (id == ID_SEARCH) SetWindowTextW(edits_[2].hwnd, L"");
         else if (id == ID_NAME) SetWindowTextW(edits_[0].hwnd, st_.config.displayName.c_str());
         else SetWindowTextW(edits_[1].hwnd, std::to_wstring(st_.config.bots).c_str());
         return;
@@ -724,7 +741,7 @@ void App::hit(int id, D2D1_RECT_F r, int flags, float radius) {
     if (measuring_ || noHit_) return;
     r.top += oy_; r.bottom += oy_;
     if (inContent_) flags |= F_CONTENT;
-    hits_.push_back({ id, r, flags, radius, clip_ });
+    hits_.push_back({ id, r, flags, radius, clip_, layer_ });
 }
 const App::Hit* App::findHit(float x, float y) const {
     for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) if (inside(it->r, x, y) && inside(it->clip, x, y)) return &*it;
@@ -771,6 +788,7 @@ void App::paint(float W, float H) {
     hits_.clear(); issues.clear(); spinRects_.clear(); toastRects_.clear();
     overlays_.clear();
     anim_.frame();
+    img_.drain(); img_.frame();
     for (auto& e : edits_) e.show = false;
     base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0; alpha_ = 1;
     clip_ = { -1e9f, -1e9f, 1e9f, 1e9f };
@@ -786,22 +804,26 @@ void App::paint(float W, float H) {
 
     float pw = std::max(280.f, std::min(340.f, W * 0.27f));
     float px = W - 24 - pw, py = TB + 90, pb = actTop - 24;
-    bool panel = pb - py >= 70;
+    bool panel = pb - py >= 70 && !pOpen_;
     drawTop(TB + 18, W);
-    drawHero(W < 900 ? 24.f : 34.f, (panel ? px : W) - 24, py, actTop - (actTop - TB < 600 ? 24.f : 34.f));
     contentClip_ = {};
-    if (panel) drawPanel(px, py, pw, pb - py);
+    if (pOpen_) drawPort(0, TB + 76, W, actTop - TB - 76);   // the cosmetics panel under the tabs
+    else {
+        drawHero(W < 900 ? 24.f : 34.f, (panel ? px : W) - 24, py, actTop - (actTop - TB < 600 ? 24.f : 34.f));
+        if (panel) drawPanel(px, py, pw, pb - py);
+    }
     if (actOpen_) drawActivity(0, actTop, W, H - actTop);
-    if (playShown_) hit(ID_PLAY, playRect_, F_FOCUS | F_HAND | (playDisabled_ ? F_DISABLED : 0), 16);   // the last control, like the page
+    if (playShown_ && !pOpen_) hit(ID_PLAY, playRect_, F_FOCUS | F_HAND | (playDisabled_ ? F_DISABLED : 0), 16);   // the last control, like the page
     toastRight_ = panel ? px - 16 : W - 24;
     toastBottom_ = actTop - 24;
     drawMenu();
+    drawPortOverlays();
     drawToasts(W, H);
 
     // keyboard focus ring (focus-visible): 2px white, 2px outside the control (inside for the window buttons)
     if (focusVisible_ && focus_) {
         const Hit* f = hitById(focus_);
-        if (f && !(f->flags & F_EDIT)) {
+        if (f && !(f->flags & F_EDIT) && f->id != ID_P_GRID) {   // the grid draws its cursor's ring
             float o = (f->flags & F_RING_IN) ? -3.f : 3.f;
             D2D1_RECT_F r = { f->r.left - o, f->r.top - o, f->r.right + o, f->r.bottom + o };
             float rad = std::max(0.f, f->radius + o);
@@ -1013,9 +1035,11 @@ void App::drawTop(float y, float W) {
     const Build* b = loaded_ ? sel() : nullptr;
     bool compact = W < 860;
     float bw = 0, cw = 0, right = W - 24;
+    int cosId = ID_COSMETICS;
     if (b) {
         bw = gbutton(ID_BUILDMENU, 0, 0, 40, L"Build", Icon::More, compact, true);
         cw = gbutton(ID_COSMETICS, 0, 0, 40, L"Cosmetics", Icon::Cos, compact, true);
+        cosId = b->port ? (int)ID_P_OPEN : (int)ID_COSMETICS;   // where cosmetics can be imported: the cosmetics panel
         right -= bw + 10 + cw + 16;
     }
     const float x0 = 24;
@@ -1089,7 +1113,7 @@ void App::drawTop(float y, float W) {
 
     if (b) {
         float bx = W - 24 - bw, cx = bx - 10 - cw;
-        gbutton(ID_COSMETICS, cx, y + 6, 40, L"Cosmetics", Icon::Cos, compact);
+        gbutton(cosId, cx, y + 6, 40, L"Cosmetics", Icon::Cos, compact);
         if (menu_ == 3) menuAnchor_ = rc(cx, y + 6, cw, 40);
         gbutton(ID_BUILDMENU, bx, y + 6, 40, L"Build", Icon::More, compact);
         if (menu_ == 2) menuAnchor_ = rc(bx, y + 6, bw, 40);
@@ -1745,6 +1769,7 @@ void App::mouseMove(float x, float y) {
         invalidate();
         return;
     }
+    if (drag_ == ID_P_SB) { portScrollbar(y, false); return; }
     if (drag_ == ID_SB_CONTENT || drag_ == ID_SB_LOG) {
         bool content = drag_ == ID_SB_CONTENT;
         D2D1_RECT_F r = rectOf(drag_);
@@ -1776,6 +1801,7 @@ void App::setHover(int id) {
 }
 
 std::wstring App::tooltip(int id) const {
+    if (id >= ID_PORT && id < ID_P_END) return portTip(id);
     const Build* b = sel();
     switch (id) {
     case ID_MIN: return L"Minimize";
@@ -1852,6 +1878,7 @@ void App::mouseDown(float x, float y) {
         return;
     }
     if (id == ID_GRIP) { drag_ = id; dragY0_ = y; dragV0_ = actH_; if (hwnd_) SetCapture(hwnd_); return; }
+    if (id == ID_P_SB) { portScrollbar(y, true); return; }
     if (id == ID_SB_CONTENT || id == ID_SB_LOG) {
         bool content = id == ID_SB_CONTENT;
         float total = content ? contentH_ : logMax_ + logView_, view = content ? contentView_ : logView_;
@@ -1891,6 +1918,7 @@ void App::mouseUp(float x, float y) {
 }
 
 void App::wheel(float x, float y, float delta) {
+    if (portWheel(x, y, delta)) return;
     const Hit* l = hitById(ID_LINES);
     if (actOpen_ && l && inside(l->r, x, y)) {
         logScroll_ = std::max(0.f, logScroll_ - delta / 120.f * LOG_LH * 3);
@@ -1905,6 +1933,7 @@ void App::wheel(float x, float y, float delta) {
 
 void App::activate(int id) {
     const std::wstring& b = selected_;
+    if (id >= ID_PORT && id < ID_P_END) { portActivate(id); return; }
     if (id >= ID_BUILD0) { int i = id - ID_BUILD0; if (i < (int)st_.builds.size()) select(st_.builds[i].name, true); return; }
     if (id >= ID_MENU0) {
         int n; const MenuItem* it = menuItems(menu_, &n);
@@ -1997,8 +2026,10 @@ void App::ensureVisible(int id) {
 
 void App::moveFocus(int dir) {
     std::vector<int> order;
+    int top = 0;
+    for (auto& h : hits_) top = std::max(top, h.layer);
     for (auto& h : hits_) {
-        if (!(h.flags & F_FOCUS) || (h.flags & F_DISABLED)) continue;
+        if (!(h.flags & F_FOCUS) || (h.flags & F_DISABLED) || h.layer != top) continue;
         bool inMenu = h.id >= ID_MENU0 && h.id < ID_BUILD0;
         if (menu_ ? !inMenu : inMenu) continue;
         order.push_back(h.id);
@@ -2012,6 +2043,7 @@ void App::moveFocus(int dir) {
 }
 
 bool App::key(UINT vk, bool ctrl, bool shift) {
+    if (pOpen_ && !menu_ && portKey(vk, ctrl, shift)) return true;
     if (vk == VK_ESCAPE) {
         if (menu_) { int t = menuOwner(menu_); menu_ = 0; setFocus(t, focusVisible_); return true; }
         return false;

@@ -7,12 +7,17 @@
 #include "api.h"
 #include "art.h"
 #include "gfx.h"
+#include "images.h"
+#include "video.h"
 #include <deque>
+#include <memory>
+#include <unordered_map>
 
 namespace rn {
 
 const UINT WM_APP_SINK = WM_APP + 1;     // queued core messages to apply
 const UINT WM_APP_EDITKEY = WM_APP + 2;  // a key the EDIT subclass hands to the window (wParam = vk, lParam = edit id)
+const UINT WM_APP_IMG = WM_APP + 3;      // cosmetics panel images decoded (Images): repaint
 
 class App final : public UiSink {
 public:
@@ -74,8 +79,9 @@ public:
     void onToast(const std::wstring& text, Level level) override;
 
 private:
-    struct Event { int type; State state; Session session; LogLine log; std::wstring text; Level level; };
-    struct Hit { int id; D2D1_RECT_F r; int flags; float radius; D2D1_RECT_F clip; };
+    struct Event { int type; State state; Session session; LogLine log; std::wstring text; Level level;
+                   std::shared_ptr<const PortCatalog> cat; std::shared_ptr<const PortJob> job; PortLoad load; PortPreview pv; };
+    struct Hit { int id; D2D1_RECT_F r; int flags; float radius; D2D1_RECT_F clip; int layer; };
     struct LogEntry { std::wstring ts, text, lower; int lvl; bool key; int wrapCols = 0, lines = 1; };
     struct Toast { std::wstring text; Level level; ULONGLONG until; uint32_t seq; };
     struct EditBox { HWND hwnd = nullptr; int id = 0; D2D1_RECT_F r{}; bool show = false; D2D1_RECT_F clip{}; HFONT font = nullptr; Font f; int textH = 16;
@@ -213,7 +219,7 @@ private:
     bool maximized_ = false, active_ = true;
     int drag_ = 0;              // id being dragged (range, grip, scrollbars)
     float dragY0_ = 0, dragV0_ = 0;
-    EditBox edits_[3];
+    EditBox edits_[4];          // [3]: the cosmetics panel's search
     HBRUSH editBrush_ = nullptr, fieldBrush_ = nullptr;
     // lobby screen
     ArtLoader art_;
@@ -236,6 +242,82 @@ private:
     HWND tip_ = nullptr;        // one comctl32 tooltip, its tool = the hovered control
     bool spinning_ = false;
     bool pendingEnsure_ = false;
+
+    // ================================================================ the cosmetics panel and its preview (port_ui.cpp)
+public:
+    void onPortCatalog(std::shared_ptr<const PortCatalog> c) override;
+    void onPortLoad(const PortLoad& l) override;
+    void onPortJob(std::shared_ptr<const PortJob> j) override;
+    void onPortPreview(const PortPreview& p) override;
+    bool importing() const { return pj_ != nullptr; }
+    bool portOpen() const { return pOpen_; }
+    // Selftest: open the panel on the selected build and put it in a state: 1 open, 2 filters popup, 3 Import all
+    // dialog, 4 preview of the second card, 5 three cards selected and one hovered, 6 scrolled to the end
+    void portScene(int what);
+    Images& images() { return img_; }
+    void imagesArrived();                       // WM_APP_IMG
+    void videoEvent(WPARAM w, LPARAM l) { video_.onEvent(w, l); invalidate(); }   // WM_APP_VIDEO
+    bool videoShown() const { return video_.shown(); }
+    // Selftest: clicks and keys on the panel (needs a render target and the mock's catalog)
+    std::vector<std::pair<std::wstring, bool>> portCheck(float width, float height);
+
+private:
+    struct PortRow { std::wstring stage; int64_t ms; bool done; ULONGLONG at; };
+    struct RarBrush { std::string key; ID2D1LinearGradientBrush* bg; ID2D1LinearGradientBrush* shade; uint32_t dark; };
+    float para(const std::wstring& s, const Font& f, float x, float top, float w, float lh, int maxLines, uint32_t c, bool draw = true);
+    float chip(int id, float x, float y, float h, const std::wstring& label, int icon, const std::wstring& count, bool on, bool disabled, bool measure = false, bool pill = false);
+    void portEvent(Event& e);                    // a queued onPort* (types 4..7)
+    void portShow(bool open);
+    void portLoad(bool refresh);
+    void portRebuild();                          // the filtered, sorted list and the per-group counts
+    void portRefilter() { pDirty_ = true; pScroll_ = 0; pCursor_ = 0; invalidate(); }
+    bool portMatch(const PortItem& it, int skip) const;
+    bool importable(const PortItem& it) const { return !it.path.empty() && (it.status == PortStatus::New || it.status == PortStatus::Failed); }
+    void drawPort(float x, float y, float w, float h);
+    float drawPortJob(float x, float y, float w);
+    float drawPortLoad(float x, float y, float w, bool draw);
+    void drawPortCard(int slot, int item, D2D1_RECT_F r);
+    void drawPortOverlays();
+    void drawPortPop();
+    void drawPortDialog();
+    void drawPortPreview();
+    void portActivate(int id);
+    bool portKey(UINT vk, bool ctrl, bool shift);
+    bool portWheel(float x, float y, float delta);
+    void portScrollbar(float y, bool down);      // mouse down on it / drag
+    void portConfirm(const std::vector<int>& items, bool all);
+    void portPreviewOpen(int item);
+    void portCursor(int idx, bool keyboard);
+    std::wstring portTip(int id) const;
+    RarBrush* rarBrush(const std::string& rarity);
+    void releasePortBrushes();
+
+    Images img_;
+    Video video_;               // the preview's clip (live window only)
+    int layer_ = 0;             // overlay level of the hits being recorded (Tab stays inside the topmost one)
+    bool pOpen_ = false, pLoading_ = false, pDirty_ = true, pLogOpen_ = false, pPvWait_ = false, pDlg_ = false, pDlgAll_ = false;
+    std::wstring pBuild_, pQ_;
+    std::shared_ptr<const PortCatalog> pCat_;
+    std::shared_ptr<const PortJob> pj_;
+    ULONGLONG pjAt_ = 0, pLoadT0_ = 0;
+    std::vector<PortRow> pRows_;
+    uint32_t pTypes_ = 0, pSts_ = 0, pRars_ = 0;   // filter bit sets (PortType, PortStatus, rarity index)
+    int pSort_ = 0;                              // 0 newest, 1 oldest, 2 A to Z, 3 rarity
+    std::vector<uint8_t> pSel_;                  // per catalog item
+    int pSelN_ = 0;
+    std::vector<int> pList_;                     // filtered + sorted catalog indices
+    int pCntT_[16] = {}, pCntS_[4] = {}, pCntR_[32] = {}, pTodo_ = 0;
+    int pPop_ = 0;                               // 0 none, 1 category, 2 filters, 3 sort
+    D2D1_RECT_F pPopAnchor_{}, pGrid_{}, pBody_{}, pJobR_{}, pLoadR_{};
+    std::vector<int> pPending_;                  // the dialog's items
+    int pPv_ = -1;                               // catalog index in the preview
+    PortPreview pPvData_;
+    float pScroll_ = 0, pTotal_ = 0, pView_ = 0;
+    int pCursor_ = 0;                            // keyboard position in pList_
+    std::vector<int> pSlot_;                     // visible card slot -> pList_ index
+    std::vector<RarBrush> rarBrushes_;
+    std::vector<int8_t> pRi_;                    // per catalog item: its rarity's index in the filter list (-1 none)
+    std::unordered_map<std::wstring, int> pPath_;   // path -> catalog index, built while an import is shown
 };
 
 } // namespace rn

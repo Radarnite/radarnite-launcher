@@ -241,6 +241,8 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == SPI_SETCLIENTAREAANIMATION && !g_selftest) { BOOL on = TRUE; SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0); g_app->setMotion(on != FALSE); }
         break;
     case WM_APP_SINK: g_app->drain(); return 0;
+    case WM_APP_IMG: g_app->imagesArrived(); return 0;
+    case WM_APP_VIDEO: g_app->videoEvent(w, l); return 0;
     case WM_APP_EDITKEY: g_app->editKey((int)l, (UINT)(w & 0xFFFF), (w & 0x20000) != 0, (w & 0x10000) != 0); return 0;
     case WM_APP_SHOW:
         g_showRequests++;
@@ -252,6 +254,9 @@ LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_CLOSE:
         if (!g_selftest && g_app->sessionRunning() &&
             MessageBoxW(h, L"Fortnite is running. Closing Radarnite Launcher stops the game and the local servers.", L"Radarnite Launcher",
+                        MB_OKCANCEL | MB_ICONWARNING) != IDOK) return 0;
+        if (!g_selftest && g_app->importing() &&
+            MessageBoxW(h, L"Cosmetics are being imported. Closing stops the import (importing again continues where it stopped).", L"Radarnite Launcher",
                         MB_OKCANCEL | MB_ICONWARNING) != IDOK) return 0;
         if (!g_snapshot.empty()) snapshot(h, g_snapshot);
         DestroyWindow(h);
@@ -480,6 +485,81 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     delete g_app; g_app = nullptr; delete core;
     discardTarget();
 
+    // 1b) the cosmetics panel in a live window: memory with the panel open and its images loaded, after scrolling
+    //     through ~1,000 cards, and after closing it (before the offscreen renders: their memory would count too)
+    double portOpenMs = -1, portImagesMs = -1;
+    double portVideoMs = -1;
+    size_t portPrivVideo = 0, portPrivVideoClosed = 0;
+    size_t portPriv0 = 0, portPrivOpen = 0, portPrivScrolled = 0, portPrivClosed = 0, portImgBytes = 0, portImgMax = 0, portImgCount = 0;
+    {
+        Core* c = createMockCore(L"28-port-catalog-125");
+        g_app = new App(g_gfx, c);
+        HWND ph = createWindow(inst, true, 1200, 800);
+        g_app->attach(ph);
+        g_app->start(); g_app->drain();
+        ShowWindow(ph, SW_SHOWNOACTIVATE);
+        UpdateWindow(ph);
+        if (!g_rt) paint(ph);
+        pump(msSinceStart() + 300);
+        portPriv0 = privateBytes();
+        double t = msSinceStart();
+        g_app->portScene(1);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        portOpenMs = msSinceStart() - t;
+        for (double until = msSinceStart() + 15000; msSinceStart() < until; ) {
+            pump(msSinceStart() + 50);
+            if (forced) paint(ph);
+            if (g_app->images().idle()) break;
+        }
+        portImagesMs = msSinceStart() - t;
+        portPrivOpen = privateBytes();
+        captureWindow(ph, dir + L"\\00-live-port-panel.png");
+        portImgBytes = g_app->images().bytes(); portImgCount = g_app->images().count();
+        RECT cr; GetClientRect(ph, &cr);
+        float s = g_dpi / 96.f;
+        for (int k = 0; k < 40; k++) {
+            g_app->wheel(cr.right / s / 2, cr.bottom / s / 2, -120 * 10);
+            if (forced) paint(ph); else UpdateWindow(ph);
+            pump(msSinceStart() + 120);
+            portImgMax = std::max(portImgMax, g_app->images().bytes());
+        }
+        for (double until = msSinceStart() + 5000; msSinceStart() < until && !g_app->images().idle(); ) pump(msSinceStart() + 50);
+        portPrivScrolled = privateBytes();
+        // closed: the decoded images go back (the image workers exit after 3 s idle)
+        g_app->key(VK_ESCAPE, false, false);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        pump(msSinceStart() + 4000);
+        portPrivClosed = privateBytes();
+        int workers = g_app->images().threads();
+        // opened again on the first card's preview: it plays its clip (Media Foundation loads now), then closes
+        g_app->portScene(7);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        double tv = msSinceStart();
+        while (msSinceStart() < tv + 15000 && !g_app->videoShown()) { pump(msSinceStart() + 50); if (forced) paint(ph); }
+        portVideoMs = g_app->videoShown() ? msSinceStart() - tv : -1;
+        pump(msSinceStart() + 1500);
+        portPrivVideo = privateBytes();
+        captureWindow(ph, dir + L"\\00-live-port-preview-video.png");
+        g_app->key(VK_ESCAPE, false, false);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        bool videoGone = !g_app->videoShown() && !FindWindowExW(ph, nullptr, L"RnVideo", nullptr);
+        g_app->key(VK_ESCAPE, false, false);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        pump(msSinceStart() + 4000);
+        portPrivVideoClosed = privateBytes();
+        char buf[300];
+        snprintf(buf, sizeof buf, "cosmetics panel: images within their budget while scrolling (%.1f MB at most, %zu held when opened)", portImgMax / 1048576.0, portImgCount);
+        addCheck(buf, portImgMax <= (12u << 20) + (2u << 20));
+        snprintf(buf, sizeof buf, "the preview plays the item's clip, muted and looped (first frame after %.0f ms), and closing it removes it", portVideoMs);
+        addCheck(buf, (forced || portVideoMs >= 0) && videoGone);
+        snprintf(buf, sizeof buf, "cosmetics panel: the image workers exit once nothing loads (%d running)", workers);
+        addCheck(buf, workers == 0);
+        DestroyWindow(ph);
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+        delete c; delete g_app; g_app = nullptr;
+        discardTarget();
+    }
+
     // 2) every scenario rendered offscreen (WIC bitmap, same drawing code, texts of the EDIT fields drawn by Direct2D)
     int n; const MockScenario* sc = mockScenarios(&n);
     std::string items;
@@ -490,6 +570,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         app->start(); app->drain();
         if (sc[i].activityOpen) app->openActivity(true);
         if (sc[i].menu) app->openMenu(sc[i].menu);
+        if (sc[i].port) app->portScene(sc[i].port);
         UINT pw = (UINT)lroundf(sc[i].width * sc[i].scale), ph = (UINT)lroundf(sc[i].height * sc[i].scale);
         IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
         bool ok = SUCCEEDED(g_gfx.wic->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp)) &&
@@ -501,6 +582,12 @@ int selftest(HINSTANCE inst, std::wstring dir) {
             for (int pass = 0; pass < 3; pass++) {
                 rt->BeginDraw(); app->paint((float)sc[i].width, (float)sc[i].height); rt->EndDraw();
                 if (pass == 0) for (int t = 0; t < sc[i].tabs; t++) app->key(VK_TAB, false, false);   // keyboard focus scenarios
+            }
+            // the panel's images: drawn again until the visible ones are decoded (downloaded the first time), 15 s at most
+            for (double until = msSinceStart() + 15000; sc[i].port && msSinceStart() < until; ) {
+                Sleep(60);
+                rt->BeginDraw(); app->paint((float)sc[i].width, (float)sc[i].height); rt->EndDraw();
+                if (app->images().idle()) { rt->BeginDraw(); app->paint((float)sc[i].width, (float)sc[i].height); rt->EndDraw(); break; }
             }
             app->setTarget(nullptr, 96.f);
             ok = savePng(bmp, dir + L"\\" + sc[i].id + L".png");
@@ -531,6 +618,20 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         release(rt); release(bmp);
         delete c; delete app;   // the core first: its timers (launch) never reach a deleted window state
     }
+    {
+        Core* c = createMockCore(L"28-port-catalog-125");
+        App* app = new App(g_gfx, c);
+        app->start(); app->drain();
+        IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
+        if (SUCCEEDED(g_gfx.wic->CreateBitmap(1200, 800, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp)) &&
+            SUCCEEDED(g_gfx.d2d->CreateWicBitmapRenderTarget(bmp, D2D1::RenderTargetProperties(), &rt))) {
+            app->setTarget(rt, 96.f);
+            for (auto& r : app->portCheck(1200, 800)) addCheck(json(r.first), r.second);
+            app->setTarget(nullptr, 96.f);
+        }
+        release(rt); release(bmp);
+        delete c; delete app;
+    }
 
     wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
     WIN32_FILE_ATTRIBUTE_DATA fa = {}; GetFileAttributesExW(exe, GetFileExInfoStandard, &fa);
@@ -541,9 +642,11 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"firstFrameSteps\": {\"gfx\": %.1f, \"window\": %.1f, \"target\": %.1f},\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
                "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"idleTimers\": %d,\n  \"exeBytes\": %lu,\n"
                "  \"dwmDarkFrame\": %s,\n  \"systemMotion\": %s,\n  \"animSettledMs\": %.0f,\n  \"hoverFrames\": [%d, %d],\n  \"hoverDirtyMaxPct\": %.2f,\n  \"afterTransition\": {\"paints\": %d, \"timers\": %d},\n  \"partialVsFullDiffPx\": %lld,\n"
+               "  \"port\": {\"openFrameMs\": %.1f, \"imagesMs\": %.0f, \"privateMB\": {\"before\": %.1f, \"open\": %.1f, \"scrolled\": %.1f, \"closed\": %.1f, \"clip\": %.1f, \"afterClip\": %.1f}, \"videoFirstFrameMs\": %.0f, \"imagesMB\": %.1f, \"imagesMaxMB\": %.1f, \"images\": %zu},\n"
                "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"failed\": %d,\n  \"scenarios\": [%s\n  ],\n  \"interactions\": [%s\n  ]\n}\n",
             first, g_tGfx, g_tWindow, g_tTarget, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints, idleTimers,
-            fa.nFileSizeLow, SUCCEEDED(darkHr) ? (dark ? "true" : "false") : "null", systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
+            fa.nFileSizeLow, SUCCEEDED(darkHr) ? (dark ? "true" : "false") : "null", systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff,
+            portOpenMs, portImagesMs, portPriv0 / 1048576.0, portPrivOpen / 1048576.0, portPrivScrolled / 1048576.0, portPrivClosed / 1048576.0, portPrivVideo / 1048576.0, portPrivVideoClosed / 1048576.0, portVideoMs, portImgBytes / 1048576.0, portImgMax / 1048576.0, portImgCount, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
             live ? "true" : "false", forced ? "true" : "false", (unsigned long)g_lastHr, (unsigned long)g_createHr, g_client.right, g_client.bottom, g_lastFrameMs, session, failed, items.c_str(), checks.c_str());
     fclose(f);
     return failed ? 1 : 0;

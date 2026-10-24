@@ -36,6 +36,7 @@ struct Start {
     HANDLE job = nullptr;                 // created inside it (PROC_THREAD_ATTRIBUTE_JOB_LIST)
     HANDLE out = nullptr, err = nullptr;  // inheritable write ends for stdout/stderr (nullptr = none)
     DWORD priority = 0;                   // e.g. BELOW_NORMAL_PRIORITY_CLASS (0 = normal)
+    std::function<void(DWORD pid)> started;   // run(): called once the process exists (e.g. to kill its tree later)
 };
 // CreateProcessW. Returns the process handle (the caller closes it) or nullptr with *error.
 HANDLE start(const Start& s, DWORD* pid, std::wstring* error);

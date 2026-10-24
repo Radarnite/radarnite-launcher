@@ -8,12 +8,15 @@
 //   coretest.exe fetch <url> <file>   net::download (redirects, streamed SHA-256) + update::sha256Token of the file
 //   coretest.exe sha <file>           net::sha256 of a file's bytes
 //   coretest.exe semver               update::parseTag / update::compare against a table (exit 1 on any failure)
+//   coretest.exe port                 the import's line classifier and the catalog.json join against tables (exit 1 on a failure)
+//   coretest.exe port <catalog.json>  the same, then the real radarnite.com file parsed (count, time, memory)
 // Like RadarniteLauncher.exe, it runs rn::cli::run() first (the core re-runs its own exe for "--firewall").
 #include "../buildinfo.h"
 #include "../builddata.h"
 #include "../cli.h"
 #include "../core.h"
 #include "../net.h"
+#include "../port.h"
 #include "../update.h"
 #include "../util.h"
 #include <objbase.h>
@@ -54,6 +57,15 @@ struct Sink : UiSink {
     }
     void onLog(const LogLine& l) override { out(L"[log " + std::wstring(lv(l.level)) + L"] " + l.ts + L" " + l.text); }
     void onToast(const std::wstring& t, Level l) override { out(L"[toast " + std::wstring(lv(l)) + L"] " + t); }
+    void onPortCatalog(std::shared_ptr<const PortCatalog> c) override {
+        out(fmt(L"[portCatalog] build=%ls partial=%d items=%d slotsFree=%d error='%ls'", c->build.c_str(), c->partial, (int)c->items.size(), c->slotsFree, c->error.c_str()));
+    }
+    void onPortLoad(const PortLoad& l) override { out(fmt(L"[portLoad] %ls %ls ms=%lld done=%d", l.build.c_str(), l.stage.c_str(), (long long)l.ms, l.done)); }
+    void onPortJob(std::shared_ptr<const PortJob> j) override {
+        if (!j) { out(L"[portJob] none"); return; }
+        out(fmt(L"[portJob] %ls %d/%d ok=%d failed=%d phase=%ls batch=%d/%d", j->build.c_str(), j->done, j->total, j->ok, j->failed, j->phase.c_str(), j->batch, j->batches));
+    }
+    void onPortPreview(const PortPreview& p) override { out(fmt(L"[portPreview] %ls found=%d '%ls'", p.id.c_str(), p.found, p.description.c_str())); }
 };
 
 void waitFor(const std::function<bool()>& f, int ms) {
@@ -133,6 +145,74 @@ int semverTable() {
     return fails ? 1 : 0;
 }
 
+// The import's progress lines (port.ps1 and fn-port's batch\stdout.txt) and the preview join: one line per check.
+int portTables(const std::wstring& file) {
+    int fails = 0, checks = 0;
+    auto expect = [&](bool ok, const std::wstring& what) { checks++; if (!ok) fails++; out((ok ? L"ok   " : L"FAIL ") + what); };
+    using port::Line;
+    struct C { const wchar_t* line; Line::Kind kind; const wchar_t* path; int toPort; };
+    const C lines[] = {
+        { L"OK /BRCosmetics/Athena/Items/Cosmetics/Dances/EID_LoneStar.EID_LoneStar 12.3s", Line::Ok, L"/BRCosmetics/Athena/Items/Cosmetics/Dances/EID_LoneStar.EID_LoneStar", 0 },
+        { L"  FAILED /Game/Athena/Items/Cosmetics/Characters/CID_A_1.CID_A_1: no mesh  ", Line::Failed, L"/Game/Athena/Items/Cosmetics/Characters/CID_A_1.CID_A_1", 0 },
+        { L"OK", Line::Other, L"", 0 },                      // no path: not a result
+        { L"OKAY /x", Line::Other, L"", 0 },
+        { L"batch 3: 25 items, 24 ok", Line::Batch, L"", 0 },
+        { L"batches: 3", Line::Other, L"", 0 },
+        { L"done: 50 imported, 2 failed", Line::Done, L"", 0 },
+        { L"cpu: 83 % > 70 %, waiting", Line::Cpu, L"", 0 },
+        { L"items: 16620 listed, 412 to port", Line::Items, L"", 412 },
+        { L"items: 16620 listed", Line::Other, L"", 0 },
+        { L"items: many listed, 4 to port", Line::Other, L"", 0 },
+        { L"localization: 14 languages", Line::Localization, L"", 0 },
+        { L"\r\n", Line::Other, L"", 0 },
+    };
+    for (auto& c : lines) {
+        Line l = port::classify(c.line);
+        expect(l.kind == c.kind && l.path == c.path && l.toPort == c.toPort, fmt(L"classify('%ls') = %d '%ls' %d", c.line, (int)l.kind, l.path.c_str(), l.toPort));
+    }
+    // catalog.json: joined by id ignoring case, only the kept ids, the video and page URLs rebuilt from the numeric id
+    std::string sample = R"({"date":"2026-10-24","items":[
+      {"i":"EID_LoneStar","n":"Texas Primadonna","t":"emote","ds":"Yeehaw!","sz":"C6 S4","v":"https://fnggcdn.com/items/1/video-sd.mp4","vh":"https://fnggcdn.com/items/1/video.mp4","g":"https://fortnite.gg/cosmetics?id=1"},
+      {"i":"Backpack_CargoLying","ds":"A wish été","sz":"C6 S4","g":"https://fortnite.gg/cosmetics?id=22"},
+      {"i":"Character_NotWanted","ds":"x","sz":"C1 S1","v":"https://fnggcdn.com/items/3/video-sd.mp4"},
+      {"i":"Glider_Odd","ds":"odd","sz":null,"v":"https://elsewhere.example/v.mp4","g":"https://fortnite.gg/cosmetics?id=9x"}]})";
+    port::Previews pv;
+    bool parsed = pv.parse(sample, { L"eid_lonestar", L"backpack_cargolying", L"glider_odd" });
+    expect(parsed && pv.size() == 3, fmt(L"catalog.json sample: %d of 4 items kept", (int)pv.size()));
+    PortPreview a = pv.get(L"EID_LONESTAR");
+    expect(a.found && a.description == L"Yeehaw!" && a.introduced == L"C6 S4" && a.video == "https://fnggcdn.com/items/1/video-sd.mp4" &&
+           a.videoHd == "https://fnggcdn.com/items/1/video.mp4" && a.page == "https://fortnite.gg/cosmetics?id=1", L"EID_LONESTAR found, its videos and page");
+    PortPreview b = pv.get(L"backpack_cargolying");
+    expect(b.found && b.video.empty() && b.page == "https://fortnite.gg/cosmetics?id=22" && b.description == L"A wish \u00e9t\u00e9", L"no video: page only, UTF-8 description");
+    PortPreview c = pv.get(L"Character_NotWanted");
+    expect(!c.found, L"an id that is not in the build's catalog is not kept");
+    PortPreview d = pv.get(L"glider_odd");
+    expect(d.found && d.video.empty() && d.page.empty() && d.introduced.empty(), L"URLs of another shape are dropped, not guessed");
+    if (!file.empty()) {
+        std::string text;
+        if (!readFile(file, &text)) { out(L"FAIL cannot read " + file); return 1; }
+        std::vector<std::wstring> keep;
+        for (size_t at = 0; (at = text.find("\"i\":\"", at)) != std::string::npos; at += 5) {
+            size_t e = text.find('"', at + 5);
+            std::wstring id = widen(text.substr(at + 5, e - at - 5));
+            for (auto& ch : id) ch = (wchar_t)towlower(ch);
+            keep.push_back(id);
+        }
+        size_t all = keep.size();
+        keep.resize(all / 2);   // like a build's catalog: part of them
+        port::Previews big;
+        ULONGLONG t0 = GetTickCount64();
+        bool ok = big.parse(text, keep);
+        ULONGLONG ms = GetTickCount64() - t0;
+        std::string().swap(text);
+        size_t withVideo = 0;
+        for (auto& k : keep) if (!big.get(k).video.empty()) withVideo++;
+        expect(ok && big.size() == keep.size(), fmt(L"%ls: %d of %d items kept in %llu ms, %d with a video", file.c_str(), (int)big.size(), (int)all, ms, (int)withVideo));
+    }
+    out(fmt(L"port: %d checks, %d failed", checks, fails));
+    return fails ? 1 : 0;
+}
+
 } // namespace
 
 int main() {
@@ -154,13 +234,15 @@ int main() {
         std::string text;
         readFile(argv[3], &text);
         out(rc ? L"download failed: " + error : fmt(L"downloaded %d bytes, sha256 %ls, token %ls", (int)text.size(), sha.c_str(), update::sha256Token(widen(text)).c_str()));
+    } else if (mode == L"port") {
+        rc = portTables(arg);
     } else if (mode == L"semver") {
         rc = semverTable();
     } else if (mode == L"sha") {
         std::string data;
         rc = readFile(arg, &data) ? 0 : 1;
         out(L"sha256 " + net::sha256(data.data(), data.size()));
-    } else { err(L"usage: coretest core <build> | addzip <zip> | addfolder <dir> | fetch <url> <file> | sha <file> | semver"); rc = 2; }
+    } else { err(L"usage: coretest core <build> | addzip <zip> | addfolder <dir> | fetch <url> <file> | sha <file> | semver | port [catalog.json]"); rc = 2; }
     LocalFree(argv);
     return rc;
 }
