@@ -30,10 +30,16 @@ const logs = (n) => Array.from({ length: n }, (_, i) => {
 
 // cosmetics catalog (Porter): 42 real items of the current game, padded to the real size of the list (12,352 to import)
 const cat = JSON.parse(fs.readFileSync(new URL('./ui-port-catalog.json', import.meta.url)));
-const catAll = cat.concat(Array.from({ length: 12352 - cat.filter((x) => x.status === 'new').length }, (_, i) => ({ ...cat[i % cat.length], path: `/pad/${i}`, status: 'new' })));
+const catAll = cat.concat(Array.from({ length: 12352 - cat.filter((x) => x.status === 'new').length }, (_, i) => ({ ...cat[i % cat.length], path: `/pad/${i}`, status: 'new', added: '' })));
 const b1430 = mk('14.30', 14, 30, 14456520, '4.26', { match: 'Yes', matchWhy: 'Reboot: S3-S15 supported', cosmetics: 4025, matchServer: true, port: true, imported: 21 });
 const portMsgs = [{ type: 'state', builds: [b1430, b1750], config: cfg, selected: '14.30', root: 'S:\\FortniteBuilds' }];
 const portCat = { type: 'portCatalog', catalog: { build: '14.30', items: catAll, slotsFree: 7979 } };
+// an import as the host reports it (Porter.Job.View): phase, item being converted, every item, last lines
+const portJob = (phase) => ({ type: 'portJob', job: { build: '14.30', total: 40, done: 9, ok: 8, failed: 1, phase, batch: 1, batches: 2, elapsedMs: 312000, phaseMs: 41000,
+  cpu: phase === 'cpu' ? 82 : 41, current: phase === 'convert' ? cat[11].path : '', currentMs: 12000, etaMs: 1062000, line: '',
+  items: cat.slice(0, 16).map((x, i) => ({ path: x.path, st: i < 8 ? 'ok' : i === 8 ? 'failed' : phase === 'convert' && i === 11 ? 'converting' : i < 11 ? 'ok' : 'queued' })),
+  recent: [{ t: '16:41:02', text: 'items: 40 listed, 40 to port (the rest already done; -Force redoes them)' }, { t: '16:41:05', text: 'batch 1: fn-port is reading the current Fortnite (25 items)' },
+    { t: '16:41:31', text: 'localization es: 412883 strings' }, { t: '16:41:44', text: 'converted EID_LoneStar' }, { t: '16:42:10', text: 'FAILED /BRCosmetics/Athena/Items/Cosmetics/Dances/EID_X.EID_X: NotSupportedException: class X: no item porter' }] } });
 const scenarios = [
   { id: '01-one-build-practice-100', vp: [1200, 800], dpr: 1, msgs: [{ type: 'state', builds: [b1750], config: cfg, selected: '17.50', root: 'S:\\FortniteBuilds' }] },
   { id: '02-many-builds-bots-activity-125', vp: [960, 640], dpr: 1.25, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'bots', bots: 35 }, selected: '17.50', root: 'S:\\FortniteBuilds' }, ...logs(400)], open: true },
@@ -60,7 +66,14 @@ const scenarios = [
   { id: '20-port-card', vp: [1200, 800], dpr: 1, msgs: portMsgs },
   { id: '21-port-catalog', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat] },
   { id: '22-port-import-all-dialog', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, "$('[data-cmd=portImportAll]').click()"] },
-  { id: '23-port-importing-760x520', vp: [760, 520], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, { type: 'portJob', job: { build: '14.30', total: 240, done: 87, ok: 85, failed: 2, line: 'batch 4: 85 ok, 2 not ported so far (21 min)' } }] },
+  { id: '23-port-importing-convert', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, portJob('convert')] },
+  { id: '24-port-importing-760x520-cpu', vp: [760, 520], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, portJob('cpu')] },
+  { id: '25-port-loading-partial', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', { type: 'portLoad', build: '14.30', stage: 'list', ms: 12000, done: false }, { type: 'portLoad', build: '14.30', stage: 'names', ms: 4000, done: true },
+    { type: 'portCatalog', catalog: { build: '14.30', partial: true, items: cat.map((x) => ({ ...x, path: null })) } }] },
+  { id: '26-port-category-popup', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, "$('#pcbtn').click()"] },
+  { id: '27-port-filters-panel', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, "$('#pfbtn').click()", "$('[data-pst=new]').click()"] },
+  { id: '28-port-sort-menu', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, "$('#psortb').click()"] },
+  { id: '29-port-search-eid', vp: [1200, 800], dpr: 1, msgs: portMsgs, act: ['portOpen()', portCat, "(() => { const q = $('#pq'); q.value = 'EID_LoneStar'; q.dispatchEvent(new Event('input')); })()"] },
   { id: '11-large-1920x1080', vp: [1920, 1040], dpr: 1, msgs: [{ type: 'state', builds: many, config: { ...cfg, mode: 'lobby' }, selected: '7.40', root: 'S:\\FortniteBuilds' }, ...logs(60)], open: true },
 ];
 
