@@ -84,6 +84,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
           echo "makensis $(makensis -VERSION), zig $(zig version)"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 8.0.x
+      - name: Game start helper (dotnet publish, self-contained win-x64 single file)
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+          DOTNET_NOLOGO: 1
+        run: |
+          dotnet publish play/RadarnitePlay.csproj -c Release -o play/out
+          [ "$(ls -A play/out)" = radarnite-play.exe ] || { echo "::error::play/out must hold radarnite-play.exe alone: $(ls -A play/out)"; exit 1; }
+          echo "radarnite-play.exe: $(stat -c %s play/out/radarnite-play.exe) bytes"
       - name: Core and window (zig c++, x86_64-windows-gnu)
         env:
           RN_VERSION: ${{ env.VERSION }}
@@ -113,6 +124,7 @@ jobs:
         run: >-
           tools/release.sh build --version "$VERSION" --launcher native/ui/out/RadarniteLauncher.exe
           --payload "$RUNNER_TEMP/payload" --out dist --makensis "$(command -v makensis)"
+          --play play/out/radarnite-play.exe
       - name: Program folder zip (the installer's content; no .sha256 asset, the updaters take any)
         run: |
           x="$RUNNER_TEMP/program"; rm -rf "$x"

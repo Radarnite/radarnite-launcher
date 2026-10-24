@@ -140,6 +140,8 @@ bool PlaySession::start() {
     r.config = &c_;
     r.job = job_;
     r.log = log_;
+    r.stage = stage;
+    r.match = this->match;   // the member, not the build's match support above
     err.clear();
     client_ = LaunchGame(r, &err);
     if (!client_) {

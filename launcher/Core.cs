@@ -13,7 +13,8 @@ namespace FnOffline;
 /// with "Change builds folder"); without it, the folder that contains the launcher (portable layout &lt;root&gt;\launcher).</summary>
 public static class Paths
 {
-    public static string LauncherDir => AppContext.BaseDirectory.TrimEnd('\\');
+    /// <summary>This exe's folder; radarnite-play.exe sets the launcher's (--launcher-dir).</summary>
+    public static string LauncherDir { get; set; } = AppContext.BaseDirectory.TrimEnd('\\');
     static string? _root;
     public static string Root => _root ??= BuildsFolder() ?? Directory.GetParent(LauncherDir)!.FullName;
     /// <summary>Forget the cached root (config.json was saved).</summary>
@@ -542,8 +543,12 @@ public static class Native
     [StructLayout(LayoutKind.Sequential)] struct IO_COUNTERS { public ulong a, b, c, d, e, f; }
     [StructLayout(LayoutKind.Sequential)] struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION Basic; public IO_COUNTERS Io; public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed; }
     static IntPtr _job;
+    /// <summary>radarnite-play.exe runs inside the 3.0 launcher's session job, which every process it starts inherits:
+    /// no job of its own (its KILL_ON_JOB_CLOSE would end the game when the helper exits).</summary>
+    public static bool InheritJob;
     public static void AddToJob(int pid)
     {
+        if (InheritJob) return;
         if (_job == IntPtr.Zero)
         {
             _job = CreateJobObjectW(IntPtr.Zero, null);

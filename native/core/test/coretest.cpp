@@ -1,6 +1,8 @@
 // Test harness for the core without the window (not shipped). Build next to the core (see test/README.md):
 //   coretest.exe core <build>         rn::Core through api.h with a printing UiSink: ready, select, save, refresh,
-//                                      launch <build> (ends in the session Error of launch_stub.cpp), stop
+//                                      launch <build>, stop. The launch is real (launch.cpp) when radarnite-play.exe
+//                                      sits next to coretest.exe: it starts the game; without it the session ends in
+//                                      Error ("A launcher file is missing (radarnite-play.exe).")
 //   coretest.exe addzip <zip>         builddata::addZip into the builds folder
 //   coretest.exe addfolder <dir>      builddata::addFolder into the builds folder
 //   coretest.exe fetch <url> <file>   net::download (redirects, streamed SHA-256) + update::sha256Token of the file
