@@ -220,7 +220,7 @@ public:
         else if (id.rfind(L"16-", 0) == 0) { st.builds = one(); st.config.mode = L"bots"; st.selected = L"17.50"; hasSession = true; se = running(MatchPhase::Storm, L"Storm"); }
         else if (id.rfind(L"17-", 0) == 0) { st.builds = one(); st.config.mode = L"bots"; st.selected = L"17.50"; hasSession = true; se = running(MatchPhase::Down, L"The match server stopped"); post = logs(12); }
         else if (id.rfind(L"18-", 0) == 0) {
-            Build a = mk(L"3.6-CL-4019403", 3, 6, 4019403, L"4.20"); a.dir = L"S:\\FortniteBuilds\\3.6-CL-4019403\\Fortnite"; a.match = Support::Yes; a.matchWhy = kS3; a.cosmetics = 0; a.firewall = L"firewall rules missing for 6 programs";
+            Build a = mk(L"3.6-CL-4019403", 3, 6, 4019403, L"4.20"); a.version = L"3.6"; a.dir = L"S:\\FortniteBuilds\\3.6-CL-4019403\\Fortnite"; a.match = Support::Yes; a.matchWhy = kS3; a.cosmetics = 0; a.firewall = L"firewall rules missing for 6 programs";
             Build b = mk(L"14.30", 14, 30, 15341163, L"4.26"); b.match = Support::Yes; b.matchWhy = kS3; b.cosmetics = 4100;
             st.builds = { a, b, b1750() }; st.selected = L"3.6-CL-4019403";
             LogLine l; l.level = Level::Warn; l.ts = L"22:09:58";

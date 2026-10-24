@@ -79,6 +79,11 @@ std::wstring seasonShort(int major, int minor) {
     if (major <= 31) return fmt(L"C5 · S%d", major - 27);
     return fmt(L"%d.x", major);
 }
+// The version a build is shown as: "3.6", never the raw build string or the folder ("3.6-CL-4019403")
+std::wstring verLabel(const Build& b) {
+    if (b.major && (b.version.find(L"-CL-") != std::wstring::npos || b.version.empty() || b.version == L"?")) return fmt(L"%d.%d", b.major, b.minor);
+    return b.version;
+}
 std::wstring caps(const std::wstring& s) { std::wstring o = s; for (auto& c : o) c = (wchar_t)towupper(c); return o; }
 // The button a menu belongs to (focus goes back to it)
 int menuOwner(int menu) { return menu == 1 ? ID_ADD : menu == 2 ? ID_BUILDMENU : menu == 3 ? ID_COSMETICS : 0; }
@@ -1051,7 +1056,7 @@ void App::drawTop(float y, float W) {
     for (int i = 0; i < n; i++) {
         if (loaded_) {
             const Build& bd = st_.builds[i];
-            tw[i] = std::min(220.f, std::max(150.f, 28 + 2 + std::max(textW(bd.version, vf, -0.44f), textW(seasonShort(bd.major, bd.minor), sf))));
+            tw[i] = std::min(220.f, std::max(150.f, 28 + 2 + std::max(textW(verLabel(bd), vf, -0.44f), textW(seasonShort(bd.major, bd.minor), sf))));
         }
         total += tw[i] + (i ? 10 : 0);
     }
@@ -1096,7 +1101,7 @@ void App::drawTop(float y, float W) {
         }
         if (!on) box(r, 12, 0, 0, C::white, .12f + .14f * hv);
         float ty = y + (52 - 22 - 12.6f) / 2;
-        text(bd.version, vf, r.left + 14, ty, tw[i] - 28, 22, on ? INK : C::white, 0, -0.44f);
+        text(verLabel(bd), vf, r.left + 14, ty, tw[i] - 28, 22, on ? INK : C::white, 0, -0.44f);
         text(seasonShort(bd.major, bd.minor), sf, r.left + 14, ty + 22, tw[i] - 28, 12.6f, on ? 0x4B5160 : C::white, 0, 0, on ? 1.f : .7f);
         hit(id, r, F_FOCUS | F_HAND, 12);
     }
@@ -1213,6 +1218,10 @@ void App::drawHero(float x, float right, float top, float bottom) {
             float mx = x + pw + 10, mw = std::max(0.f, x + w - mx), my = sy + (21 - 17.4f) / 2;
             std::wstring meta = no ? b->lobbyWhy
                               : fmt(L"CL %u · UE %ls · %ls", b->cl, b->engine.c_str(), b->cosmetics ? (thousands(b->cosmetics) + L" cosmetics").c_str() : L"no cosmetics list yet");
+            if (!no && b->name != verLabel(*b)) {
+                bool hasCl = b->cl && b->name.find(std::to_wstring(b->cl)) != std::wstring::npos;
+                meta = b->name + L" · " + (hasCl ? meta.substr(meta.find(L"UE ")) : meta);
+            }
             text(meta, mf, mx, my, mw, 17.4f, C::white, 0, 0, .7f);
             hit(ID_META, rc(mx, my, std::min(mw, textW(meta, mf)), 17.4f), 0, 0);   // tooltip only
         }
@@ -1227,7 +1236,7 @@ void App::drawHero(float x, float right, float top, float bottom) {
     struct Notice { int cls; std::wstring html; int btn; const wchar_t* label; };
     std::vector<Notice> notices;
     bool fwOk = b->firewall == L"OK";
-    if (b->lobby == Support::No) notices.push_back({ 2, L"**Fortnite " + b->version + L" cannot be launched.** " + b->lobbyWhy + L".", 0, nullptr });
+    if (b->lobby == Support::No) notices.push_back({ 2, L"**Fortnite " + verLabel(*b) + L" cannot be launched.** " + b->lobbyWhy + L".", 0, nullptr });
     else {
         if (!fwOk) notices.push_back({ 1, L"**Firewall rules missing.** " + b->firewall + L". They are created before launch (administrator prompt).", ID_NOTICE_FW, L"Create now" });
         if (!b->cosmetics) notices.push_back({ 1, L"**No cosmetics list yet.** Only the default items will show in the locker.", ID_NOTICE_COS, L"Generate" });
@@ -1244,8 +1253,9 @@ void App::drawHero(float x, float right, float top, float bottom) {
 
     // the version: as big as fits the width and what is left of the height (168 at most)
     Font v100{ Face::Display, 100, 900, true };
-    float vw100 = textW(b->version, v100, -5.f);
-    float byW = vw100 > 0 ? w / vw100 * 98 : 168.f;
+    std::wstring ver = verLabel(*b);
+    float vw100 = textW(ver, v100, -5.f);
+    float byW = vw100 > 0 ? (w - 8) / vw100 * 96 : 168.f;   // the italic leans out: a little room on the right
     float room = seaTop - 14 - top - notesH;
     bool showSeason = true;
     float size = std::min({ 168.f, byW, (room - 21 - 16) / .8f });
@@ -1253,7 +1263,7 @@ void App::drawHero(float x, float right, float top, float bottom) {
     bool showVer = size >= 32;
     float vTop = seaTop - 14 - .8f * size;
     if (showVer) {
-        text(b->version, Font{ Face::Display, size, 900, true }, x, vTop, w + size, .8f * size, C::white, 0, -.05f * size);
+        text(ver, Font{ Face::Display, size, 900, true }, x, vTop, w + size, .8f * size, C::white, 0, -.05f * size);
         float ny = vTop;
         if (showSeason) {
             std::wstring s = season(b->major, b->minor);
@@ -1322,7 +1332,7 @@ void App::drawLaunch(D2D1_RECT_F pr, uint32_t glow) {
     // ▶ LAUNCH <small>version</small>: italic 900 34px, gap 14px; the version in 14px #5b6170
     Font pf{ Face::Display, 34, 900, true }, sf{ Face::Display, 14, 900, true };
     const wchar_t* pl = stopStyle ? L"STOP" : L"LAUNCH";
-    std::wstring ver = stopStyle || !b ? L"" : b->version;
+    std::wstring ver = stopStyle || !b ? L"" : verLabel(*b);
     float iconS = stopStyle ? 30.f : 40.f, gap = 14;
     float g0 = 4.5f / 16 * iconS, gw = (stopStyle ? 7.f : 8.7f) / 16 * iconS;   // the glyph inside the icon box
     float ptw = textW(pl, pf, -0.34f), stw = ver.empty() ? 0 : textW(ver, sf);
@@ -1526,7 +1536,7 @@ float App::panelBody(float x, float y0, float w) {
         if (c.botsAI) {   // the page's warning when the bots' AI is on
             y += 10;
             Font wf{ Face::UI, 11.5f, 400, false };
-            std::wstring note = L"**Bot AI is on.** On " + b->version + L" it crashes the match server a few seconds after it starts.";
+            std::wstring note = L"**Bot AI is on.** On " + verLabel(*b) + L" it crashes the match server a few seconds after it starts.";
             float th = rich(note, wf, 0, 0, w - 24, 16.5f, C::warnText, C::white, 0, false);
             icon(Icon::Warn, x, y + 0.5f, 16, C::warn);
             rich(note, wf, x + 24, y, w - 24, 16.5f, C::warnText, C::white);
@@ -1826,7 +1836,7 @@ std::wstring App::tooltip(int id) const {
     case ID_CELL0 + 2: return L"Read from the build's own data";
     case ID_CELL0 + 3: return b ? (b->firewall == L"OK" ? L"Every exe of the build is blocked from the internet" : b->firewall) : L"";
     }
-    if (id >= ID_BUILD0 && id - ID_BUILD0 < (int)st_.builds.size()) { const Build& x = st_.builds[id - ID_BUILD0]; return x.version + L" · " + season(x.major, x.minor); }
+    if (id >= ID_BUILD0 && id - ID_BUILD0 < (int)st_.builds.size()) { const Build& x = st_.builds[id - ID_BUILD0]; std::wstring v = verLabel(x); return v + (x.name != v ? L" (" + x.name + L")" : L"") + L" · " + season(x.major, x.minor); }
     return L"";
 }
 

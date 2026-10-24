@@ -134,12 +134,28 @@ struct Clip {
     HWND parent = nullptr, hwnd = nullptr;
     IMFMediaEngine* engine = nullptr;
     int radius = 0;
+    MFARGB border = {};
     LPARAM gen = 0;
     bool ready = false, visible = true;
     void apply() {
         bool show = ready && visible;
         if (show && engine) engine->Play(); else if (engine) engine->Pause();
         ShowWindow(hwnd, show ? SW_SHOWNA : SW_HIDE);
+    }
+    // object-fit: cover when it only trims a little (no bands above and below), else contain on the border color
+    void fit() {
+        IMFMediaEngineEx* ex = nullptr;
+        if (!engine || FAILED(engine->QueryInterface(__uuidof(IMFMediaEngineEx), (void**)&ex))) return;
+        RECT c; GetClientRect(hwnd, &c);
+        DWORD vw = 0, vh = 0;
+        MFVideoNormalizedRect src = { 0, 0, 1, 1 };
+        if (SUCCEEDED(engine->GetNativeVideoSize(&vw, &vh)) && vw && vh && c.right > 0 && c.bottom > 0) {
+            float k = ((float)c.right / c.bottom) / ((float)vw / vh);   // < 1: the clip is wider than the area
+            if (k < 1 && k >= .8f) { src.left = (1 - k) / 2; src.right = 1 - src.left; }
+            else if (k > 1 && 1 / k >= .8f) { src.top = (1 - 1 / k) / 2; src.bottom = 1 - src.top; }
+        }
+        ex->UpdateVideoStream(&src, nullptr, &border);
+        ex->Release();
     }
     void region() {
         // the preview's left corners are rounded: so is the clip
@@ -155,13 +171,14 @@ LRESULT CALLBACK clipProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(h, &ps); EndPaint(h, &ps); return 0; }
-    case WM_SIZE: g_clip.region(); return 0;
+    case WM_SIZE: g_clip.region(); if (g_clip.ready) g_clip.fit(); return 0;
     case WM_TIMER: if (!IsWindow(g_clip.parent)) DestroyWindow(h); return 0;   // the launcher's window is gone
     case WM_CLIP_VISIBLE: g_clip.visible = w != 0; g_clip.apply(); return 0;
     case WM_CLIP_EVENT:
         if (w == MF_MEDIA_ENGINE_EVENT_ERROR) { DestroyWindow(h); return 0; }   // the launcher sees the exit: image stays
         if (!g_clip.ready) {
             g_clip.ready = true;
+            g_clip.fit();
             g_clip.apply();
             PostMessageW(g_clip.parent, WM_APP_VIDEO, 1, g_clip.gen);
         }
@@ -180,6 +197,7 @@ int clipMain(int argc, wchar_t** argv) {
     int x = _wtoi(argv[3]), y = _wtoi(argv[4]), w = _wtoi(argv[5]), h = _wtoi(argv[6]);
     c.radius = _wtoi(argv[7]);
     uint32_t border = (uint32_t)wcstoul(argv[8], nullptr, 10);
+    c.border = { (BYTE)(border & 255), (BYTE)((border >> 8) & 255), (BYTE)((border >> 16) & 255), 255 };
     c.gen = (LPARAM)_wtoi64(argv[9]);
     std::wstring url = argv[10];
     if (!IsWindow(c.parent) || url.compare(0, 8, L"https://")) return 3;
@@ -213,12 +231,7 @@ int clipMain(int argc, wchar_t** argv) {
         c.engine->SetMuted(TRUE);
         c.engine->SetLoop(TRUE);
         c.engine->SetAutoPlay(TRUE);
-        IMFMediaEngineEx* ex = nullptr;
-        if (SUCCEEDED(c.engine->QueryInterface(__uuidof(IMFMediaEngineEx), (void**)&ex))) {
-            MFARGB b = { (BYTE)(border & 255), (BYTE)((border >> 8) & 255), (BYTE)((border >> 16) & 255), 255 };
-            ex->UpdateVideoStream(nullptr, nullptr, &b);
-            ex->Release();
-        }
+        c.fit();
         BSTR s = SysAllocString(url.c_str());
         ok = s && SUCCEEDED(c.engine->SetSource(s));
         SysFreeString(s);
