@@ -1,14 +1,14 @@
 # Build and publish Radarnite Launcher 3.x; nothing is released by hand (INSTALL.md). One trigger per job:
 #   push to main  -> release vX.Y.Z, made the latest release: every installed launcher updates to it
 #   pull request  -> CI: version and installer, nothing published (any base branch, feat/3.0 included)
-#   Run workflow  -> like a push: main publishes the release; another branch a prerelease vX.Y.Z-<branch>.N, never
-#                    the latest release (installed release builds only read releases/latest; prerelease builds offer it)
+#   Run workflow  -> like a push: main publishes the release; another branch only builds (no prereleases)
 # A push to any other branch runs nothing: its PR does.
 # tools/ci-version.sh picks the version (last stable tag + 1 patch, or VERSION when higher) and writes the notes.
-# Everything builds on ubuntu-latest: zig c++ for the core and the window, cargo zigbuild for the backend, makensis
-# for the installer; the payload comes from the pinned 2.2.1 installer (tools/payload-from-release.sh).
+# Everything builds on ubuntu-latest: zig c++ for the core and the window, makensis for the installer; the backend is
+# backend/server.mjs on the Node runtime, which comes with the rest of the payload from the pinned 2.2.1 installer
+# (tools/payload-from-release.sh).
 # CI only compiles and checks: the test suites are run by hand before a release (native/core/test/README.md,
-# tests/parity/README.md, `just backend-test`, `just release-selftest`).
+# `just release-selftest`).
 # Every action is pinned to a commit SHA (its tag in a comment). Third-party actions run only in the read-only jobs:
 # the one job that can write (publish) runs gh and GitHub's download-artifact alone.
 name: release
@@ -31,8 +31,6 @@ concurrency:
 
 env:
   ZIG_VERSION: 0.16.0
-  RUST_TOOLCHAIN: 1.94.0
-  CARGO_ZIGBUILD_VERSION: 0.23.4
   # release.sh bans the builder's account name as an identity and scrubs it out of the prebuilt payload. On a runner
   # that name is "runner", which is also part of type names in the .NET payload (RegexRunner) that the scrub would
   # rewrite, so release.sh sees this neutral name (absent from the payload) instead. HOME
@@ -79,27 +77,13 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-20)
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: x86_64-pc-windows-gnu
-      - name: Keep the runner's paths out of the backend (the remaps of backend-rs/justfile)
-        run: |
-          c="${CARGO_HOME:-$HOME/.cargo}"; r="${RUSTUP_HOME:-$HOME/.rustup}"
-          echo "RUSTFLAGS=--remap-path-prefix=$c/registry/src=/cargo --remap-path-prefix=$c/git=/cargo-git --remap-path-prefix=$r=/rustup --remap-path-prefix=$GITHUB_WORKSPACE/backend-rs=/backend-rs" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: backend-rs
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
-        with:
-          tool: cargo-zigbuild@${{ env.CARGO_ZIGBUILD_VERSION }}
       - name: makensis and 7z
         run: |
           pkgs=(nsis)
           command -v 7z >/dev/null || pkgs+=(p7zip-full)
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
-          echo "makensis $(makensis -VERSION), zig $(zig version), $(cargo zigbuild -V 2>/dev/null || cargo-zigbuild -V)"
+          echo "makensis $(makensis -VERSION), zig $(zig version)"
       - name: Core and window (zig c++, x86_64-windows-gnu)
         env:
           RN_VERSION: ${{ env.VERSION }}
@@ -107,13 +91,6 @@ jobs:
           native/core/build.sh out
           mkdir -p native/ui/out
           native/ui/build.sh out/RadarniteLauncher.exe
-      - name: Backend (cargo zigbuild, x86_64-pc-windows-gnu)
-        working-directory: backend-rs
-        run: |
-          cargo zigbuild --release --locked --target x86_64-pc-windows-gnu
-          size=$(stat -c %s target/x86_64-pc-windows-gnu/release/radarnite-backend.exe)
-          echo "radarnite-backend.exe: $size bytes"
-          [ "$size" -le 3145728 ] || { echo "::error::radarnite-backend.exe is over 3 MB"; exit 1; }
       - name: Payload from the pinned 2.2.1 installer
         run: tools/payload-from-release.sh "$RUNNER_TEMP/payload"
       - name: Payload sources built here (informational, nothing of it ships)
@@ -135,7 +112,6 @@ jobs:
           RN_PRIVACY_BAN: ${{ secrets.RN_PRIVACY_BAN }}
         run: >-
           tools/release.sh build --version "$VERSION" --launcher native/ui/out/RadarniteLauncher.exe
-          --backend backend-rs/target/x86_64-pc-windows-gnu/release/radarnite-backend.exe
           --payload "$RUNNER_TEMP/payload" --out dist --makensis "$(command -v makensis)"
       - name: Program folder zip (the installer's content; no .sha256 asset, the updaters take any)
         run: |

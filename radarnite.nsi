@@ -1,6 +1,6 @@
 ; Radarnite Launcher installer (NSIS 3, Unicode). Per-user: no administrator needed to install.
 ; Build (tools/release.sh does it): makensis -DVERSION=3.0.0-rc.1 -DVERSION_NUM=3.0.0 -DSRC=<staging> -DOUT=<setup.exe> radarnite.nsi
-;   <staging>/app      the launcher exactly as it is installed (RadarniteLauncher.exe, radarnite-backend.exe, redirect\,
+;   <staging>/app      the launcher exactly as it is installed (RadarniteLauncher.exe, node\, backend\, redirect\,
 ;                      gameserver\, patches\, tools\, THIRD-PARTY-NOTICES.txt, README-offline.md)
 ;   <staging>/radarnite.ico
 ; 3.x replaces a 2.x install in place: same folder, Start menu entry, registry keys, uninstall key and firewall group
@@ -208,7 +208,7 @@ Section "Radarnite Launcher" SecMain
   Call CheckRunning
   SetOutPath "$INSTDIR"
   ; Only over an existing Radarnite Launcher (2.x or 3.x): a folder picked by hand that holds other files is never
-  ; cleaned. Upgrading from 2.x: its .NET runtime, WebView2 page and profile, Node and server.mjs go. Wildcards catch
+  ; cleaned. Upgrading from 2.x: its .NET runtime, WebView2 page and profile go; Node and server.mjs are installed again. Wildcards catch
   ; the runtime files of other 2.x versions; 3.x has no dll in the program folder root (tools/release.sh enforces it).
   ; Program folders are fully replaced on every install (so a file removed between versions cannot linger); only
   ; config.json (name, account, settings), the logs and the builds, which live elsewhere, stay.
@@ -217,6 +217,7 @@ Section "Radarnite Launcher" SecMain
     Delete "$INSTDIR\*.dll"
     Delete "$INSTDIR\*.deps.json"
     Delete "$INSTDIR\*.runtimeconfig.json"
+    Delete "$INSTDIR\${BACKEND}"   ; 3.0 release candidates' backend: the Node one (node\, backend\) runs instead
     !insertmacro TolerantRMDir "$INSTDIR\tools"
     !insertmacro TolerantRMDir "$INSTDIR\gameserver"
     !insertmacro TolerantRMDir "$INSTDIR\redirect"

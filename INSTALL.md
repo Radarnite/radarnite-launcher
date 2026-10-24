@@ -32,12 +32,13 @@ branch runs nothing (one trigger per job).
 
 - Version: the last stable tag + 1 patch, or the committed `VERSION` file (X.Y.Z) when that is higher.
   `VERSION` is 3.0.0 while the last tag is v2.2.1; raise it for the next minor or major.
-- `main` -> release `vX.Y.Z`, the latest one: every installed launcher updates. "Run workflow" on another branch ->
-  prerelease `vX.Y.Z-<branch>.N` (`feat/3.0` -> `v3.0.0-feat-3-0.1`), never the latest: only prerelease builds offer it.
+- `main` -> release `vX.Y.Z`, the latest one: every installed launcher updates. "Run workflow" on another branch only
+  builds the installer; nothing but `main` is ever published (no prereleases).
 - A head commit whose message contains `[skip release]` is built but not published.
 - Assets: `RadarniteLauncherSetup-<version>.exe`, its `.sha256` (2.x format) and `RadarniteLauncher-<version>.zip` (the
   program folder: no uninstaller, registry keys, shortcuts or 2.x cleanup). Notes: the commits since the last tag.
-- The payload (tools, gameserver, redirect, patches, notices) comes from the v2.2.1 installer, pinned by sha256
+- The backend is `backend/server.mjs` from the checkout, run by Node. The payload (Node, tools, gameserver, redirect,
+  patches, notices) comes from the v2.2.1 installer, pinned by sha256
   (`tools/payload-from-release.sh` says why it is not built in CI). A new payload = pin there the installer of a
   release built with `just release`, which takes it from the PC's dev tree.
 - Optional repository secret `RN_PRIVACY_BAN`: more strings for the privacy gate to ban, one per line.
