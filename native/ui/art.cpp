@@ -58,7 +58,7 @@ const SeasonArt& seasonArt(int major, int minor) {
 namespace {
 
 Lock g_failLock;
-std::set<std::wstring> g_failed;   // per process: an offline PC does not wait on every selection or scenario
+std::set<std::wstring>& g_failed = *new std::set<std::wstring>;   // per process, never destroyed (a pool item may outlive exit): offline, no wait on every selection
 
 bool safeId(const std::wstring& s) {
     if (s.empty() || s.size() > 80) return false;
