@@ -164,7 +164,7 @@ App::App(Gfx& g, Core* core) : g_(g), core_(core) {
     edits_[0].id = ID_NAME; edits_[0].f = { Face::UI, 13, 600, false }; edits_[0].bg = FIELD;
     edits_[1].id = ID_BOTS; edits_[1].f = { Face::Display, 26, 900, true }; edits_[1].bg = FIELD; edits_[1].lazy = true;
     edits_[2].id = ID_SEARCH; edits_[2].f = { Face::UI, 12, 400, false };
-    edits_[3].id = ID_P_SEARCH; edits_[3].f = { Face::UI, 13, 400, false };
+    edits_[3].id = ID_P_SEARCH; edits_[3].f = { Face::UI, 13, 400, false }; edits_[3].bg = FIELD;   // the panel's search: a field on the season art, like the name
     float h = 0;
     std::wstring v = core_->uiPref(L"activityHeight");
     if (!v.empty() && (h = (float)_wtof(v.c_str())) >= 140) actH_ = h;
@@ -957,9 +957,9 @@ void App::drawStage(float top, float bottom) {
     const SeasonArt& sa = b ? seasonArt(b->major, b->minor) : seasonArt(0, 0);
     float W = W_, sh = bottom - top;
     ensureArt(sa.skin, (UINT)lroundf(sh * scale_));
-    BgKey k = { W, top, bottom, scale_, &sa, artGen_, rt_ };
+    BgKey k = { W, top, bottom, scale_, &sa, artGen_, rt_, pOpen_ };   // bare: the cosmetics panel shows the season without the skin
     bool same = bg_ && k.w == bgKey_.w && k.top == bgKey_.top && k.bottom == bgKey_.bottom && k.scale == bgKey_.scale && k.sa == bgKey_.sa &&
-                k.artGen == bgKey_.artGen && k.rt == bgKey_.rt;
+                k.artGen == bgKey_.artGen && k.rt == bgKey_.rt && k.bare == bgKey_.bare;
     if (!same) {
         release(bg_); release(bgRT_);
         D2D1_SIZE_U px = D2D1::SizeU((UINT32)ceilf(W * scale_ - 0.01f), (UINT32)ceilf(sh * scale_ - 0.01f));
@@ -997,7 +997,7 @@ void App::drawStage(float top, float bottom) {
             release(gk); release(pg);
             // img.art: height = the stage, bottom 16 % below it, translateX(-46%) from the middle; its drop shadow is in
             // the pixels
-            if (!artImg_.px.empty()) {
+            if (!artImg_.px.empty() && !k.bare) {
                 ID2D1Bitmap* bm = nullptr;
                 D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
                 if (SUCCEEDED(t->CreateBitmap(D2D1::SizeU(artImg_.w, artImg_.h), artImg_.px.data(), artImg_.w * 4, bp, &bm))) {
@@ -1119,6 +1119,15 @@ void App::drawTop(float y, float W) {
     if (b) {
         float bx = W - 24 - bw, cx = bx - 10 - cw;
         gbutton(cosId, cx, y + 6, 40, L"Cosmetics", Icon::Cos, compact);
+        if (cosId == ID_P_OPEN && !pOpen_) {
+            // cosmetics of the current game can be imported: a brighter ring and, once listed, how many are new
+            box(rc(cx, y + 6, cw, 40), 12, 0, 0, C::white, .42f);
+            std::wstring n = pNewAll_ > 0 && pBuild_ == selected_ ? (pNewAll_ > 9999 ? fmt(L"%dk", pNewAll_ / 1000) : thousands(pNewAll_)) : L"NEW";
+            Font nf{ Face::UI, 10.5f, 700, false, true };
+            float nw = std::max(20.f, textW(n, nf) + 12), nx = cx + cw - nw + 6, ny = y + 6 - 8;
+            fill(rc(nx, ny, nw, 20), C::white, 1, 10);
+            text(n, nf, nx, ny, nw, 20, INK, 1);
+        }
         if (menu_ == 3) menuAnchor_ = rc(cx, y + 6, cw, 40);
         gbutton(ID_BUILDMENU, bx, y + 6, 40, L"Build", Icon::More, compact);
         if (menu_ == 2) menuAnchor_ = rc(bx, y + 6, bw, 40);
@@ -1423,7 +1432,15 @@ float App::panelBody(float x, float y0, float w) {
             dot(cx + 12 + 3.5f, cy + 10 + 14 + 2 + 9, 7, cells[i].cls == 0 ? GREEN : clsColor(cells[i].cls));
             text(cells[i].v, Font{ Face::UI, 13, 700, false }, cx + 12 + 13, cy + 10 + 14 + 2, cw - 24 - 13, 18,
                  cells[i].cls == 0 ? C::white : cells[i].cls == 1 ? C::warnText : C::badText);
-            hit(ID_CELL0 + i, rc(cx, cy, cw, chh), 0, 0);   // tooltip only
+            if (i == 2 && b->port) {
+                D2D1_RECT_F cr = rc(cx, cy, cw, chh);
+                float hv = fx(K_HOVER | ID_P_CELL, hover_ == ID_P_CELL ? 1.f : 0.f, cr);
+                if (hv > 0) fill(cr, C::white, .06f * hv, 11);
+                Font af{ Face::UI, 11, 600, false };
+                float aw = textW(L"Import \u203A", af);
+                text(L"Import \u203A", af, cx + cw - 12 - aw, cy + 10, aw + 1, 14, C::white, 0, 0, .7f + .3f * hv);
+                hit(ID_P_CELL, cr, F_FOCUS | F_HAND, 11);
+            } else hit(ID_CELL0 + i, rc(cx, cy, cw, chh), 0, 0);   // tooltip only
         }
         y += 2 * chh + 8 + 11;
 

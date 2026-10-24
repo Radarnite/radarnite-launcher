@@ -116,6 +116,8 @@ const MockScenario kScenarios[] = {
     { L"33-port-preview", 1200, 800, 1.0f, false, 0, 0, 4 },
     { L"34-port-loading", 1200, 800, 1.0f, false, 0, 0, 1 },
     { L"35-port-importing-1920", 1920, 1040, 1.0f, false, 0, 0, 1 },
+    { L"36-port-catalog-2560x1380-125", 2048, 1104, 1.25f, false, 0, 0, 1 },
+    { L"37-port-catalog-1280x800", 1280, 800, 1.0f, false, 0, 0, 1 },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -392,7 +394,7 @@ private:
     std::shared_ptr<PortCatalog> cat_;
     std::shared_ptr<PortJob> job_;
     int jobSeq_ = 0;
-    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 35; }
+    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 37; }
 };
 
 } // namespace

@@ -89,7 +89,7 @@ private:
                      bool lazy = false, want = false;   // lazy: the EDIT only shows while it has the focus (drawn text otherwise)
                      uint32_t bg = C::bg2; };
     struct Thumb { std::wstring skin; ArtImage img; UINT req = 0; ID2D1Bitmap* bmp = nullptr; ID2D1BitmapBrush* brush = nullptr; };
-    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; };
+    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; bool bare; };
 
     void invalidate();
     void dirty(D2D1_RECT_F r);             // repaint only r (client DIPs)
@@ -308,6 +308,8 @@ private:
     int pSelN_ = 0;
     std::vector<int> pList_;                     // filtered + sorted catalog indices
     int pCntT_[16] = {}, pCntS_[4] = {}, pCntR_[32] = {}, pTodo_ = 0;
+    int pNewAll_ = -1;                           // items of the catalog not imported yet (-1 = not listed); the lobby's badge
+    bool glassChips_ = false;                    // chips drawn on the season art (the panel's bars): glass like the lobby
     int pPop_ = 0;                               // 0 none, 1 category, 2 filters, 3 sort
     D2D1_RECT_F pPopAnchor_{}, pGrid_{}, pBody_{}, pJobR_{}, pLoadR_{};
     std::vector<int> pPending_;                  // the dialog's items

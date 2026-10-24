@@ -39,7 +39,7 @@ D2D1_RECT_F grow(D2D1_RECT_F r, float d) { return r.right > r.left ? D2D1_RECT_F
 // the page's tokens for the panel (.port: --n-*)
 namespace N {
 const uint32_t ink = 0xF5F6F7, mut = 0xA1A1AA, line = 0x303238, surf = 0x202228, on = 0x111216, bg = 0x101114, panel = 0x181A1F,
-               dim = 0x71717A, l3 = 0x55585F, hov = 0x292C33, l2 = 0x3A3D44, l3b = 0x55575F, oncount = 0x5A5D66, l25b = 0x45484F,
+               dim = 0x71717A, hov = 0x292C33, l2 = 0x3A3D44, l3b = 0x55575F, oncount = 0x5A5D66, l25b = 0x45484F,
                surf2 = 0x24262C, accent = 0xE5E7EB;
 }
 
@@ -267,8 +267,10 @@ void App::portRebuild() {
     pList_.clear();
     memset(pCntT_, 0, sizeof pCntT_); memset(pCntS_, 0, sizeof pCntS_); memset(pCntR_, 0, sizeof pCntR_);
     pTodo_ = 0;
+    pNewAll_ = -1;
     if (!pCat_) return;
     const auto& items = pCat_->items;
+    if (!pCat_->partial && pCat_->error.empty()) { pNewAll_ = 0; for (auto& it : items) if (it.status == PortStatus::New) pNewAll_++; }
     if (pRi_.size() != items.size()) { pRi_.resize(items.size()); for (size_t i = 0; i < items.size(); i++) pRi_[i] = (int8_t)rarIndex(items[i].rarity); }
     // counts like the web: each group counted with the other filters applied
     for (size_t i = 0; i < items.size(); i++) {
@@ -331,8 +333,10 @@ float App::chip(int id, float x, float y, float h, const std::wstring& label, in
     float a0 = alpha_;
     if (disabled) alpha_ *= .4f;
     uint32_t bgc = on ? (hov ? 0xFFFFFF : N::accent) : N::surf, bc = on ? N::accent : mix(N::line, N::l2, hv);
-    if (on) box(r, 9, bgc, 1, bc); else box(r, 9, bgc, hv, bc);
-    uint32_t col = on ? N::on : mix(C::muted, C::text, hv);
+    if (on) box(r, 9, bgc, 1, bc);
+    else if (glassChips_) glass(r, 9, .62f + .2f * hv, .12f + .16f * hv);
+    else box(r, 9, bgc, hv, bc);
+    uint32_t col = on ? N::on : glassChips_ ? C::white : mix(C::muted, C::text, hv);
     float cx = x + 1 + 12;
     if (ic >= 0) { icon((Icon)ic, cx, y + (h - 13) / 2, 13, col, .85f); cx += 13 + 6; }
     text(label, f, cx, y, lw + 1, h, col);
@@ -340,7 +344,7 @@ float App::chip(int id, float x, float y, float h, const std::wstring& label, in
     if (!count.empty()) {
         cx += 6;
         if (pill) { fill(rc(cx, y + (h - 18) / 2, cw, 18), N::accent, 1, 9); text(count, cf, cx, y, cw, h, N::on, 1); }
-        else text(count, cf, cx, y, cw + 1, h, on ? N::l3b : C::dim);
+        else text(count, cf, cx, y, cw + 1, h, on ? N::l3b : glassChips_ ? C::muted : C::dim);
     }
     alpha_ = a0;
     hit(id, r, F_FOCUS | F_HAND | (disabled ? F_DISABLED : 0), 9);
@@ -371,17 +375,28 @@ void App::releasePortBrushes() { for (auto& b : rarBrushes_) { release(b.bg); re
 void App::drawPort(float x0, float y0, float W, float H) {
     if (pDirty_) portRebuild();
     const Build* b = sel();
-    fill({ x0, y0, x0 + W, y0 + H }, C::bg);
+    // the season (drawn bare under it) shows through at the top and darkens under the grid: one lobby, still readable
+    if (!measuring_) {
+        // from nothing behind the tabs to .32 at the title, .86 from ~360 DIPs under it
+        float L = 76 + std::max(360.f, std::min(H, 520.f));
+        const D2D1_GRADIENT_STOP ss[] = { { 0, rgb(C::bg, 0) }, { 76 / L, rgb(C::bg, .32f) }, { 256 / L, rgb(C::bg, .62f) }, { 436 / L, rgb(C::bg, .80f) }, { 1, rgb(C::bg, .86f) } };
+        ID2D1GradientStopCollection* gs = nullptr; ID2D1LinearGradientBrush* sb = nullptr;
+        if (SUCCEEDED(rt_->CreateGradientStopCollection(ss, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
+            SUCCEEDED(rt_->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, y0 - 76), D2D1::Point2F(0, y0 - 76 + L)), gs, &sb)))
+            rt_->FillRectangle({ x0, y0 - 76, x0 + W, y0 + H }, sb);
+        release(sb); release(gs);
+    }
     float px = 24, x = x0 + px, w = W - 2 * px;
+    glassChips_ = true;
     // ---- header: title, sub, Refresh, Close
     float y = y0 + 16;
-    float cw = button(ID_P_CLOSE, 0, 0, nullptr, Icon::X, true, true, true, true, true);
-    float rw = button(ID_P_REFRESH, 0, 0, L"Refresh", Icon::Refresh, true, false, false, true, true);
+    float cw = gbutton(ID_P_CLOSE, 0, 0, 36, L"Close", Icon::X, true, true);   // glass, like the lobby's top buttons
+    float rw = gbutton(ID_P_REFRESH, 0, 0, 36, L"Refresh", Icon::Refresh, false, true);
     float hh = 28 + 4 + 17.4f;
     text(L"CURRENT FORTNITE COSMETICS", Font{ Face::Display, 28, 900, true }, x, y, w - cw - rw - 24, 28, C::text, 0, -0.56f);
     if (b) text(L"Imported into Fortnite " + b->version + L" as new items · nothing of the build is replaced", Font{ Face::UI, 12, 400, false }, x, y + 32, w - cw - rw - 24, 17.4f, C::muted);
-    button(ID_P_REFRESH, x + w - cw - 12 - rw, y + (hh - 28) / 2, L"Refresh", Icon::Refresh, true, false, false);
-    button(ID_P_CLOSE, x + w - cw, y + (hh - 28) / 2, nullptr, Icon::X, true, true, true);
+    gbutton(ID_P_REFRESH, x + w - cw - 10 - rw, y + (hh - 36) / 2, 36, L"Refresh", Icon::Refresh, false);
+    gbutton(ID_P_CLOSE, x + w - cw, y + (hh - 36) / 2, 36, L"Close", Icon::X, true);
     y += hh + 20;
 
     // ---- the filter bar: category, Filters, Not imported, search, sort
@@ -406,14 +421,14 @@ void App::drawPort(float x0, float y0, float W, float H) {
         D2D1_RECT_F r = rc(sx, y, sw, bh);
         bool hov = hover_ == id;
         float hv = fx(K_HOVER | id, hov || open ? 1.f : 0.f, r, 150);
-        box(r, 9, open ? C::surface : mix(C::bg2, N::surf, hv), 1, open ? 0x44474F : mix(C::line, N::l2, hv));
-        icon(ic, sx + 1 + 12, y + (bh - 14) / 2, 14, C::text);
+        glass(r, 9, .62f + .2f * std::max(hv, open ? 1.f : 0.f), .12f + .16f * hv);
+        icon(ic, sx + 1 + 12, y + (bh - 14) / 2, 14, C::white);
         if (!label.empty()) text(label, sf, sx + 1 + 12 + 14 + 6, y, sw - 2 - 12 - 14 - 6 - 28, bh, C::text);
         // the ::after chevron: 5 px, border right/bottom, rotated 45 deg
         float cx = sx + sw - 1 - 9 - 2.5f, cy = y + bh / 2 - 1.5f;
         if (!measuring_) {
-            rt_->DrawLine(D2D1::Point2F(cx - 3, cy - 1.5f), D2D1::Point2F(cx, cy + 1.5f), br(C::dim), 1.5f);
-            rt_->DrawLine(D2D1::Point2F(cx, cy + 1.5f), D2D1::Point2F(cx + 3, cy - 1.5f), br(C::dim), 1.5f);
+            rt_->DrawLine(D2D1::Point2F(cx - 3, cy - 1.5f), D2D1::Point2F(cx, cy + 1.5f), br(C::muted), 1.5f);
+            rt_->DrawLine(D2D1::Point2F(cx, cy + 1.5f), D2D1::Point2F(cx + 3, cy - 1.5f), br(C::muted), 1.5f);
         }
         hit(id, r, F_FOCUS | F_HAND, 9);
     };
@@ -430,11 +445,11 @@ void App::drawPort(float x0, float y0, float W, float H) {
         bool foc = hwnd_ && GetFocus() == e.hwnd;
         D2D1_RECT_F r = rc(sx, y, searchW, bh);
         if (foc && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(r, 1.5f), 10.5f, 10.5f), br(0xE5E7EB, .08f), 3);
-        box(r, 9, C::bg2, 1, fxc(K_COLOR | ID_P_SEARCH, foc ? N::l3 : C::line, r, 150));
-        icon(Icon::PSearch, sx + 10, y + (bh - 14) / 2, 14, C::dim);
+        box(r, 9, 0x0B0E19, 1, C::white, fx(K_COLOR | ID_P_SEARCH, foc ? .34f : .12f, r, 150));   // FIELD: the EDIT paints the same
+        icon(Icon::PSearch, sx + 10, y + (bh - 14) / 2, 14, C::muted);
         D2D1_RECT_F inner = { sx + 32, y + 1, sx + searchW - 12, y + bh - 1 };
         if (!measuring_) { e.r = inner; e.clip = clip_; e.show = hwnd_ != nullptr; }
-        if (!e.show) text(pQ_.empty() ? L"Search name or ID (EID_…)" : pQ_, Font{ Face::UI, 13, 400, false }, inner.left, y, inner.right - inner.left, bh, pQ_.empty() ? C::dim : C::text);
+        if (!e.show) text(pQ_.empty() ? L"Search name or ID (EID_…)" : pQ_, Font{ Face::UI, 13, 400, false }, inner.left, y, inner.right - inner.left, bh, pQ_.empty() ? C::muted : C::text);
         hit(ID_P_SEARCH, r, F_FOCUS | F_EDIT, 9);
     }
     selBtn(ID_P_SORT, sortX, sortW, Icon::PSort, sortIconOnly ? L"" : L"Sort", pPop_ == 3);
@@ -502,8 +517,10 @@ void App::drawPort(float x0, float y0, float W, float H) {
         by += secH + 30;
         if (pLoading_) { float lh = drawPortLoad(x, by, gw, true); pLoadR_ = rc(x, by + oy_, gw, lh); by += lh + 26; }
         else pLoadR_ = {};
-        // the grid: repeat(auto-fill, minmax(168px, 1fr)), gap 30 px 10 px, cards 198:258
-        int cols = std::max(1, (int)floorf((gw + 10) / (168 + 10)));
+        // the grid: gap 30 px 10 px, cards 198:258 (radarnite.com: 6 of 198 at 1280). Cards grow with the window
+        // (190 DIPs at 1280 to 240 from ~2100) instead of making a dozen small columns; narrow windows keep 168.
+        float minW = gw < 2 * 190 + 10 ? 168.f : std::max(190.f, std::min(240.f, 190 + (gw - 1232) * .06f));
+        int cols = std::max(1, (int)floorf((gw + 10) / (minW + 10)));
         float cardW = (gw - (cols - 1) * 10) / cols, cardH = cardW * 258 / 198, pitch = cardH + 30;
         pGrid_ = rc(x, by + oy_, gw, 0);
         pSlot_.clear();
@@ -572,6 +589,7 @@ void App::drawPort(float x0, float y0, float W, float H) {
     clip_ = savedClip;
     if (fabsf(by - pTotal_) > 0.5f) { pTotal_ = by; invalidate(); }
     if (sb) drawScrollbar(ID_P_SB, x0 + W - 10, bodyTop, bodyH, pScroll_, pTotal_, bodyH);
+    glassChips_ = false;
 }
 
 void App::drawPortCard(int slot, int idx, D2D1_RECT_F r) {
@@ -627,12 +645,13 @@ void App::drawPortCard(int slot, int idx, D2D1_RECT_F r) {
     // .fsh: the bottom 58 % darkens towards the name
     if (rb && rb->shade && !measuring_) {
         float st = r.bottom - ch * .58f;
+        // one fill of the whole card: the brush is transparent above st (two overlapping fills drew a hard band there)
         rb->shade->SetStartPoint(D2D1::Point2F(0, r.bottom)); rb->shade->SetEndPoint(D2D1::Point2F(0, st)); rb->shade->SetOpacity(alpha_);
-        rt_->FillRoundedRectangle(D2D1::RoundedRect({ r.left, st, r.right, r.bottom }, 14, 14), rb->shade);
-        rt_->FillRectangle({ r.left, st, r.right, st + 14 }, rb->shade);
+        rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 14, 14), rb->shade);
     }
     // name (2 lines) and "Type · Series"
-    Font nf{ Face::Display, 14, 800, false }, mf{ Face::UI, 11.5f, 400, false };
+    // .name: 800 14px/1.15, upright (the display face only ships its 900 italic: Inter at 800)
+    Font nf{ Face::UI, 14, 800, false }, mf{ Face::UI, 11.5f, 400, false };
     std::wstring sub = kPT1[(int)it.type];
     std::wstring ser = !it.series.empty() ? it.series : cap(it.rarity);
     if (!ser.empty()) sub += L" · " + ser;
@@ -641,18 +660,19 @@ void App::drawPortCard(int slot, int idx, D2D1_RECT_F r) {
     float my = r.bottom - 12 - 15.525f;
     para(name, nf, r.left + 10, my - 3 - nh, cw - 20, 16.1f, 2, C::white);
     text(sub, mf, r.left + 10, my, cw - 20, 15.525f, C::white, 0, 0, .8f);
-    // badge (top left): Imported / In the build / Failed
+    // badge (top left), radarnite.com's "In the shop": a black pill skewed -12deg, a status dot, italic 900 white
     if (it.status != PortStatus::New) {
         const wchar_t* bt = it.status == PortStatus::Imported ? L"IMPORTED" : it.status == PortStatus::Build ? L"IN THE BUILD" : L"FAILED";
-        uint32_t bc = it.status == PortStatus::Imported ? C::ok : it.status == PortStatus::Failed ? C::bad : C::white;
-        Font bf{ Face::Display, 9.5f, 900, true };
-        float bw = textW(bt, bf, .095f) + 12, bh = 10.925f + 6, bx = r.left + 8, byy = r.top + 8;
+        uint32_t bc = it.status == PortStatus::Imported ? 0x3DFF6E : it.status == PortStatus::Failed ? C::bad : C::muted;
+        Font bf{ Face::Display, 10, 900, true };
+        float bh = 17, bw = 8 + 6 + 6 + textW(bt, bf, .1f) + 8, bx = r.left + 10, byy = r.top + 9;
         D2D1_MATRIX_3X2_F saved = base_;
         base_ = D2D1::Matrix3x2F::Skew(-12, 0, D2D1::Point2F(bx + bw / 2, byy + bh / 2)) * base_;
         rt_->SetTransform(base_);
-        fill(rc(bx, byy, bw, bh), 0x000000, 1, 6);
+        fill(rc(bx, byy, bw, bh), 0x000000, .92f, 6);
         base_ = saved; rt_->SetTransform(base_);
-        text(bt, bf, bx + 6, byy, bw, bh, bc, 0, .095f);
+        if (!measuring_) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bx + 8 + 3, byy + bh / 2), 3, 3), br(bc, alpha_));
+        text(bt, bf, bx + 8 + 6 + 6, byy, bw, bh, C::white, 0, .1f);
     }
     alpha_ = a0;
     hit(id, r, F_HAND, 14);
@@ -1227,6 +1247,7 @@ void App::drawPortPreview() {
 std::wstring App::portTip(int id) const {
     switch (id) {
     case ID_P_OPEN: return pOpen_ ? L"Close the cosmetics" : L"Import cosmetics of the current Fortnite";
+    case ID_P_CELL: return L"Read from the build's own data. Import more from the current Fortnite";
     case ID_P_REFRESH: return L"List again from the installed Fortnite";
     case ID_P_CLOSE: return L"Close (Esc)";
     case ID_P_NEW: return L"Only what is not imported yet";
@@ -1303,6 +1324,7 @@ void App::portActivate(int id) {
     }
     switch (id) {
     case ID_P_OPEN: portShow(!pOpen_); break;   // the lobby's Cosmetics button
+    case ID_P_CELL: portShow(true); break;      // the lobby's COSMETICS status cell
     case ID_P_CLOSE: portShow(false); break;
     case ID_P_REFRESH: case ID_P_RETRY: portLoad(true); break;
     case ID_P_CAT: case ID_P_FILTERS: case ID_P_SORT: {
