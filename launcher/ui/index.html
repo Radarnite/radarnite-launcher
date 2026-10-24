@@ -221,6 +221,55 @@ body.act-open .activity{display:flex}
 .sk{background:linear-gradient(90deg,var(--bg2) 25%,var(--surface) 50%,var(--bg2) 75%);background-size:800px 100%;animation:shimmer 1.4s infinite linear;border-radius:var(--r2)}
 @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
 
+/* ===== Cosmetics of the current Fortnite (import panel) ===== */
+.pcard{display:flex;align-items:center;gap:var(--s4);padding:var(--s4) var(--s5)}
+.pcard .t{font-weight:600;font-size:13px}.pcard .d{font-size:12px;color:var(--muted);margin-top:2px}
+.pcard .sp{flex:1}
+.port{position:absolute;inset:0;z-index:15;display:none;flex-direction:column;background:var(--bg2)}
+body.port-open .port{display:flex}
+.ws{position:relative}
+.port-h{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s6) var(--s3)}
+.port-h .ttl{font:italic 900 28px/1 var(--fh);letter-spacing:-.02em}
+.port-h .sub{font-size:12px;color:var(--muted)}
+.port-bar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:0 var(--s6) var(--s3)}
+.port-bar .search{width:220px;height:var(--h)}
+.types{display:flex;flex-wrap:wrap;gap:6px}
+.types button{height:var(--h-c);padding:0 10px;border-radius:999px;border:1px solid var(--line2);background:var(--surface);color:var(--ink2);font-size:12px;display:inline-flex;align-items:center;gap:6px}
+.types button.on{background:#fff;color:#101114;border-color:#fff}
+.types button .n{color:var(--dim);font-variant-numeric:tabular-nums}.types button.on .n{color:#52525B}
+.port-sum{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s6);border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);background:var(--bg);font-size:12px;color:var(--muted)}
+.port-sum b{color:var(--text);font-weight:600}
+.port-sum .sp{flex:1}
+.port-body{flex:1;overflow:auto;padding:var(--s4) var(--s6) var(--s6)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:var(--s2)}
+.tile{position:relative;display:flex;flex-direction:column;border:1px solid var(--line2);border-radius:var(--r2);background:var(--bg);padding:0;text-align:left;overflow:hidden;transition:border-color var(--t1)}
+.tile:hover{border-color:var(--l2)}
+.tile.on{border-color:#fff;box-shadow:0 0 0 1px #fff}
+.tile .img{aspect-ratio:1;background:var(--surface);display:grid;place-items:center;border-bottom:3px solid var(--rc,var(--line))}
+.tile .img img{width:100%;height:100%;object-fit:cover;display:block}
+.tile .img .ph{color:var(--dim);font-size:11px;padding:var(--s2);text-align:center;word-break:break-all}
+.tile .nm{padding:6px 8px 0;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .ty{padding:0 8px 7px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .st{position:absolute;top:6px;left:6px;height:20px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:600;display:inline-flex;align-items:center;gap:4px;background:rgba(16,17,20,.82);color:var(--ink2)}
+.tile .st.imported{color:var(--ok)}.tile .st.failed{color:var(--bad)}
+.tile .ck{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:6px;border:1.5px solid rgba(255,255,255,.6);background:rgba(16,17,20,.6);display:grid;place-items:center}
+.tile.on .ck{background:#fff;border-color:#fff;color:#101114}
+.tile.inbuild{opacity:.55}
+.more{display:flex;justify-content:center;margin-top:var(--s4)}
+.pjob{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s6);background:var(--surface);border-bottom:1px solid var(--line2);font-size:12.5px}
+.pjob .txt{flex:1;min-width:0}.pjob .a{font-weight:600}.pjob .b{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.prog{height:4px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:6px}.prog i{display:block;height:100%;background:var(--ok);transition:width var(--t2)}
+.modal{position:fixed;inset:0;z-index:40;display:none;place-items:center;background:rgba(0,0,0,.55)}
+.modal.open{display:grid}
+.dlg{width:min(480px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:var(--s5);box-shadow:0 20px 50px rgba(0,0,0,.6)}
+.dlg h3{margin:0 0 var(--s2);font-size:15px}
+.dlg p{margin:0 0 var(--s3);color:var(--ink2);font-size:12.5px}
+.dlg .nums{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line2);border-radius:var(--r2);background:var(--bg);margin:var(--s3) 0}
+.dlg .nums div{padding:var(--s3)}.dlg .nums div+div{border-left:1px solid var(--line2)}
+.dlg .nums b{display:block;font-size:17px;font-variant-numeric:tabular-nums}.dlg .nums span{font-size:11.5px;color:var(--muted)}
+.dlg .row{display:flex;justify-content:flex-end;gap:var(--s2);margin-top:var(--s4)}
+.btn.pri{background:#fff;color:#101114;border-color:#fff}.btn.pri:hover{background:#E4E4E7}
+
 /* ===== Responsive: narrow windows ===== */
 @media (max-width:1040px){.content{padding:var(--s5) var(--s6)}.hero .ver{font-size:48px}}
 .mhint{display:none}
@@ -321,10 +370,27 @@ body.act-open .activity{display:flex}
         <button class="act" id="actBtn" aria-expanded="false" aria-controls="activity"><svg class="i"><use href="#i-log"/></svg>Activity <span class="badge" id="badge">0</span></button>
         <button class="play" id="play"><svg class="i"><use href="#i-play"/></svg>Launch</button>
       </footer>
+
+      <section class="port" id="port" aria-label="Cosmetics of the current Fortnite">
+        <div class="port-h">
+          <div style="flex:1;min-width:0"><div class="ttl">Current Fortnite cosmetics</div><div class="sub" id="portSub"></div></div>
+          <button class="btn sm" data-cmd="portRefresh" title="List again from the installed Fortnite"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+          <button class="btn sm icon ghost" data-cmd="portClose" aria-label="Close" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button>
+        </div>
+        <div id="portJob"></div>
+        <div class="port-bar">
+          <input class="search" id="pq" placeholder="Search name, set or id" spellcheck="false" aria-label="Search cosmetics">
+          <div class="types" id="ptypes"></div>
+          <div class="fseg" id="pstat" style="margin-left:auto"><button data-ps="new" class="on">Not imported</button><button data-ps="imported">Imported</button><button data-ps="all">All</button></div>
+        </div>
+        <div class="port-sum" id="portSum"></div>
+        <div class="port-body" id="portBody"></div>
+      </section>
     </main>
   </div>
 </div>
 <div class="toasts" id="toasts"></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true"><div class="dlg" id="dlg"></div></div>
 
 <script>
 const $ = (s, r = document) => r.querySelector(s);
@@ -434,7 +500,10 @@ function renderContent() {
         <div class="field"><label class="lbl" for="name">Player name</label><input class="in" id="name" maxlength="24" spellcheck="false" value="${esc(c.displayName || '')}"><div class="help">Local account only, never an Epic account.</div></div>
         ${hasMatch ? botsCount : ''}
       </div>${hasMatch ? `<div class="toggles" style="margin-top:var(--s3)">${botToggles}</div>${botsNote}` : ''}</div>
-    </section>`;
+    </section>
+    ${b.port && b.lobby !== 'No' ? `<section class="card pcard"><svg class="i" style="width:20px;height:20px;color:var(--muted)"><use href="#i-cos"/></svg>
+      <div style="min-width:0"><div class="t">Cosmetics from the current Fortnite</div><div class="d">${P.job ? `Importing… ${P.job.done.toLocaleString('en')} of ${P.job.total.toLocaleString('en')} · ` : b.imported ? `${b.imported.toLocaleString('en')} imported · ` : ''}Outfits, emotes, back blings, pickaxes, gliders and more from the Fortnite installed on this PC, added as new items.</div></div>
+      <span class="sp"></span><button class="btn" data-cmd="portOpen"${busy() ? ' disabled' : ''}>Browse and import</button></section>` : ''}`;
   const r = $('#botsR');
   if (r) { r.oninput = () => { $('#bots').value = r.value; }; r.onchange = () => setConfig({ bots: +r.value }); }
 }
@@ -512,6 +581,72 @@ function toast(text, lvl) {
   $('#toasts').appendChild(t); setTimeout(() => t.remove(), 4500);
 }
 
+/* ---------- cosmetics of the current Fortnite (fn-port) ---------- */
+const PT = { outfit: 'Outfits', emote: 'Emotes', backpack: 'Back blings', pickaxe: 'Pickaxes', glider: 'Gliders', wrap: 'Wraps', loadingscreen: 'Loading screens', spray: 'Sprays', emoji: 'Emoticons' };
+const PT1 = { outfit: 'Outfit', emote: 'Emote', backpack: 'Back bling', pickaxe: 'Pickaxe', glider: 'Glider', wrap: 'Wrap', loadingscreen: 'Loading screen', spray: 'Spray', emoji: 'Emoticon' };
+// average pak size per item (MB) and seconds per item, measured on the first fn-port imports into 14.30 (24-oct-2026)
+const PMB = { outfit: 70, backpack: 7, pickaxe: 7, emote: 3.7, glider: 9, wrap: 2, loadingscreen: 2, spray: 1, emoji: .5 }, PSEC = 14;
+const RC = { common: '#8A8F98', uncommon: '#6CCB5F', rare: '#4FA3F0', epic: '#B05CF0', legendary: '#E8944A', mythic: '#E8C74A', marvel: '#E5464E', dc: '#4A6BE5', icon: '#3FC6D9', gaminglegends: '#7A5CF0', starwars: '#D9D9D9', dark: '#C04AE5', frozen: '#9ED8F0', lava: '#E8693A', shadow: '#8A8A8A', slurp: '#3AD9C6' };
+const P = { open: false, build: null, items: null, error: '', loading: false, type: 'all', st: 'new', q: '', sel: new Set(), shown: 240, job: null, slotsFree: 0 };
+function portOpen() { P.open = true; document.body.classList.add('port-open'); if (P.build !== S.selected || !P.items) portLoad(false); else renderPort(); }
+function portClose() { P.open = false; document.body.classList.remove('port-open'); }
+function portLoad(refresh) { P.build = S.selected; P.loading = true; P.error = ''; P.items = null; P.sel.clear(); renderPort(); send('portCatalog', { build: S.selected, refresh }); }
+function portFiltered(ignoreType) {
+  const q = P.q.trim().toLowerCase();
+  return (P.items || []).filter((it) => (ignoreType || P.type === 'all' || it.type === P.type)
+    && (P.st === 'all' || (P.st === 'imported' ? it.status === 'imported' : it.status === 'new' || it.status === 'failed'))
+    && (!q || (it.name || '').toLowerCase().includes(q) || (it.set || '').toLowerCase().includes(q) || it.id.toLowerCase().includes(q)));
+}
+const importable = (it) => it.status === 'new' || it.status === 'failed';
+function estimate(items) {
+  const mb = items.reduce((a, it) => a + (PMB[it.type] || 2), 0), h = items.length * PSEC / 3600;
+  return { gb: mb / 1024, h };
+}
+const fmtGB = (gb) => gb < 1 ? `${Math.max(1, Math.round(gb * 1024))} MB` : `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`;
+const fmtH = (h) => h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : `${h < 10 ? h.toFixed(1) : Math.round(h)} h`;
+function renderPort() {
+  if (!P.open) return;
+  const b = sel();
+  $('#portSub').textContent = b ? `Imported into Fortnite ${b.version} as new items · nothing of the build is replaced` : '';
+  const j = P.job;
+  $('#portJob').innerHTML = j ? `<div class="pjob"><span class="spin"></span><div class="txt"><div class="a">Importing into ${esc(j.build)} · ${j.done.toLocaleString('en')} of ${j.total.toLocaleString('en')}${j.failed ? ` · ${j.failed} not converted` : ''}</div>
+    <div class="b">${esc(j.line || 'Starting…')}</div><div class="prog"><i style="width:${j.total ? Math.round(100 * j.done / j.total) : 0}%"></i></div></div>
+    <button class="btn sm" data-cmd="portStop">Stop</button></div>` : '';
+  const body = $('#portBody'), sum = $('#portSum');
+  if (P.loading) { $('#ptypes').innerHTML = ''; sum.innerHTML = 'Reading the cosmetics of the installed Fortnite…'; body.innerHTML = `<div class="tiles">${Array.from({ length: 24 }, () => '<div class="sk" style="aspect-ratio:.78"></div>').join('')}</div>`; return; }
+  if (P.error) { $('#ptypes').innerHTML = ''; sum.innerHTML = ''; body.innerHTML = `<div class="notice warn"><svg class="i"><use href="#i-warn"/></svg><div><b>The cosmetics of the current Fortnite cannot be listed.</b> ${esc(P.error)}.</div></div>`; return; }
+  const base = portFiltered(true), counts = {};
+  base.forEach((it) => { counts[it.type] = (counts[it.type] || 0) + 1; });
+  $('#ptypes').innerHTML = [['all', 'All', base.length]].concat(Object.keys(PT).map((k) => [k, PT[k], counts[k] || 0]))
+    .map(([k, l, n]) => `<button data-pt="${k}" class="${P.type === k ? 'on' : ''}">${l} <span class="n">${n.toLocaleString('en')}</span></button>`).join('');
+  document.querySelectorAll('#pstat button').forEach((x) => x.classList.toggle('on', x.dataset.ps === P.st));
+  const list = portFiltered(false), todo = list.filter(importable), selN = P.sel.size;
+  const imported = (P.items || []).filter((it) => it.status === 'imported').length;
+  sum.innerHTML = `<span><b>${list.length.toLocaleString('en')}</b> shown · ${imported.toLocaleString('en')} imported · ${(P.items || []).filter((it) => it.status === 'build').length.toLocaleString('en')} already in the build</span><span class="sp"></span>
+    ${selN ? `<button class="btn sm ghost" data-cmd="portClear">Clear</button>` : ''}
+    <button class="btn sm" data-cmd="portImportSel"${!selN || j ? ' disabled' : ''}>Import selected${selN ? ` (${selN})` : ''}</button>
+    ${todo.length ? `<button class="btn sm pri" data-cmd="portImportAll"${j ? ' disabled' : ''}>Import all ${todo.length.toLocaleString('en')}…</button>` : ''}`;
+  if (!list.length) { body.innerHTML = `<div class="empty">${P.st === 'imported' ? 'Nothing imported yet.' : 'Nothing matches.'}</div>`; return; }
+  body.innerHTML = `<div class="tiles">${list.slice(0, P.shown).map((it) => {
+    const can = importable(it), on = P.sel.has(it.path);
+    const st = it.status === 'imported' ? '<span class="st imported"><svg class="i" style="width:11px;height:11px"><use href="#i-check"/></svg>Imported</span>' : it.status === 'failed' ? '<span class="st failed">Failed</span>' : '';
+    return `<button class="tile${on ? ' on' : ''}${it.status === 'build' ? ' inbuild' : ''}" data-pi="${esc(it.path)}" ${can ? '' : 'aria-disabled="true"'} title="${esc((it.name || it.id) + ' · ' + (PT1[it.type] || it.type) + (it.set ? ' · ' + it.set : '') + '\n' + it.id)}" style="--rc:${RC[(it.rarity || '').toLowerCase()] || 'var(--line)'}">
+      <div class="img">${it.icon ? `<img loading="lazy" alt="" src="${esc(it.icon)}">` : `<span class="ph">${esc(it.id)}</span>`}</div>
+      ${st}${can ? `<span class="ck">${on ? '<svg class="i" style="width:12px;height:12px"><use href="#i-check"/></svg>' : ''}</span>` : ''}
+      <span class="nm">${esc(it.name || it.id)}</span><span class="ty">${PT1[it.type] || it.type}</span></button>`; }).join('')}</div>
+    ${list.length > P.shown ? `<div class="more"><button class="btn" data-cmd="portMore">Show more (${(list.length - P.shown).toLocaleString('en')} left)</button></div>` : ''}`;
+}
+function portConfirm(items, all) {
+  const e = estimate(items), b = sel(), over = items.length > P.slotsFree;
+  $('#dlg').innerHTML = `<h3>Import ${items.length.toLocaleString('en')} cosmetic${items.length === 1 ? '' : 's'} into ${esc(b?.version || '')}?</h3>
+    <p>${all ? 'Every cosmetic shown that is not imported yet.' : 'The cosmetics you picked.'} They are converted from the Fortnite installed on this PC and added as new items. It runs in the background at low priority; you can stop it and import again later to continue.</p>
+    <div class="nums"><div><b>${items.length.toLocaleString('en')}</b><span>items</span></div><div><b>~${fmtGB(e.gb)}</b><span>disk (estimate)</span></div><div><b>~${fmtH(e.h)}</b><span>time (estimate)</span></div></div>
+    ${over ? `<div class="mnote warn"><svg class="i"><use href="#i-warn"/></svg><span><b>Only ${P.slotsFree.toLocaleString('en')} more items fit in this build</b> (one pak slot each). The import stops when they run out.</span></div>` : ''}
+    <div class="row"><button class="btn ghost" data-cmd="dlgCancel">Cancel</button><button class="btn pri" data-cmd="dlgImport">Import</button></div>`;
+  P.pending = items.map((it) => it.path);
+  $('#modal').classList.add('open'); $('#dlg .btn.pri').focus();
+}
+
 /* ---------- state ---------- */
 // Each part renders on its own: a bug in one never blanks the others; script errors go to Activity and to
 // launcher\ui-error.log through the host.
@@ -533,10 +668,26 @@ document.addEventListener('click', (e) => {
     const cmd = c.dataset.cmd;
     if (cmd === 'copyLog') { navigator.clipboard?.writeText(S.logs.map((l) => `${l.ts} ${l.text}`).join('\n')); toast('Activity copied', 'info'); return; }
     if (cmd === 'clearLog') { S.logs = []; renderLogs(); return; }
+    if (cmd === 'portOpen') return portOpen();
+    if (cmd === 'portClose') return portClose();
+    if (cmd === 'portRefresh') return portLoad(true);
+    if (cmd === 'portMore') { P.shown += 480; return renderPort(); }
+    if (cmd === 'portClear') { P.sel.clear(); return renderPort(); }
+    if (cmd === 'portStop') return send('portCancel');
+    if (cmd === 'portImportSel') return portConfirm((P.items || []).filter((it) => P.sel.has(it.path)), false);
+    if (cmd === 'portImportAll') return portConfirm(portFiltered(false).filter(importable), true);
+    if (cmd === 'dlgCancel') { $('#modal').classList.remove('open'); return; }
+    if (cmd === 'dlgImport') { $('#modal').classList.remove('open'); P.sel.clear(); send('portImport', { build: P.build, paths: P.pending || [] }); return; }
     return send(cmd, { build: S.selected });
   }
+  const pi = e.target.closest('[data-pi]');
+  if (pi) { if (pi.getAttribute('aria-disabled') !== 'true') { const k = pi.dataset.pi; P.sel.has(k) ? P.sel.delete(k) : P.sel.add(k); renderPort(); } return; }
+  const pt = e.target.closest('[data-pt]');
+  if (pt) { P.type = pt.dataset.pt; P.shown = 240; return renderPort(); }
+  const ps = e.target.closest('[data-ps]');
+  if (ps) { P.st = ps.dataset.ps; P.shown = 240; return renderPort(); }
   const bi = e.target.closest('[data-build]');
-  if (bi && !busy()) { S.selected = bi.dataset.build; try { localStorage.setItem('lastBuild', S.selected); } catch {} send('select', { build: S.selected }); render(); greet(); return; }
+  if (bi && !busy()) { if (P.open && bi.dataset.build !== P.build) portClose(); S.selected = bi.dataset.build; try { localStorage.setItem('lastBuild', S.selected); } catch {} send('select', { build: S.selected }); render(); greet(); return; }
   const m = e.target.closest('[data-mode]');
   if (m && m.getAttribute('aria-disabled') !== 'true') return setConfig({ mode: m.dataset.mode });
   const f = e.target.closest('[data-flag]');
@@ -551,7 +702,7 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'bots') setConfig({ bots: Math.max(0, Math.min(99, parseInt(e.target.value) || 0)) });
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') document.querySelectorAll('.menu.open').forEach((m) => m.classList.remove('open'));
+  if (e.key === 'Escape') { if ($('#modal').classList.contains('open')) $('#modal').classList.remove('open'); else if (P.open && !document.querySelector('.menu.open')) portClose(); document.querySelectorAll('.menu.open').forEach((m) => m.classList.remove('open')); }
   if (e.key === 'Enter' && e.ctrlKey && !$('#play').disabled) $('#play').click();
   if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); toggleActivity(); }
   if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.target.closest('#list') && S.builds?.length && !busy()) {
@@ -561,6 +712,7 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keydown', (e) => { if (e.altKey && e.code === 'Space') { e.preventDefault(); send('win', { op: 'sysmenu' }); } });
 $('#q').oninput = (e) => { S.q = e.target.value; renderLogs(); };
+$('#pq').oninput = (e) => { P.q = e.target.value; P.shown = 240; renderPort(); };
 $('#actBtn').onclick = () => toggleActivity();
 $('#play').onclick = () => { if (S.session.state === 'launching' || S.session.state === 'running') send('stop'); else if (S.selected) send('launch', { build: S.selected }); };
 // activity height: drag the top edge; remembered per viewer
@@ -589,6 +741,15 @@ function onMessage(m) {
   } else if (m.type === 'log') addLog(m.text, m.level, m.ts);
   else if (m.type === 'window') { document.body.classList.toggle('max', !!m.maximized); document.body.classList.toggle('inactive', m.active === false); }
   else if (m.type === 'toast') toast(m.text, m.level || 'info');
+  else if (m.type === 'portCatalog') {
+    const c = m.catalog || {};
+    if (c.build !== P.build) return;
+    P.loading = false; P.error = c.error || ''; P.items = c.items || null; P.slotsFree = c.slotsFree ?? 0; renderPort();
+  } else if (m.type === 'portJob') {
+    const was = P.job; P.job = m.job;
+    if (was && !m.job && P.open) portLoad(false); else renderPort();
+    if (!P.open) safe('build', renderContent);
+  }
 }
 window.chrome?.webview?.addEventListener('message', (e) => onMessage(e.data));
 window.__fnoffline = onMessage; // used by the static preview tests

@@ -62,7 +62,11 @@ sealed class WebHost : Form
             var wa = Screen.FromControl(this).WorkingArea;
             Size = new Size(Math.Min((int)(1180 * s), wa.Width - 40), Math.Min((int)(740 * s), wa.Height - 40));
             if (StartPosition == FormStartPosition.CenterScreen) Location = new Point(wa.Left + (wa.Width - Width) / 2, wa.Top + (wa.Height - Height) / 2);
-            if (SelfTestPng != null) { var t = new System.Windows.Forms.Timer { Interval = 90000 }; t.Tick += (_, _) => Close(); t.Start(); }
+            if (SelfTestPng != null)
+            {
+                int.TryParse(Environment.GetEnvironmentVariable("RADARNITE_SELFTEST_WAIT_MS"), out var w);
+                var t = new System.Windows.Forms.Timer { Interval = 90000 + Math.Max(0, w) }; t.Tick += (_, _) => Close(); t.Start();
+            }
             try { await InitAsync(); }
             catch (Exception e)
             {
@@ -82,6 +86,17 @@ sealed class WebHost : Form
             if (_session is { Running: true } && SelfTestPng == null &&
                 MessageBox.Show(this, "Fortnite is running. Closing Radarnite Launcher stops the game and the local servers.", "Radarnite Launcher",
                     MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { e.Cancel = true; return; }
+            if (_port is { } job)
+            {
+                // a cosmetics import: stop it after the batch being installed, then close (it resumes next time)
+                e.Cancel = true;
+                if (_closing) return;
+                if (SelfTestPng == null && MessageBox.Show(this, "Cosmetics are being imported. Closing stops the import (importing again continues where it stopped).", "Radarnite Launcher",
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+                _closing = true;
+                _ = job.CancelAndWaitAsync(120_000).ContinueWith(_ => { try { BeginInvoke(() => { _port = null; Close(); }); } catch { } });
+                return;
+            }
             if (_session != null) { _session.Stop(); Session.StopAll(_ => { }); }
         };
     }
@@ -339,6 +354,10 @@ sealed class WebHost : Form
         if (b != null) try { File.AppendAllText(Path.Combine(Paths.Offline(b.Dir), "launcher.log"), $"{DateTime.Now:O} {s}\r\n"); } catch { }
     }
 
+    bool _closing;          // closing once the running import has stopped
+    Porter.Job? _port; // a running cosmetics import (Porter): one at a time, never while a game runs
+    void PostPort() => Post(new { type = "portJob", job = _port == null ? null : new { build = _port.Build, total = _port.Total, done = _port.Done, ok = _port.Ok, failed = _port.Failed, line = _port.Line } });
+
     BuildInfo? _sessionBuild;
     (string phase, string detail) _match = ("", "");
     object SessionDto() => new { state = _state, version = _sessionVersion, message = _failure, stages = _stages, match = new { phase = _match.phase, detail = _match.detail } };
@@ -366,7 +385,8 @@ sealed class WebHost : Form
                 try { lob = b.Lobby; mat = b.Match; } catch (Exception e) { lob = (Support.No, e.Message); }
                 return new { name = b.Name, dir = b.Dir, version = b.Version, major = b.Major, minor = b.Minor, cl = b.Cl, engine = b.Engine,
                     lobby = lob.s.ToString(), lobbyWhy = lob.why, match = mat.s.ToString(), matchWhy = mat.why,
-                    matchServer = File.Exists(Paths.GameServerDll), cosmetics = cos, firewall = fw };
+                    matchServer = File.Exists(Paths.GameServerDll), cosmetics = cos, firewall = fw,
+                    port = Porter.Supports(b), imported = Porter.Supports(b) ? Porter.Imported(b).Count : 0 };
             }).ToList();
             Post(new { type = "state", builds, selected = _selected, root = Paths.Root, session = SessionDto(),
                 config = new { displayName = c.DisplayName, mode = c.Mode, bots = c.Bots, botsAI = c.BotsAI, infiniteMaterials = c.InfiniteMaterials, infiniteAmmo = c.InfiniteAmmo, lateGame = c.LateGame } });
@@ -431,7 +451,43 @@ sealed class WebHost : Form
                 c.Save();
                 break;
             }
-            case "launch": if (Sel(m) is { } lb) await LaunchAsync(lb); break;
+            case "launch":
+                if (_port != null) { Log("Wait for the cosmetics import to finish (or stop it) before launching.", "warn"); break; }
+                if (Sel(m) is { } lb) await LaunchAsync(lb);
+                break;
+            case "portCatalog":
+                if (Sel(m) is { } pb)
+                {
+                    var refresh = m["refresh"]?.GetValue<bool>() == true;
+                    JsonObject cat;
+                    try { cat = await Task.Run(() => Porter.CatalogAsync(pb, refresh, s => Log(s))); }
+                    catch (Exception e) { cat = new JsonObject { ["error"] = e.Message }; }
+                    cat["build"] = pb.Name;
+                    Post(new { type = "portCatalog", catalog = cat });
+                    PostPort();
+                }
+                break;
+            case "portImport":
+                if (Sel(m) is { } ib)
+                {
+                    if (_port != null) { Log("A cosmetics import is already running.", "warn"); break; }
+                    if (_state is "launching" or "running" or "stopping") { Log("Stop the game before importing cosmetics.", "warn"); break; }
+                    var paths = m["paths"]?.AsArray().Select(x => x!.GetValue<string>()).ToList() ?? new();
+                    if (paths.Count == 0) break;
+                    _port = new Porter.Job();
+                    PostPort();
+                    var last = DateTime.MinValue;
+                    var ok = await Task.Run(() => Porter.ImportAsync(ib, paths, _port, s => Log(s), () =>
+                    {
+                        if ((DateTime.Now - last).TotalMilliseconds < 400) return;
+                        last = DateTime.Now; PostPort();
+                    }));
+                    var done = _port; _port = null;
+                    Post(new { type = "toast", text = done.Cancelled ? $"Import stopped: {done.Ok} imported" : ok ? $"{done.Ok} cosmetics imported into {ib.Version}" : "The import failed (see Activity)", level = ok ? "ok" : done.Cancelled ? "info" : "bad" });
+                    PostPort(); PushState();
+                }
+                break;
+            case "portCancel": _port?.Cancel(); break;
             case "stop":
                 _state = "stopping"; PostSession();
                 await Task.Run(() => { _session?.Stop(); Session.StopAll(s => Log(s)); });
@@ -576,6 +632,8 @@ sealed class WebHost : Form
     {
         await Task.Delay(2000);
         if (SelfTestScript != null) { await _web.CoreWebView2.ExecuteScriptAsync(SelfTestScript); await Task.Delay(800); }
+        // a script that starts host work (listing or importing cosmetics) needs time before the capture
+        if (int.TryParse(Environment.GetEnvironmentVariable("RADARNITE_SELFTEST_WAIT_MS"), out var waitMs)) await Task.Delay(waitMs);
         using (var fs = File.Create(SelfTestPng!)) await _web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, fs);
         // window-frame facts, measured on the real window
         var report = new JsonObject
