@@ -115,8 +115,9 @@ release version="3.0.0-rc.1":
 
 # Test build for the owner's installed launcher (test channel, native/core/update.h): `just publish-test 3.0.0-t120.2`
 # builds the installer with `release` and publishes it to the feed (tools/test-feed.py; folder, address and port in
-# ~/.config/rn-test-feed.env, served by the rn-test-feed user service). Launchers with the channel on install it by
-# themselves within 2 minutes, never during a game. The version must sort after the feed's current one.
+# ~/.config/rn-test-feed.env, served by the rn-test-feed user service). Launchers with the channel on poll it every
+# 2 minutes and install it by themselves within a few minutes, never during a game. The version must sort after the
+# feed's current one (so a 3.0.0-t106.y is refused once the feed has a t120.x).
 publish-test version notes="":
     #!/usr/bin/env bash
     set -euo pipefail

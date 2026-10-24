@@ -351,27 +351,16 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     void runUpdate(bool manual, bool periodic = false) {
         bool expected = false;
         if (!updating.compare_exchange_strong(expected, true)) return;   // one check / install at a time
-        bool canInstall;
-        {
-            std::lock_guard<std::mutex> g(m);
-            canInstall = !(session && session->running()) && state == L"idle" && !portJob;
-        }
-        if (busy > 0) canInstall = false;   // a build being added, cosmetics being generated
-        if (canInstall) {
-            for (auto& p : proc::list())
-                if (ieq(p.exe, L"FortniteClient-Win64-Shipping.exe")) { canInstall = false; break; }   // any game, ours or not
-        }
-        HWND h = proc::mainWindow();
-        DWORD fgPid = 0;
-        if (HWND fg = GetForegroundWindow()) GetWindowThreadProcessId(fg, &fgPid);
-        bool foreground = fgPid == GetCurrentProcessId();   // the window or one of its dialogs
+        bool foreground = false;
+        bool canInstall = installAllowed(&foreground);
         if (periodic && foreground) {
             LASTINPUTINFO li = { sizeof li };
             if (GetLastInputInfo(&li) && GetTickCount() - li.dwTime < 2 * 60 * 1000) { updating = false; return; }
         }
         std::weak_ptr<Ctx> w = shared_from_this();
-        if (update::runInteractive(h, manual, canInstall, [w](const std::wstring& t, Level l) { if (auto c = w.lock()) c->toast(t, l); },
-                                   periodic, foreground)) {
+        auto recheck = [w](bool* fg) { auto c = w.lock(); return c && c->installAllowed(fg); };
+        if (update::runInteractive(proc::mainWindow(), manual, canInstall, [w](const std::wstring& t, Level l) { if (auto c = w.lock()) c->toast(t, l); },
+                                   periodic, recheck)) {
             std::shared_ptr<PlaySession> s;
             { std::lock_guard<std::mutex> g(m); s = session; }
             if (s) { s->stop(); stopAll([](const std::wstring&) {}); }
@@ -379,6 +368,22 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
             return;   // stays "updating": the window is closing
         }
         updating = false;
+    }
+
+    // Nothing an install would cut: no game (ours or not), no session, no import, no long job. *foreground = the
+    // window (or one of its dialogs) is the active one.
+    bool installAllowed(bool* foreground) {
+        DWORD fgPid = 0;
+        if (HWND fg = GetForegroundWindow()) GetWindowThreadProcessId(fg, &fgPid);
+        *foreground = fgPid == GetCurrentProcessId();
+        {
+            std::lock_guard<std::mutex> g(m);
+            if ((session && session->running()) || state != L"idle" || portJob) return false;
+        }
+        if (busy > 0) return false;   // a build being added, cosmetics being generated
+        for (auto& p : proc::list())
+            if (ieq(p.exe, L"FortniteClient-Win64-Shipping.exe")) return false;
+        return true;
     }
 
     // The test channel: the feed polled every 2 minutes while the window is open (update.h); off = no thread.

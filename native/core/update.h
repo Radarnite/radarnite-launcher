@@ -54,16 +54,18 @@ std::wstring takeInstalledTest();
 // The digest in a .sha256 asset: the first white-space separated token that starts with 64 hex digits, lower-cased
 // ("" = none).
 std::wstring sha256Token(const std::wstring& text);
-// Download, verify, start the installer (with args, e.g. "/S /RELAUNCH=bg"). true = it was started (the launcher must
-// exit so NSIS can replace it).
-bool downloadVerifyRun(const Release& r, const std::wstring& args = L"");
+// Download, verify, start the installer (with args, e.g. "/S /RELAUNCH=bg"). ready, when given, runs once the file is
+// verified and may change args; false = not now (the installer is not started). true = it was started (the launcher
+// must exit so NSIS can replace it).
+bool downloadVerifyRun(const Release& r, const std::wstring& args = L"", const std::function<bool(std::wstring* args)>& ready = nullptr);
 
 // The whole window flow (Updater.RunInteractiveAsync): check, ask (MessageBox owned by owner), download, run.
 // true = an install was started, the caller exits. canInstall = false while a game runs (only announced).
-// testOnly (the test channel's periodic check): only the test feed is read; GitHub is asked at each start. foreground = the launcher's window is the active one (the relaunch after a test install takes the focus back
-// only then).
+// testOnly (the test channel's periodic check): only the test feed is read; GitHub is asked at each start.
+// recheck: asked again once a test build is downloaded and verified (a game may have started meanwhile); false = not
+// now; *foreground = the launcher's window is the active one (the relaunch takes the focus back only then).
 bool runInteractive(HWND owner, bool manual, bool canInstall, const std::function<void(const std::wstring&, Level)>& toast,
-                    bool testOnly = false, bool foreground = true);
+                    bool testOnly = false, const std::function<bool(bool* foreground)>& recheck = nullptr);
 
 } // namespace update
 } // namespace rn

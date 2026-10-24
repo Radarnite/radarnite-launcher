@@ -375,7 +375,8 @@ std::wstring takeInstalledTest() {
     return v;
 }
 
-bool downloadVerifyRun(const Release& r, const std::wstring& args) {
+bool downloadVerifyRun(const Release& r, const std::wstring& argsIn, const std::function<bool(std::wstring*)>& ready) {
+    std::wstring args = argsIn;
     wchar_t tmp[MAX_PATH + 1];
     DWORD n = GetTempPathW(MAX_PATH + 1, tmp);
     std::wstring dst = join(std::wstring(tmp, n), L"RadarniteLauncherSetup-" + r.version.str() + L".exe");
@@ -399,6 +400,7 @@ bool downloadVerifyRun(const Release& r, const std::wstring& args) {
         DeleteFileW(dst.c_str());
         return false;
     }
+    if (ready && !ready(&args)) { log(L"sha256 ok (" + got + L"); not installing now (busy), next check retries"); DeleteFileW(dst.c_str()); return false; }
     log(L"sha256 ok (" + got + L"); starting installer");
     SHELLEXECUTEINFOW se = { sizeof se };
     se.fMask = SEE_MASK_NOASYNC;
@@ -411,7 +413,7 @@ bool downloadVerifyRun(const Release& r, const std::wstring& args) {
 }
 
 bool runInteractive(HWND owner, bool manual, bool canInstall, const std::function<void(const std::wstring&, Level)>& toast,
-                    bool testOnly, bool foreground) {
+                    bool testOnly, const std::function<bool(bool*)>& recheck) {
     if (manual) toast(L"Checking for updates…", Level::Info);
     Release r = check(testOnly);   // the periodic check reads the feed alone (GitHub's API is asked at each start)
     if (!r.found) {
@@ -419,8 +421,8 @@ bool runInteractive(HWND owner, bool manual, bool canInstall, const std::functio
         return false;
     }
     if (r.test) {
-        // the test channel: no question, no window of the installer; a game is never interrupted (the next check runs
-        // after it closes)
+        // the test channel: no question, no window of the installer; a game is never interrupted (asked again once the
+        // download is verified; the next check retries)
         static std::wstring announced;
         if (!canInstall) {
             if (manual || announced != r.version.str())
@@ -428,11 +430,20 @@ bool runInteractive(HWND owner, bool manual, bool canInstall, const std::functio
             announced = r.version.str();
             return false;
         }
-        toast(L"Installing test build " + r.version.str() + L"… the launcher reopens in a moment.", Level::Info);
-        if (!setRegString(L"TestInstalling", r.version.str())) log(L"could not note the test build being installed");
-        if (downloadVerifyRun(r, foreground ? L"/S /RELAUNCH=fg" : L"/S /RELAUNCH=bg")) return true;
+        toast(L"Downloading test build " + r.version.str() + L"…", Level::Info);
+        bool deferred = false;
+        auto ready = [&](std::wstring* args) {
+            bool fg = true;
+            if (recheck && !recheck(&fg)) { deferred = true; return false; }
+            *args = fg ? L"/S /RELAUNCH=fg" : L"/S /RELAUNCH=bg";
+            if (!setRegString(L"TestInstalling", r.version.str())) log(L"could not note the test build being installed");
+            toast(L"Installing test build " + r.version.str() + L"… the launcher reopens in a moment.", Level::Info);
+            Sleep(1500);   // long enough to read
+            return true;
+        };
+        if (downloadVerifyRun(r, L"/S", ready)) return true;
         setRegString(L"TestInstalling", L"");
-        toast(L"Test build update failed (see launcher\\update.log).", Level::Bad);
+        if (!deferred) toast(L"Test build update failed (see launcher\\update.log).", Level::Bad);
         return false;
     }
     if (!canInstall) {
