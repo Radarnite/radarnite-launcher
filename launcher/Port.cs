@@ -353,14 +353,14 @@ public static class Porter
     static async Task TailBatchAsync(Job job, Action progress, CancellationToken ct)
     {
         var dir = Path.Combine(Work, "batch");
-        string batchKey = "", partial = "";
+        string batchKey = "", partial = "", lastErr = "";
         long pos = 0;
         var cpu = new CpuMeter();
         while (!ct.IsCancellationRequested)
         {
             try { await Task.Delay(500, ct); } catch { break; }
             // port.ps1 waits silently while the CPU is above 70 %: the window shows the reading
-            if (cpu.Sample() is int c) { job.Cpu = c; if (job.Phase is "wait" or "cpu") { if (c > 70 && (DateTime.Now - job.PhaseSince).TotalSeconds > 5) job.SetPhase("cpu"); progress(); } }
+            if (cpu.Sample() is int c) { job.Cpu = c; if (job.Phase is "wait" && c > 70 && (DateTime.Now - job.PhaseSince).TotalSeconds > 5) job.SetPhase("cpu"); }
             try
             {
                 var itemsFile = Path.Combine(dir, "items.json");
@@ -372,13 +372,12 @@ public static class Porter
                     batchKey = key; pos = 0; partial = "";
                     lock (job.Lock) { job.Batch++; foreach (var bp in batch) if (job.States.GetValueOrDefault(bp) is null or "pending") { job.States[bp] = "queued"; if (!job.Order.Contains(bp)) job.Order.Add(bp); } }
                     job.SetPhase("load"); job.Note($"batch {job.Batch}: fn-port is reading the current Fortnite ({batch.Count} items)");
-                    progress();
                 }
                 var so = Path.Combine(dir, "stdout.txt");
                 if (!File.Exists(so)) continue;
                 using var fs = new FileStream(so, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 if (fs.Length < pos) pos = 0;
-                if (fs.Length == pos) { if (job.Phase is "convert" or "load") progress(); continue; }
+                if (fs.Length == pos) continue;
                 fs.Seek(pos, SeekOrigin.Begin);
                 using var rd = new StreamReader(fs);
                 var text = partial + await rd.ReadToEndAsync(ct);
@@ -400,10 +399,10 @@ public static class Porter
                     }
                     else job.Note(line);
                 }
-                progress();
             }
             catch (OperationCanceledException) { break; }
-            catch { } // the batch folder is being replaced: next round
+            catch (Exception e) { if (e.Message != lastErr) job.Note("(reading the batch: " + (lastErr = e.Message) + ")"); } // being replaced: next round
+            finally { progress(); } // every half second: the window's view of the import never lags behind
         }
     }
 
