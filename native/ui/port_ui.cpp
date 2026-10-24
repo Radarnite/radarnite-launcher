@@ -501,7 +501,6 @@ void App::drawPort(float x0, float y0, float W, float H) {
         float h2w = textW(h2, h2f, -0.11f);
         float secH = 37;
         text(h2, h2f, x, by, h2w + 2, secH, C::white, 0, -0.11f);
-        if (pCat_) text(thousands((int)pList_.size()) + L" items", Font{ Face::UI, 13, 500, false, true }, x + h2w + 10, by + 2, 200, secH, N::mut);
         float rx = x + gw;
         if (pTodo_) {
             std::wstring l = L"Import all " + thousands(pTodo_) + L"…";
@@ -518,6 +517,9 @@ void App::drawPort(float x0, float y0, float W, float H) {
             text(L"Clear", cf, rx + 2, by, clw, secH, hover_ == ID_P_CLEARSEL ? N::ink : N::mut);
             hit(ID_P_CLEARSEL, rc(rx, by + 6, clw, secH - 12), F_FOCUS | F_HAND, 4);
         }
+        // the count, in what the buttons leave
+        float cw2 = rx - 10 - (x + h2w + 10);
+        if (pCat_ && cw2 >= 60) text(thousands((int)pList_.size()) + L" items", Font{ Face::UI, 13, 500, false, true }, x + h2w + 10, by + 2, cw2, secH, N::mut);
         by += secH + 30;
         if (pLoading_) { float lh = drawPortLoad(x, by, gw, true); pLoadR_ = rc(x, by + oy_, gw, lh); by += lh + 26; }
         else pLoadR_ = {};

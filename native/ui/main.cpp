@@ -529,8 +529,13 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         }
         for (double until = msSinceStart() + 5000; msSinceStart() < until && !g_app->images().idle(); ) pump(msSinceStart() + 50);
         portPrivScrolled = privateBytes();
-        // the preview of the first card plays its clip (Media Foundation loads now), then closes it
-        g_app->key(VK_HOME, false, false);
+        // closed: the decoded images go back (the image workers exit after 3 s idle)
+        g_app->key(VK_ESCAPE, false, false);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        pump(msSinceStart() + 4000);
+        portPrivClosed = privateBytes();
+        int workers = g_app->images().threads();
+        // opened again on the first card's preview: it plays its clip (Media Foundation loads now), then closes
         g_app->portScene(7);
         if (forced) paint(ph); else UpdateWindow(ph);
         double tv = msSinceStart();
@@ -541,20 +546,18 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         captureWindow(ph, dir + L"\\00-live-port-preview-video.png");
         g_app->key(VK_ESCAPE, false, false);
         if (forced) paint(ph); else UpdateWindow(ph);
-        pump(msSinceStart() + 1000);
-        portPrivVideoClosed = privateBytes();
         bool videoGone = !g_app->videoShown() && !FindWindowExW(ph, nullptr, L"RnVideo", nullptr);
         g_app->key(VK_ESCAPE, false, false);
         if (forced) paint(ph); else UpdateWindow(ph);
-        pump(msSinceStart() + 4000);   // the image workers exit after 3 s idle
-        portPrivClosed = privateBytes();
+        pump(msSinceStart() + 4000);
+        portPrivVideoClosed = privateBytes();
         char buf[300];
         snprintf(buf, sizeof buf, "cosmetics panel: images within their budget while scrolling (%.1f MB at most, %zu held when opened)", portImgMax / 1048576.0, portImgCount);
         addCheck(buf, portImgMax <= (12u << 20) + (2u << 20));
         snprintf(buf, sizeof buf, "the preview plays the item's clip, muted and looped (first frame after %.0f ms), and closing it removes it", portVideoMs);
         addCheck(buf, (forced || portVideoMs >= 0) && videoGone);
-        snprintf(buf, sizeof buf, "cosmetics panel: the image workers exit once nothing loads (%d running)", g_app->images().threads());
-        addCheck(buf, g_app->images().threads() == 0);
+        snprintf(buf, sizeof buf, "cosmetics panel: the image workers exit once nothing loads (%d running)", workers);
+        addCheck(buf, workers == 0);
         DestroyWindow(ph);
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
         delete c; delete g_app; g_app = nullptr;
@@ -643,7 +646,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"firstFrameSteps\": {\"gfx\": %.1f, \"window\": %.1f, \"target\": %.1f},\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
                "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"idleTimers\": %d,\n  \"exeBytes\": %lu,\n"
                "  \"dwmDarkFrame\": %s,\n  \"systemMotion\": %s,\n  \"animSettledMs\": %.0f,\n  \"hoverFrames\": [%d, %d],\n  \"hoverDirtyMaxPct\": %.2f,\n  \"afterTransition\": {\"paints\": %d, \"timers\": %d},\n  \"partialVsFullDiffPx\": %lld,\n"
-               "  \"port\": {\"openFrameMs\": %.1f, \"imagesMs\": %.0f, \"privateMB\": {\"before\": %.1f, \"open\": %.1f, \"scrolled\": %.1f, \"closed\": %.1f, \"video\": %.1f, \"videoClosed\": %.1f}, \"videoFirstFrameMs\": %.0f, \"imagesMB\": %.1f, \"imagesMaxMB\": %.1f, \"images\": %zu},\n"
+               "  \"port\": {\"openFrameMs\": %.1f, \"imagesMs\": %.0f, \"privateMB\": {\"before\": %.1f, \"open\": %.1f, \"scrolled\": %.1f, \"closed\": %.1f, \"clip\": %.1f, \"afterClip\": %.1f}, \"videoFirstFrameMs\": %.0f, \"imagesMB\": %.1f, \"imagesMaxMB\": %.1f, \"images\": %zu},\n"
                "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"failed\": %d,\n  \"scenarios\": [%s\n  ],\n  \"interactions\": [%s\n  ]\n}\n",
             first, g_tGfx, g_tWindow, g_tTarget, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints, idleTimers,
             fa.nFileSizeLow, SUCCEEDED(darkHr) ? (dark ? "true" : "false") : "null", systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff,

@@ -15,19 +15,23 @@ const CLSID kFactory = { 0xb44392da, 0x499b, 0x446b, { 0xa4, 0xcb, 0x00, 0x5f, 0
 // Media Foundation, loaded on the first video
 typedef HRESULT(WINAPI* StartupFn)(ULONG, DWORD);
 typedef HRESULT(WINAPI* AttrsFn)(IMFAttributes**, UINT32);
+typedef HRESULT(WINAPI* ShutdownFn)();
 AttrsFn g_attrs = nullptr;
-bool g_tried = false;
+ShutdownFn g_shutdown = nullptr;
+bool g_started = false;
+// started for each clip and shut down after it (its work queues and threads go with it)
 bool loadMf() {
-    if (g_tried) return g_attrs != nullptr;
-    g_tried = true;
+    if (g_started) return true;
     HMODULE m = LoadLibraryExW(L"mfplat.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!m) return false;
     auto startup = (StartupFn)(void*)GetProcAddress(m, "MFStartup");
-    auto attrs = (AttrsFn)(void*)GetProcAddress(m, "MFCreateAttributes");
-    if (!startup || !attrs || FAILED(startup(MF_VERSION, MFSTARTUP_FULL))) return false;
-    g_attrs = attrs;
+    g_attrs = (AttrsFn)(void*)GetProcAddress(m, "MFCreateAttributes");
+    g_shutdown = (ShutdownFn)(void*)GetProcAddress(m, "MFShutdown");
+    if (!startup || !g_attrs || !g_shutdown || FAILED(startup(MF_VERSION, MFSTARTUP_FULL))) return false;
+    g_started = true;
     return true;
 }
+void unloadMf() { if (g_started) { g_shutdown(); g_started = false; } }
 
 // The video's window: the engine draws into it; the mouse goes through to the window under it
 LRESULT CALLBACK videoProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -136,6 +140,7 @@ void Video::stop() {
     if (engine_) { engine_->Shutdown(); engine_->Release(); engine_ = nullptr; }
     if (notify_) { notify_->Release(); notify_ = nullptr; }
     if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
+    unloadMf();
     url_.clear();
     ready_ = shown_ = failed_ = false;
     visible_ = true;

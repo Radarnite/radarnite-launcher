@@ -9,13 +9,13 @@ $dir = $Dir
 $out = "$dir\out"; $exe = Join-Path $dir $Exe; $name = 'rn-native-ui-selftest'
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 $sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
-$a = New-ScheduledTaskAction -Execute $exe -Argument "--selftest-ui `"$out`" $UiArgs" -WorkingDirectory $dir
+$a = New-ScheduledTaskAction -Execute $exe -Argument "--selftest-ui $out $UiArgs" -WorkingDirectory $dir
 $p = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive
 Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Force | Out-Null
 try {
     Start-ScheduledTask -TaskName $name
     $t0 = Get-Date
-    do { Start-Sleep -Milliseconds 500 } while (-not (Test-Path "$out\selftest.json") -and ((Get-Date) - $t0).TotalSeconds -lt 240)
+    do { Start-Sleep -Milliseconds 500 } while (-not (Test-Path "$out\selftest.json") -and ((Get-Date) - $t0).TotalSeconds -lt 90)
     Start-Sleep -Seconds 1
 } finally {
     Unregister-ScheduledTask -TaskName $name -Confirm:$false
