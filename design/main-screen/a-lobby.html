@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>A · Lobby</title>
+<link rel="stylesheet" href="common.css"><script src="parts.js"></script>
+<style>
+/* A · Lobby: the Fortnite Chapter 1 lobby (tab bar on top, season card left, skin on a pad, mode card + READY bottom right) */
+.stage{--rx:50%;--ry:46%}
+.band{position:absolute;left:0;right:0;top:40px;height:76px;background:linear-gradient(180deg,rgba(6,9,22,.78),rgba(6,9,22,.35));border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;padding:0 24px;gap:10px;z-index:5}
+.tabs{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px}
+.tab{height:48px;min-width:150px;padding:0 18px;display:flex;align-items:center;gap:12px;transform:skewX(-10deg);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)}
+.tab>*{transform:skewX(10deg)}
+.tab b{font:italic 900 26px/1 var(--fh);letter-spacing:-.02em}
+.tab span{font:600 11px var(--fn);color:rgba(255,255,255,.6);letter-spacing:.04em}
+.tab.on{background:#fff;color:#000}.tab.on span{color:rgba(0,0,0,.55)}
+.tab .tdot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.tab.add{min-width:48px;justify-content:center;padding:0}
+.right{margin-left:auto;display:flex;gap:10px}
+.season{position:absolute;left:40px;top:150px;width:430px}
+.season .head{height:44px;display:flex;align-items:center;padding:0 18px;background:rgba(255,255,255,.12);clip-path:polygon(0 0,100% 0,96% 100%,0 100%);font:italic 900 22px var(--fh);letter-spacing:.01em;text-transform:uppercase}
+.season .body{background:rgba(9,13,28,.72);border:1px solid rgba(255,255,255,.1);border-top:0;padding:18px 20px 20px}
+.big{font:italic 900 112px/.86 var(--fh);letter-spacing:-.05em}
+.sn{font:italic 900 22px var(--fh);color:var(--c0);margin-top:8px;text-transform:uppercase}
+.meta{font-size:12px;color:rgba(255,255,255,.6);margin-top:4px}
+.st{margin-top:16px;border-top:1px solid rgba(255,255,255,.08)}
+.st .row{height:44px;border-bottom:1px solid rgba(255,255,255,.08);font-size:13px}
+.st .k{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.75)}
+.st .v{display:flex;align-items:center;gap:8px;font-weight:600}
+.link{font:600 12px var(--fn);color:#fff;opacity:.8;display:flex;align-items:center;gap:2px}
+.feed{position:absolute;left:40px;bottom:58px;width:620px;font-size:14px;line-height:1.6}
+.feed .t{color:rgba(255,255,255,.5);margin-right:8px}
+.feed .g{color:#7CF29A}
+.plate{position:absolute;left:50%;top:150px;transform:translateX(-50%);text-align:center}
+.plate .n{font:700 20px var(--fn);display:flex;align-items:center;gap:8px;justify-content:center;border-bottom:2px dotted rgba(255,255,255,.5);padding-bottom:4px}
+.plate .r{font:700 17px var(--fn);color:#7CF29A;margin-top:4px}
+.pad{position:absolute;left:50%;bottom:52px;width:560px;height:120px;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(closest-side,#EAF3FF,#9CC2FF 30%,rgba(93,134,255,.75) 60%,rgba(93,134,255,.25) 85%,transparent);box-shadow:0 0 60px 10px rgba(120,170,255,.45)}
+.beam{position:absolute;left:50%;bottom:110px;width:340px;height:700px;transform:translateX(-50%);background:linear-gradient(0deg,rgba(150,195,255,.45),rgba(150,195,255,.08) 70%,transparent);filter:blur(6px);border-radius:45% 45% 0 0}
+.mode{position:absolute;right:40px;bottom:58px;width:440px}
+.mode .flag{height:42px;display:grid;place-items:center;background:var(--c0);color:#000;font:italic 900 20px var(--fh);text-transform:uppercase;clip-path:polygon(3% 0,100% 0,97% 100%,0 100%)}
+.mode .card{background:rgba(9,13,28,.78);border:1px solid rgba(255,255,255,.12);padding:16px 18px}
+.mode .gm{text-align:center}
+.mode .gm .lbl{display:block}
+.mode .gm b{display:block;font:italic 900 44px/1 var(--fh);margin-top:6px;text-transform:uppercase}
+.mode .gm span{display:block;margin-top:6px;color:rgba(255,255,255,.7);font-size:13px}
+.chg{margin:14px 0 10px;height:42px;border:2px solid var(--c0);display:flex;align-items:center;justify-content:center;gap:10px;font:700 15px var(--fn);background:rgba(93,134,255,.15)}
+.opt .row{height:38px;border-top:1px solid rgba(255,255,255,.08);font-size:13px}
+.opt .bots{display:flex;align-items:center;gap:10px;width:230px}
+.ready{margin-top:14px;height:96px;transform:skewX(-8deg);border-radius:6px;font-size:58px}
+.ready>*{transform:skewX(8deg)}
+.foot{position:absolute;left:0;right:0;bottom:0;height:40px;background:rgba(6,9,22,.85);display:flex;align-items:center;gap:22px;padding:0 40px;font-size:13px;color:rgba(255,255,255,.75)}
+.foot .h{display:flex;align-items:center;gap:8px}
+.foot .r{margin-left:auto;display:flex;gap:22px}
+</style></head><body><div class="win">
+<div data-tb></div>
+<div class="stage"><div class="rays"></div>
+  <div class="beam"></div><div class="pad"></div>
+  <img class="skin" src="art/cid_845_athena_commando_m_hightowertapas.png" style="height:860px;left:50%;transform:translateX(-50%);bottom:52px">
+  <div class="fade" style="background:linear-gradient(0deg,rgba(6,9,22,.55) 0%,transparent 25%),linear-gradient(90deg,rgba(6,9,22,.75) 0%,transparent 30%,transparent 70%,rgba(6,9,22,.75) 100%)"></div>
+</div>
+<div class="band">
+  <div class="tabs">
+    <span class="kbd">Q</span>
+    <div class="tab"><b>3.6</b><span>C1 · S3</span></div>
+    <div class="tab on"><b>14.30</b><span>C2 · S4</span></div>
+    <div class="tab"><b>17.50</b><span>C2 · S7</span></div>
+    <div class="tab add"><i data-i="plus"></i></div>
+    <span class="kbd">E</span>
+  </div>
+  <div class="right">
+    <div class="gbtn"><i data-i="cos"></i>Cosmetics<span class="badge">12k</span></div>
+    <div class="gbtn"><i data-i="more"></i>Build</div>
+  </div>
+</div>
+<div class="season">
+  <div class="head">Chapter 2 · Season 4</div>
+  <div class="body">
+    <div class="big">14.30</div>
+    <div class="sn">Nexus War</div>
+    <div class="meta">CL 14456520 · Unreal Engine 4.26 · S:\FortniteBuilds\14.30</div>
+    <div class="st">
+      <div class="row"><span class="k"><i data-i="user"></i>Lobby</span><span class="v"><i class="dot"></i>Ready</span></div>
+      <div class="row"><span class="k"><i data-i="match"></i>Local match</span><span class="v"><i class="dot"></i>Ready</span></div>
+      <div class="row"><span class="k"><i data-i="cos"></i>Cosmetics</span><span class="v"><i class="dot"></i>4,025<span class="link" style="margin-left:10px">Import 12k<i data-i="chev"></i></span></span></div>
+      <div class="row"><span class="k"><i data-i="lock"></i>Firewall</span><span class="v"><i class="dot"></i>Local only</span></div>
+    </div>
+  </div>
+</div>
+<div class="plate"><div class="n"><i data-i="user"></i>GoldenTiger86</div><div class="r">Ready</div></div>
+<div class="feed">
+  <div><span class="t">[22:05]</span><span class="g">Cosmetics:</span> 4,025 items in 14.30's list, 12,297 more to import.</div>
+  <div><span class="t">[22:05]</span><span class="g">Firewall:</span> local-only rules found, nothing leaves 127.0.0.1.</div>
+</div>
+<div class="mode">
+  <div class="flag">Game mode</div>
+  <div class="card">
+    <div class="gm"><span class="lbl">Local match · 14.30</span><b>Battle Royale</b><span>Solo to Squads, against bots on your own server</span></div>
+    <div class="chg"><i data-i="match"></i>Change mode<span class="kbd" style="margin-left:6px">Tab</span></div>
+    <div class="opt">
+      <div class="row"><span>Bots</span><span class="bots"><span class="slider"><b style="width:20%"></b><i style="left:20%"></i></span><b style="font:italic 900 22px var(--fh);width:30px;text-align:right">20</b></span></div>
+      <div class="row"><span>Bots use the game's AI</span><span class="tg"></span></div>
+      <div class="row"><span>Late game</span><span class="tg"></span></div>
+      <div class="row"><span>Infinite materials</span><span class="tg on"></span></div>
+      <div class="row"><span>Infinite ammo</span><span class="tg"></span></div>
+    </div>
+    <div class="launch ready"><span style="display:flex;align-items:center;gap:16px"><span class="tri"></span>LAUNCH<small>14.30</small></span></div>
+  </div>
+</div>
+<div class="foot">
+  <span class="h"><span class="kbd">Q</span><span class="kbd">E</span>Switch build</span>
+  <span class="h"><span class="kbd">Tab</span>Change mode</span>
+  <span class="h"><span class="kbd">Enter</span>Launch</span>
+  <span class="r"><span class="h"><i data-i="folder"></i>S:\FortniteBuilds</span><span class="h"><i data-i="log"></i>Activity <span class="count">2</span></span></span>
+</div>
+</div></body></html>

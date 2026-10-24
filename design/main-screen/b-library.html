@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>B · Library</title>
+<link rel="stylesheet" href="common.css"><script src="parts.js"></script>
+<style>
+/* B · Library: Battle.net / Epic / Xbox app shape (build list on the left, the game's hero art, tabs) + the 2.x footer with Launch on the right */
+.rail{position:absolute;left:0;top:40px;bottom:0;width:300px;background:#0C0E13;border-right:1px solid var(--line2);display:flex;flex-direction:column;z-index:4}
+.rail .h{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 20px}
+.cap{font:600 11px var(--fn);color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+.bi{position:relative;margin:0 10px 6px;height:88px;border-radius:12px;display:flex;align-items:center;gap:14px;padding:0 14px 0 12px}
+.bi.on{background:rgba(255,255,255,.07)}
+.bi.on::before{content:"";position:absolute;left:-10px;top:18px;bottom:18px;width:3px;border-radius:2px;background:#fff}
+.th{width:64px;height:64px;border-radius:10px;flex:none;background-repeat:no-repeat;background-size:220%;background-position:50% 6%;position:relative;overflow:hidden}
+.bi .v{font:italic 900 28px/1 var(--fh);letter-spacing:-.02em}
+.bi .s{font-size:12px;color:var(--muted);margin-top:4px}
+.bi .dot{margin-left:auto}
+.rail .add{margin:6px 10px;height:40px;border-radius:10px;border:1px dashed rgba(255,255,255,.16);display:flex;align-items:center;gap:10px;padding:0 14px;color:var(--muted);font-weight:600}
+.rail .foot{margin-top:auto;height:52px;border-top:1px solid var(--line2);display:flex;align-items:center;gap:10px;padding:0 20px;color:var(--muted);font-size:12.5px}
+.stage{left:300px;bottom:auto;height:640px;--rx:72%;--ry:40%}
+.hfade{position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 0%,rgba(16,17,20,.6) 22%,transparent 50%),linear-gradient(90deg,rgba(6,9,22,.75) 0%,transparent 45%)}
+.hero{position:absolute;left:348px;top:150px}
+.big{font:italic 900 168px/.84 var(--fh);letter-spacing:-.05em;margin-top:18px}
+.meta{margin-top:14px;font-size:13px;color:rgba(255,255,255,.7)}
+.chips{display:flex;gap:8px;margin-top:22px}
+.chip{height:52px;padding:0 16px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.chip .lbl{font-size:10px}
+.chip b{display:flex;align-items:center;gap:7px;font:600 13px var(--fn)}
+.tr{position:absolute;right:24px;top:58px;display:flex;gap:10px}
+.tabsb{position:absolute;left:348px;top:640px;display:flex;gap:28px;height:44px;align-items:flex-end;border-bottom:1px solid var(--line2);right:48px}
+.tabsb span{padding-bottom:12px;font:600 15px var(--fn);color:var(--muted);display:flex;align-items:center;gap:8px}
+.tabsb span.on{color:#fff;box-shadow:inset 0 -2px 0 #fff}
+.grid{position:absolute;left:348px;right:48px;top:708px;display:grid;grid-template-columns:1.25fr 1fr 1fr 1fr;gap:16px}
+.card{background:var(--bg2);border:1px solid var(--line2);border-radius:14px;padding:16px 18px;height:280px}
+.card .lbl{display:block;margin-bottom:12px;color:var(--dim)}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mt{height:200px;border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:flex-end;position:relative;border:2px solid transparent}
+.mt b{font:italic 900 24px/1 var(--fh);text-transform:uppercase}
+.mt span{font-size:12px;opacity:.85;margin-top:6px}
+.mt.p{background:linear-gradient(160deg,#58D36B,#1F8A3A);opacity:.5}
+.mt.br{background:linear-gradient(160deg,#B26BFF,#6A2BD0);border-color:#fff;box-shadow:0 0 0 3px rgba(178,107,255,.35)}
+.mt .ck{position:absolute;right:12px;top:12px;width:22px;height:22px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center}
+.bots{font:italic 900 72px/1 var(--fh)}
+.card .row{height:42px;border-top:1px solid var(--line2);font-size:13px}
+.help{font-size:12px;color:var(--dim);margin-top:8px}
+.bar{position:absolute;left:300px;right:0;bottom:0;height:88px;background:#0C0E13;border-top:1px solid var(--line2);display:flex;align-items:center;padding:0 24px 0 48px;gap:14px}
+.bar .a{font:600 15px var(--fn)}
+.bar .b{font-size:12.5px;color:var(--muted);margin-top:2px}
+.bar .launch{width:300px;height:64px;font-size:34px;border-radius:14px}
+</style></head><body><div class="win">
+<div data-tb></div>
+<div class="stage"><div class="rays"></div>
+  <img class="skin" src="art/cid_845_athena_commando_m_hightowertapas.png" style="height:760px;right:140px;top:10px">
+  <div class="hfade"></div>
+</div>
+<div class="rail">
+  <div class="h"><span class="cap">Builds · 3</span><i data-i="plus"></i></div>
+  <div class="bi"><div class="th" style="background-image:url(art/cid_084_athena_commando_m_assassin.png),linear-gradient(160deg,#A06BFF,#2C1866)"></div><div><div class="v">3.6</div><div class="s">Chapter 1 · Season 3</div></div><i class="dot"></i></div>
+  <div class="bi on"><div class="th" style="background-image:url(art/cid_845_athena_commando_m_hightowertapas.png),linear-gradient(160deg,#5D86FF,#152A6E)"></div><div><div class="v">14.30</div><div class="s">Chapter 2 · Season 4</div></div><i class="dot"></i></div>
+  <div class="bi"><div class="th" style="background-image:url(art/cid_a_110_athena_commando_m_alientrooper.png),linear-gradient(160deg,#3FE0D0,#0C4A55)"></div><div><div class="v">17.50</div><div class="s">Chapter 2 · Season 7</div></div><i class="dot"></i></div>
+  <div class="add"><i data-i="zip"></i>Add from zip or folder…</div>
+  <div class="foot"><i data-i="folder"></i>S:\FortniteBuilds<i data-i="cog" style="margin-left:auto"></i></div>
+</div>
+<div class="tr"><div class="gbtn"><i data-i="cos"></i>Cosmetics<span class="badge">12k</span></div><div class="gbtn"><i data-i="more"></i>Build</div></div>
+<div class="hero">
+  <span class="pill"><span>Chapter 2 · Season 4 · Nexus War</span></span>
+  <div class="big">14.30</div>
+  <div class="meta">CL 14456520 · Unreal Engine 4.26 · S:\FortniteBuilds\14.30</div>
+  <div class="chips">
+    <div class="chip glass"><span class="lbl">Lobby</span><b><i class="dot"></i>Ready</b></div>
+    <div class="chip glass"><span class="lbl">Local match</span><b><i class="dot"></i>Ready</b></div>
+    <div class="chip glass"><span class="lbl">Cosmetics</span><b><i class="dot"></i>4,025 <span class="muted" style="font-weight:600">· Import ›</span></b></div>
+    <div class="chip glass"><span class="lbl">Firewall</span><b><i class="dot"></i>Local only</b></div>
+  </div>
+</div>
+<div class="tabsb"><span class="on">Play</span><span>Cosmetics <span class="count" style="background:rgba(255,255,255,.14);color:#fff">12k</span></span><span>Activity <span class="count">2</span></span><span>Build info</span></div>
+<div class="grid">
+  <div class="card"><span class="lbl">Mode</span><div class="modes">
+    <div class="mt p"><b>Practice</b><span>Creative · Playground</span></div>
+    <div class="mt br"><span class="ck"><i data-i="check"></i></span><b>Battle Royale</b><span>Solo to Squads</span></div></div></div>
+  <div class="card"><span class="lbl">Bots</span>
+    <div class="row" style="border:0;height:auto"><span class="bots">20</span><span style="display:flex;gap:8px"><span class="step">−</span><span class="step">+</span></span></div>
+    <div style="display:flex;align-items:center;height:36px"><span class="slider"><b style="width:20%"></b><i style="left:20%"></i></span></div>
+    <div class="row"><span>Bots use the game's AI</span><span class="tg"></span></div>
+    </div>
+  <div class="card"><span class="lbl">Match rules</span>
+    <div class="row"><span>Late game</span><span class="tg"></span></div>
+    <div class="row"><span>Infinite materials</span><span class="tg on"></span></div>
+    <div class="row"><span>Infinite ammo</span><span class="tg"></span></div></div>
+  <div class="card"><span class="lbl">Player name</span><div class="field">GoldenTiger86</div><div class="help">Local account only, never an Epic account.</div></div>
+</div>
+<div class="bar">
+  <i class="dot"></i><div><div class="a">Ready · Fortnite 14.30</div><div class="b">Battle Royale · 20 bots · infinite materials · GoldenTiger86</div></div>
+  <div class="gbtn" style="margin-left:auto;background:var(--bg2);border-color:var(--line)"><i data-i="log"></i>Activity <span class="count">2</span></div>
+  <div class="launch"><span class="tri" style="border-left-width:18px;border-top-width:11px;border-bottom-width:11px"></span>LAUNCH</div>
+</div>
+</div></body></html>

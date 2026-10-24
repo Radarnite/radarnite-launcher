@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>E · Poster</title>
+<link rel="stylesheet" href="common.css"><script src="parts.js"></script>
+<style>
+/* E · Poster: season key art as a poster (huge outlined version behind the skin), nothing else on screen but one Launch
+   at the bottom right (Fortnite's READY corner, Riot Client's single Play). Settings slide up from Launch as a sheet */
+.stage{--rx:42%;--ry:44%;background:radial-gradient(80% 110% at 42% 40%,var(--c0) 0%,var(--c1) 32%,var(--c2) 58%,var(--c3) 100%)}
+.ghost{position:absolute;left:150px;top:150px;font:italic 900 600px/.8 var(--fh);letter-spacing:-.06em;color:transparent;-webkit-text-stroke:3px rgba(255,255,255,.16);white-space:nowrap}
+.ghost.fill{color:rgba(255,255,255,.05);-webkit-text-stroke:0}
+.sw{position:absolute;left:40px;top:64px;display:flex;align-items:center;gap:6px}
+.sw .ar{width:40px;height:40px;border-radius:12px;display:grid;place-items:center}
+.sw .b{height:40px;padding:0 16px;display:flex;align-items:center;gap:8px;font:italic 900 22px var(--fh);color:rgba(255,255,255,.55)}
+.sw .b.on{color:#fff;box-shadow:inset 0 -3px 0 #fff}
+.sw .b small{font:600 11px var(--fn);font-style:normal;opacity:.8}
+.tr{position:absolute;right:24px;top:58px;display:flex;gap:10px}
+.tr .gbtn{width:44px;height:44px;padding:0;justify-content:center}
+.tr .badge{top:-8px;right:-10px}
+.tr .count{position:absolute;top:-7px;right:-7px}
+.title{position:absolute;left:48px;bottom:56px}
+.title .n{font:italic 900 92px/.9 var(--fh);text-transform:uppercase;letter-spacing:-.03em;margin-top:12px}
+.title .m{font-size:13px;color:rgba(255,255,255,.7);margin-top:10px}
+.dock{position:absolute;right:48px;bottom:48px;width:540px}
+.sum{padding:16px 18px;border-radius:18px;margin-bottom:14px}
+.sum .row{height:auto}
+.sum .md{font:italic 900 30px/1 var(--fh);text-transform:uppercase}
+.sum .ch{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.sum .ch span{height:28px;padding:0 10px;border-radius:14px;background:rgba(255,255,255,.1);display:flex;align-items:center;gap:6px;font:600 12px var(--fn)}
+.edit{height:34px;padding:0 12px;border-radius:10px;background:rgba(255,255,255,.12);display:flex;align-items:center;gap:8px;font:600 13px var(--fn)}
+.okline{display:flex;align-items:center;gap:10px;margin:0 0 12px 4px;font-size:13px;color:rgba(255,255,255,.8)}
+.dock .launch{height:112px;font-size:64px;border-radius:22px}
+.dock .launch small{font-size:20px}
+/* the settings sheet (variant "settings") */
+.sheet{display:none;position:absolute;right:48px;bottom:190px;width:540px;padding:20px 22px;border-radius:20px}
+body.settings .sheet{display:block}
+body.settings .sum{display:none}
+.sheet .modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 14px}
+.sheet .m{height:74px;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;justify-content:flex-end}
+.sheet .m b{font:italic 900 20px var(--fh);text-transform:uppercase}
+.sheet .m span{font-size:11.5px;opacity:.85}
+.sheet .row{height:44px;border-top:1px solid rgba(255,255,255,.1);font-size:13.5px}
+.sheet .bots{display:flex;align-items:center;gap:12px;width:280px}
+</style></head><body data-variants="settings"><div class="win">
+<div data-tb></div>
+<div class="stage"><div class="rays"></div>
+  <div class="ghost fill">14.30</div><div class="ghost">14.30</div>
+  <img class="skin" src="art/cid_845_athena_commando_m_hightowertapas.png" style="height:1180px;left:360px;top:30px">
+  <div class="fade" style="background:linear-gradient(0deg,rgba(6,9,22,.85) 0%,rgba(6,9,22,.25) 30%,transparent 50%),linear-gradient(90deg,rgba(6,9,22,.5) 0%,transparent 25%,transparent 60%,rgba(6,9,22,.7) 100%)"></div>
+</div>
+<div class="sw">
+  <span class="ar glass"><i data-i="chevl"></i></span>
+  <span class="b">3.6<small>C1 S3</small></span>
+  <span class="b on">14.30<small>C2 S4</small></span>
+  <span class="b">17.50<small>C2 S7</small></span>
+  <span class="ar glass"><i data-i="chev"></i></span>
+  <span class="ar glass" style="margin-left:6px"><i data-i="plus"></i></span>
+  <span class="muted" style="font-size:12px;margin-left:10px"><span class="kbd">Q</span> <span class="kbd">E</span></span>
+</div>
+<div class="tr">
+  <div class="gbtn"><i data-i="cos"></i><span class="badge">12k</span></div>
+  <div class="gbtn"><i data-i="log"></i><span class="count">2</span></div>
+  <div class="gbtn"><i data-i="more"></i></div>
+</div>
+<div class="title">
+  <span class="pill"><span>Chapter 2 · Season 4</span></span>
+  <div class="n">Nexus War</div>
+  <div class="m">Fortnite 14.30 · CL 14456520 · UE 4.26 · Thor</div>
+</div>
+<div class="sheet frost">
+  <div class="row" style="border:0;height:auto"><span class="lbl">Match settings · 14.30</span><span class="muted" style="font-size:12px">Esc to close</span></div>
+  <div class="modes">
+    <div class="m" style="background:linear-gradient(160deg,rgba(88,211,107,.45),rgba(31,138,58,.35))"><b>Practice</b><span>Creative · Playground</span></div>
+    <div class="m" style="background:linear-gradient(160deg,#B26BFF,#6A2BD0);box-shadow:0 0 0 2px #fff"><b>Battle Royale</b><span>Solo to Squads</span></div>
+  </div>
+  <div class="row"><span>Bots</span><span class="bots"><span class="slider"><b style="width:20%"></b><i style="left:20%"></i></span><b style="font:italic 900 24px var(--fh)">20</b></span></div>
+  <div class="row"><span>Bots use the game's AI</span><span class="tg"></span></div>
+  <div class="row"><span>Late game</span><span class="tg"></span></div>
+  <div class="row"><span>Infinite materials</span><span class="tg on"></span></div>
+  <div class="row"><span>Infinite ammo</span><span class="tg"></span></div>
+  <div class="row"><span>Player name</span><span class="field" style="height:32px;width:220px">GoldenTiger86</span></div>
+</div>
+<div class="dock">
+  <div class="sum frost">
+    <div class="row"><span class="md">Battle Royale</span><span class="edit"><i data-i="cog"></i>Match settings</span></div>
+    <div class="ch"><span><i data-i="bots"></i>20 bots</span><span>Infinite materials</span><span>Late game off</span><span><i data-i="user"></i>GoldenTiger86</span></div>
+  </div>
+  <div class="okline"><i class="dot"></i><b style="font-weight:600">Ready</b><span class="muted">Lobby · local match · 4,025 cosmetics · firewall local only</span></div>
+  <div class="launch"><span class="tri" style="border-left-width:28px;border-top-width:18px;border-bottom-width:18px"></span>LAUNCH<small>14.30</small></div>
+</div>
+</div></body></html>

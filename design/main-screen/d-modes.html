@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>D · Modes</title>
+<link rel="stylesheet" href="common.css"><script src="parts.js"></script>
+<style>
+/* D · Modes first: Fortnite's mode select (big mode tiles, the choice is the hero) + Riot Client's game/mode then Play.
+   The build is a dropdown on the version; each mode carries its own settings; one Launch in the middle */
+.stage{--rx:20%;--ry:40%;background:radial-gradient(70% 120% at 20% 35%,var(--c0) 0%,var(--c1) 30%,var(--c2) 55%,var(--c3) 100%)}
+.hd{position:absolute;left:40px;top:64px;display:flex;align-items:center;gap:16px;z-index:3}
+.ver{display:flex;align-items:center;gap:12px;height:72px;padding:0 18px 0 20px;border-radius:16px}
+.ver b{font:italic 900 56px/1 var(--fh);letter-spacing:-.03em}
+.ver .s{font-size:12.5px;line-height:1.35;color:rgba(255,255,255,.75)}
+.ver .s strong{display:block;color:#fff;font:italic 900 16px var(--fh);text-transform:uppercase}
+.q{height:40px;padding:0 14px;border-radius:12px;display:flex;align-items:center;gap:10px;font:italic 900 20px var(--fh)}
+.q .mini{width:26px;height:26px;border-radius:7px;background-size:230%;background-position:50% 6%;background-repeat:no-repeat}
+.tr{position:absolute;right:24px;top:58px;display:flex;gap:10px}
+.cards{position:absolute;left:640px;right:40px;top:170px;display:grid;grid-template-columns:1fr 1.25fr;gap:20px}
+.mc{height:580px;border-radius:22px;position:relative;overflow:hidden;padding:28px 30px;display:flex;flex-direction:column}
+.mc h2{margin:0;font:italic 900 64px/.9 var(--fh);text-transform:uppercase;letter-spacing:-.02em}
+.mc .d{font-size:15px;margin-top:10px;color:rgba(255,255,255,.88);max-width:520px}
+.mc.p{background:linear-gradient(160deg,rgba(88,211,107,.55),rgba(31,138,58,.4) 60%,rgba(9,13,28,.55));border:1px solid rgba(255,255,255,.14)}
+.mc.br{background:linear-gradient(160deg,#B26BFF,#6A2BD0 55%,#3A1680);box-shadow:0 0 0 3px #fff,0 20px 60px rgba(120,60,220,.45)}
+.mc .tag{position:absolute;right:24px;top:24px}
+.opts{margin-top:auto;background:rgba(10,6,30,.38);border-radius:14px;padding:6px 18px}
+.opts .row{height:52px;border-bottom:1px solid rgba(255,255,255,.12);font:500 15px var(--fn)}
+.opts .row:last-child{border:0}
+.bots{display:flex;align-items:center;gap:14px;width:340px}
+.bots b{font:italic 900 34px var(--fh);width:48px;text-align:right}
+.steps{margin-top:auto;display:flex;flex-direction:column;gap:10px;font-size:14px}
+.steps span{display:flex;gap:12px;align-items:center}
+.steps i{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;font:700 12px var(--fn);font-style:normal;flex:none}
+.go{position:absolute;left:640px;right:40px;top:800px;display:flex;align-items:center;gap:16px;justify-content:center}
+.go .launch{width:560px;height:96px;font-size:50px;border-radius:20px}
+.go .launch .t{display:flex;flex-direction:column;align-items:flex-start;line-height:.9}
+.go .launch .t small{font-size:16px;margin-top:6px}
+.name{width:260px}
+.strip{position:absolute;left:0;right:0;bottom:0;height:52px;background:rgba(6,9,22,.86);border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:28px;padding:0 40px;font-size:13px}
+.strip span{display:flex;align-items:center;gap:8px}
+.strip .k{color:rgba(255,255,255,.55)}
+.strip .r{margin-left:auto;display:flex;gap:24px}
+</style></head><body><div class="win">
+<div data-tb></div>
+<div class="stage"><div class="rays"></div>
+  <img class="skin" src="art/cid_845_athena_commando_m_hightowertapas.png" style="height:960px;left:-120px;bottom:-40px">
+  <div class="fade" style="background:linear-gradient(90deg,transparent 0%,transparent 26%,rgba(6,9,22,.55) 40%,rgba(6,9,22,.8) 100%),linear-gradient(0deg,rgba(6,9,22,.7),transparent 30%)"></div>
+</div>
+<div class="hd">
+  <div class="ver frost"><b>14.30</b><div class="s"><strong>Nexus War</strong>Chapter 2 · Season 4</div><i data-i="down" style="width:22px;height:22px;margin-left:6px"></i></div>
+  <span class="muted" style="font-size:12px">also</span>
+  <div class="q glass"><span class="mini" style="background-image:url(art/cid_084_athena_commando_m_assassin.png),linear-gradient(160deg,#A06BFF,#2C1866)"></span>3.6</div>
+  <div class="q glass"><span class="mini" style="background-image:url(art/cid_a_110_athena_commando_m_alientrooper.png),linear-gradient(160deg,#3FE0D0,#0C4A55)"></span>17.50</div>
+  <div class="q glass" style="padding:0 12px"><i data-i="plus"></i></div>
+</div>
+<div class="tr"><div class="gbtn"><i data-i="cos"></i>Cosmetics<span class="badge">12k</span></div><div class="gbtn"><i data-i="more"></i>Build</div></div>
+<div class="cards">
+  <div class="mc p">
+    <svg class="ic" viewBox="0 0 16 16" style="position:absolute;right:-40px;top:120px;width:340px;height:340px;stroke-width:.6;opacity:.14"><path d="M2.5 13.5h11M4 13.5V7l4-3.5L12 7v6.5M6.5 13.5V10h3v3.5"/></svg>
+    <h2>Practice</h2>
+    <div class="d">Creative · Playground. Alone, infinite materials and ammo, 0 ping.</div>
+    <div class="steps">
+      <span><i>1</i>Launch opens 14.30's lobby</span>
+      <span><i>2</i>Pick Creative or Playground in the game</span>
+      <span><i>3</i>Build, edit, warm up: nothing else to set</span>
+    </div>
+  </div>
+  <div class="mc br">
+    <span class="pill tag"><span class="dot"></span><span>Selected</span></span>
+    <h2>Battle Royale</h2>
+    <div class="d">Solo to Squads on your own match server, against bots.</div>
+    <div class="opts">
+      <div class="row"><span>Bots</span><span class="bots"><span class="step">−</span><span class="slider"><b style="width:20%;background:#fff"></b><i style="left:20%"></i></span><span class="step">+</span><b>20</b></span></div>
+      <div class="row"><span>Bots use the game's AI</span><span class="tg"></span></div>
+      <div class="row"><span>Late game</span><span class="tg"></span></div>
+      <div class="row"><span>Infinite materials</span><span class="tg on"></span></div>
+      <div class="row"><span>Infinite ammo</span><span class="tg"></span></div>
+    </div>
+  </div>
+</div>
+<div class="go">
+  <div class="name"><span class="lbl">Player name</span><div class="field" style="margin-top:6px">GoldenTiger86</div></div>
+  <div class="launch"><span class="tri"></span><span class="t">LAUNCH<small>Battle Royale · 14.30 · 20 bots</small></span></div>
+</div>
+<div class="strip">
+  <span><span class="k">Lobby</span><i class="dot"></i>Ready</span>
+  <span><span class="k">Local match</span><i class="dot"></i>Ready</span>
+  <span><span class="k">Cosmetics</span><i class="dot"></i>4,025 <span style="opacity:.75">· Import 12k ›</span></span>
+  <span><span class="k">Firewall</span><i class="dot"></i>Local only</span>
+  <span class="r"><span><i data-i="folder"></i>S:\FortniteBuilds</span><span><i data-i="log"></i>Activity <span class="count">2</span></span></span>
+</div>
+</div></body></html>
