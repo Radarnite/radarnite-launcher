@@ -73,6 +73,8 @@ const RC kRC[] = {
 };
 const uint32_t GREEN_ = 0x3DFF6E;   // the lobby's green (.badge.ok)
 const RC& rcOf(const std::string& r) { for (auto& x : kRC) if (r == x.key) return x; return kRC[4]; }
+// columns of the cosmetics grid for a width: cards at least 150 DIPs wide, 10 apart (drawing, keys and the selftest agree)
+int portCols(float gw) { return std::max(1, (int)floorf((gw + 10) / (150 + 10))); }
 int rarIndex(const std::string& r) { for (int i = 0; i < NR; i++) if (r == kRAR[i].key) return i; return -1; }
 
 uint32_t scaleRgb(uint32_t c, float k) {
@@ -511,10 +513,8 @@ void App::drawPort(float x0, float y0, float W, float H) {
         by += secH + 30;
         if (pLoading_) { float lh = drawPortLoad(x, by, gw, true); pLoadR_ = rc(x, by + oy_, gw, lh); by += lh + 26; }
         else pLoadR_ = {};
-        // the grid: gap 30 px 10 px, cards 198:258 (radarnite.com: 6 of 198 at 1280). Cards grow with the window
-        // (190 DIPs at 1280 to 240 from ~2100) instead of making a dozen small columns; narrow windows keep 168.
-        float minW = gw < 2 * 190 + 10 ? 168.f : std::max(190.f, std::min(240.f, 190 + (gw - 1232) * .06f));
-        int cols = std::max(1, (int)floorf((gw + 10) / (minW + 10)));
+        // the grid: gap 30 px 10 px, cards 198:258 (as radarnite.com's), at least 150 DIPs wide
+        int cols = portCols(gw);
         float cardW = (gw - (cols - 1) * 10) / cols, cardH = cardW * 258 / 198, pitch = cardH + 30;
         pGrid_ = rc(x, by + oy_, gw, 0);
         pSlot_.clear();
@@ -1433,7 +1433,7 @@ void App::portCursor(int idx, bool keyboard) {
     pCursor_ = std::max(0, std::min((int)pList_.size() - 1, idx));
     // keep it in view: the grid's geometry of the last frame
     float gw = pGrid_.right - pGrid_.left;
-    int cols = std::max(1, (int)floorf((gw + 10) / (168 + 10)));
+    int cols = portCols(gw);
     float cardW = (gw - (cols - 1) * 10) / cols, pitch = cardW * 258 / 198 + 30;
     float top = pGrid_.top - (pBody_.top - pScroll_) + (pCursor_ / cols) * pitch;   // content coordinates
     if (pCursor_ < cols) pScroll_ = 0;   // the first row: the top of the panel with it
@@ -1544,7 +1544,7 @@ bool App::portKey(UINT vk, bool ctrl, bool shift) {
     }
     if (focus_ == ID_P_GRID && !pDlg_ && pPv_ < 0 && !pPop_ && !pList_.empty()) {
         float gw = pGrid_.right - pGrid_.left;
-        int cols = std::max(1, (int)floorf((gw + 10) / (168 + 10)));
+        int cols = portCols(gw);
         float cardH = (gw - (cols - 1) * 10) / cols * 258 / 198;
         int page = std::max(1, (int)floorf(pView_ / (cardH + 30))) * cols;
         int c = pCursor_;
@@ -1644,7 +1644,7 @@ std::vector<std::pair<std::wstring, bool>> App::portCheck(float W, float H) {
     check(L"Escape closes the preview", pPv_ < 0 && pOpen_);
     setFocus(ID_P_GRID, true); pCursor_ = 0; key(VK_RIGHT, false, false); key(VK_DOWN, false, false); frame();
     float gw = pGrid_.right - pGrid_.left;
-    int cols = std::max(1, (int)floorf((gw + 10) / (168 + 10)));
+    int cols = portCols(gw);
     check(L"arrows move the grid's cursor (right, down a row)", pCursor_ == 1 + cols);
     key(VK_END, false, false); frame();
     check(L"End scrolls the last card into view", pCursor_ == (int)pList_.size() - 1 && pScroll_ > 0);
