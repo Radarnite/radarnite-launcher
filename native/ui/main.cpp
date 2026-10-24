@@ -489,6 +489,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     //     through ~1,000 cards, and after closing it (before the offscreen renders: their memory would count too)
     double portOpenMs = -1, portImagesMs = -1;
     double portVideoMs = -1;
+    size_t portClipProc = 0, portPrivPreClip = 0;
     size_t portPrivVideo = 0, portPrivVideoClosed = 0;
     size_t portPriv0 = 0, portPrivOpen = 0, portPrivScrolled = 0, portPrivClosed = 0, portImgBytes = 0, portImgMax = 0, portImgCount = 0;
     {
@@ -531,7 +532,13 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         pump(msSinceStart() + 4000);
         portPrivClosed = privateBytes();
         int workers = g_app->images().threads();
-        // opened again on the first card's preview: it plays its clip (Media Foundation loads now), then closes
+        // opened again, then the first card's preview plays its clip in a process of its own: this process before,
+        // with and after the clip, the panel open all along
+        g_app->portScene(1);
+        if (forced) paint(ph); else UpdateWindow(ph);
+        for (double until = msSinceStart() + 5000; msSinceStart() < until; ) { pump(msSinceStart() + 50); if (forced) paint(ph); if (g_app->images().idle()) break; }
+        pump(msSinceStart() + 500);
+        portPrivPreClip = privateBytes();
         g_app->portScene(7);
         if (forced) paint(ph); else UpdateWindow(ph);
         double tv = msSinceStart();
@@ -539,14 +546,16 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         portVideoMs = g_app->videoShown() ? msSinceStart() - tv : -1;
         pump(msSinceStart() + 1500);
         portPrivVideo = privateBytes();
+        portClipProc = g_app->clipBytes();
         captureWindow(ph, dir + L"\\00-live-port-preview-video.png");
         g_app->key(VK_ESCAPE, false, false);
         if (forced) paint(ph); else UpdateWindow(ph);
-        bool videoGone = !g_app->videoShown() && !FindWindowExW(ph, nullptr, L"RnVideo", nullptr);
+        bool videoGone = !g_app->videoShown() && !FindWindowExW(ph, nullptr, L"RnClip", nullptr);
+        pump(msSinceStart() + 1500);
+        portPrivVideoClosed = privateBytes();
         g_app->key(VK_ESCAPE, false, false);
         if (forced) paint(ph); else UpdateWindow(ph);
         pump(msSinceStart() + 4000);
-        portPrivVideoClosed = privateBytes();
         char buf[300];
         snprintf(buf, sizeof buf, "cosmetics panel: images within their budget while scrolling (%.1f MB at most, %zu held when opened)", portImgMax / 1048576.0, portImgCount);
         addCheck(buf, portImgMax <= (12u << 20) + (2u << 20));
@@ -642,11 +651,11 @@ int selftest(HINSTANCE inst, std::wstring dir) {
     fprintf(f, "{\n  \"firstFrameMs\": %.1f,\n  \"firstFrameSteps\": {\"gfx\": %.1f, \"window\": %.1f, \"target\": %.1f},\n  \"privateBytes\": %zu,\n  \"privateMB\": %.1f,\n  \"workingSetMB\": %.1f,\n"
                "  \"idleCpu\": %.3f,\n  \"idleCpuMs\": %.1f,\n  \"idleWindowMs\": %.0f,\n  \"idlePaints\": %d,\n  \"idleTimers\": %d,\n  \"exeBytes\": %lu,\n"
                "  \"dwmDarkFrame\": %s,\n  \"systemMotion\": %s,\n  \"animSettledMs\": %.0f,\n  \"hoverFrames\": [%d, %d],\n  \"hoverDirtyMaxPct\": %.2f,\n  \"afterTransition\": {\"paints\": %d, \"timers\": %d},\n  \"partialVsFullDiffPx\": %lld,\n"
-               "  \"port\": {\"openFrameMs\": %.1f, \"imagesMs\": %.0f, \"privateMB\": {\"before\": %.1f, \"open\": %.1f, \"scrolled\": %.1f, \"closed\": %.1f, \"clip\": %.1f, \"afterClip\": %.1f}, \"videoFirstFrameMs\": %.0f, \"imagesMB\": %.1f, \"imagesMaxMB\": %.1f, \"images\": %zu},\n"
+               "  \"port\": {\"openFrameMs\": %.1f, \"imagesMs\": %.0f, \"privateMB\": {\"before\": %.1f, \"open\": %.1f, \"scrolled\": %.1f, \"closed\": %.1f, \"preClip\": %.1f, \"clip\": %.1f, \"afterClip\": %.1f, \"clipProcess\": %.1f}, \"videoFirstFrameMs\": %.0f, \"imagesMB\": %.1f, \"imagesMaxMB\": %.1f, \"images\": %zu},\n"
                "  \"renderer\": \"%s\",\n  \"dpi\": %u,\n  \"dpiAwareness\": %d,\n  \"fonts\": \"%s\",\n  \"gdiFont\": \"%s\",\n  \"liveCapture\": %s,\n  \"firstFrameForced\": %s,\n  \"endDrawHr\": \"0x%08lx\",\n  \"createHr\": \"0x%08lx\",\n  \"client\": \"%ldx%ld\",\n  \"frameMs\": %.1f,\n  \"session\": %lu,\n  \"failed\": %d,\n  \"scenarios\": [%s\n  ],\n  \"interactions\": [%s\n  ]\n}\n",
             first, g_tGfx, g_tWindow, g_tTarget, priv, priv / 1048576.0, pm.WorkingSetSize / 1048576.0, idleMs > 0 ? idleCpu / idleMs * 100.0 : -1.0, idleCpu, idleMs, idlePaints, idleTimers,
             fa.nFileSizeLow, SUCCEEDED(darkHr) ? (dark ? "true" : "false") : "null", systemMotion ? "true" : "false", settled, hoverIn, hoverOut, dirtyPct, afterPaints, afterTimers, partialDiff,
-            portOpenMs, portImagesMs, portPriv0 / 1048576.0, portPrivOpen / 1048576.0, portPrivScrolled / 1048576.0, portPrivClosed / 1048576.0, portPrivVideo / 1048576.0, portPrivVideoClosed / 1048576.0, portVideoMs, portImgBytes / 1048576.0, portImgMax / 1048576.0, portImgCount, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
+            portOpenMs, portImagesMs, portPriv0 / 1048576.0, portPrivOpen / 1048576.0, portPrivScrolled / 1048576.0, portPrivClosed / 1048576.0, portPrivPreClip / 1048576.0, portPrivVideo / 1048576.0, portPrivVideoClosed / 1048576.0, portClipProc / 1048576.0, portVideoMs, portImgBytes / 1048576.0, portImgMax / 1048576.0, portImgCount, g_software ? "d2d-software" : "d2d-hardware", g_dpi, (int)aw, json(g_gfx.families).c_str(), json(g_gfx.gdiFamily).c_str(),
             live ? "true" : "false", forced ? "true" : "false", (unsigned long)g_lastHr, (unsigned long)g_createHr, g_client.right, g_client.bottom, g_lastFrameMs, session, failed, items.c_str(), checks.c_str());
     fclose(f);
     return failed ? 1 : 0;
@@ -662,6 +671,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    // the preview's clip, in a process of its own (video.h)
+    if (argc >= 2 && !wcscmp(argv[1], L"--clip")) { int rc = rn::clipMain(argc, argv); LocalFree(argv); CoUninitialize(); return rc; }
     {
         // console verbs of 2.x (--check, --scan, --firewall, --set-builds-folder, --update-check ...): no window, no mutex
         bool handled = false;

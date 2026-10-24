@@ -1,41 +1,41 @@
-// The preview's video (radarnite.com's item card plays fortnite.gg's clip): Media Foundation's Media Engine in
-// rendering mode on a child window over the preview's media area, muted and looped. Media Foundation is loaded on the
-// first video only (the window starts without it), and everything goes when the preview closes.
+// The preview's clip (radarnite.com's item card plays fortnite.gg's clip), muted and looped. It plays in a process of
+// its own (RadarniteLauncher.exe --clip): Media Foundation and the graphics device it creates cost ~100 MB, and part
+// of that is never given back while a process lives. The clip process puts a child window over the preview's media
+// area of this window (a cross-process child: it never takes the focus, the mouse goes through it), lives in a job
+// that dies with the launcher, and is killed when the preview closes. If it cannot play, the image stays.
 #pragma once
 #include <windows.h>
 #include <stdint.h>
 #include <string>
 
-struct IMFMediaEngine;
-
 namespace rn {
 
-const UINT WM_APP_VIDEO = WM_APP + 4;   // an engine event (wParam = MF_MEDIA_ENGINE_EVENT, lParam = play generation)
+const UINT WM_APP_VIDEO = WM_APP + 4;   // from the clip process: its first frame is on screen (lParam = play generation)
 
 class Video {
 public:
     ~Video() { stop(); }
-    // Plays url (https only) in a child window of parent at r (client pixels, left corners rounded by radius px),
-    // letterboxed on border (0xRRGGBB). The window shows once the first frame is ready; false = it cannot play here.
+    // Starts the clip process for url (https only) over r (client pixels of parent; left corners rounded by radius px),
+    // letterboxed on border (0xRRGGBB). Its window shows once the first frame is ready.
     bool play(HWND parent, const std::string& url, RECT r, int radius, uint32_t border);
     void place(RECT r, bool visible);   // every paint: follows the preview, hidden under a dialog
-    void stop();
-    void onEvent(WPARAM event, LPARAM gen);   // WM_APP_VIDEO (UI thread)
+    void stop();                        // kills the clip process (its window goes with it)
+    void onEvent(WPARAM event, LPARAM gen);   // WM_APP_VIDEO
     const std::string& url() const { return url_; }
-    bool shown() const { return shown_; }     // a frame is on screen
-    bool failed() const { return failed_; }   // the clip could not play: the image stays
+    bool shown() const;                 // a frame is on screen
+    bool failed() const { return failed_; }
+    size_t processBytes() const;        // the clip process's private bytes (selftest)
 
 private:
-    struct Notify;
-    HWND parent_ = nullptr, hwnd_ = nullptr;
-    IMFMediaEngine* engine_ = nullptr;
-    Notify* notify_ = nullptr;
+    HWND parent_ = nullptr, child_ = nullptr;
+    HANDLE proc_ = nullptr;
     std::string url_;
-    RECT r_{}, fit_{};          // the media area, the clip's window inside it
-    DWORD vw_ = 0, vh_ = 0;     // the clip's size
-    int radius_ = 0;
-    bool ready_ = false, shown_ = false, failed_ = false, visible_ = true;
+    RECT r_{};
+    bool visible_ = true, failed_ = false;
     LPARAM gen_ = 0;
 };
+
+// RadarniteLauncher.exe --clip <parent hwnd> <x> <y> <w> <h> <radius> <border rgb> <generation> <url>
+int clipMain(int argc, wchar_t** argv);
 
 } // namespace rn

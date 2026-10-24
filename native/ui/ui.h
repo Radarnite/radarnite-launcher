@@ -258,6 +258,7 @@ public:
     void imagesArrived();                       // WM_APP_IMG
     void videoEvent(WPARAM w, LPARAM l) { video_.onEvent(w, l); invalidate(); }   // WM_APP_VIDEO
     bool videoShown() const { return video_.shown(); }
+    size_t clipBytes() const { return video_.processBytes(); }   // the clip process (selftest)
     // Selftest: clicks and keys on the panel (needs a render target and the mock's catalog)
     std::vector<std::pair<std::wstring, bool>> portCheck(float width, float height);
 

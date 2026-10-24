@@ -12,8 +12,8 @@ and `--selftest-ui`.
 - Cosmetics panel (`port_ui.cpp`, opened by the Cosmetics button on builds that can import, 14.30): filters, search,
   sort, a virtualized grid (only visible cards drawn; `images.cpp`: images downloaded once to `launcher\port\img`,
   decoded at card size on up to 4 workers, 12 MB of bitmaps at most), Import / Import all with the estimate, the
-  live import status, and the item preview with its clip (`video.cpp`: Media Foundation, loaded on the first clip,
-  muted and looped)
+  live import status, and the item preview with its clip (`video.cpp`: Media Foundation in a `--clip` process of its own,
+  in a job that dies with the launcher, killed when the preview closes; muted and looped)
 - Activity panel: resizable, filters, search, copy/clear, virtualized list of up to 3,000 lines
 - Launch bar with stages, spinner and Launch/Stop; menus, toasts and the page's tooltips
 - Native EDIT fields, icons as Direct2D geometries from the page's SVG, keyboard navigation with a visible focus ring

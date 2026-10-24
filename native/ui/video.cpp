@@ -2,8 +2,105 @@
 #include <mfapi.h>
 #include <mfmediaengine.h>
 #include <oleauto.h>
+#include <psapi.h>
+#include <stdio.h>
 
 namespace rn {
+namespace {
+
+const UINT WM_CLIP_EVENT = WM_APP + 1;     // clip process: an engine event (its own window)
+const UINT WM_CLIP_VISIBLE = WM_APP + 2;   // launcher -> clip window: wParam = show it (else hidden and paused)
+const wchar_t* kClass = L"RnClip";
+
+// ================================================================================================ launcher side
+// One job for every clip process: closing the launcher (its last handle) kills them.
+HANDLE clipJob() {
+    static HANDLE job = nullptr;
+    if (!job) {
+        job = CreateJobObjectW(nullptr, nullptr);
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION li = {};
+        li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (job) SetInformationJobObject(job, JobObjectExtendedLimitInformation, &li, sizeof li);
+    }
+    return job;
+}
+
+} // namespace
+
+bool Video::play(HWND parent, const std::string& url, RECT r, int radius, uint32_t border) {
+    stop();
+    url_ = url;
+    gen_++;
+    if (url.compare(0, 8, "https://") || url.find_first_of("\" ") != std::string::npos) { failed_ = true; return false; }
+    parent_ = parent; r_ = r;
+    wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    wchar_t args[160];
+    swprintf(args, 160, L" --clip %llu %ld %ld %ld %ld %d %u %lld ", (unsigned long long)(UINT_PTR)parent, r.left, r.top,
+             r.right - r.left, r.bottom - r.top, radius, border, (long long)gen_);
+    std::wstring cmd = L"\"" + std::wstring(exe) + L"\"" + args + std::wstring(url.begin(), url.end());
+    STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(exe, &cmd[0], nullptr, nullptr, FALSE, CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi)) {
+        failed_ = true;
+        return false;
+    }
+    HANDLE job = clipJob();
+    if (!job || !AssignProcessToJobObject(job, pi.hProcess)) {   // never one that could outlive the launcher
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        failed_ = true;
+        return false;
+    }
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    proc_ = pi.hProcess;
+    return true;
+}
+
+void Video::place(RECT r, bool visible) {
+    if (!proc_) return;
+    if (WaitForSingleObject(proc_, 0) == WAIT_OBJECT_0) {   // it could not play (or died): the image stays
+        CloseHandle(proc_); proc_ = nullptr; child_ = nullptr; failed_ = true;
+        return;
+    }
+    if (!child_) { r_ = r; visible_ = visible; return; }   // applied when its window is up (onEvent)
+    if (memcmp(&r, &r_, sizeof r)) {
+        r_ = r;
+        SetWindowPos(child_, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+    }
+    if (visible != visible_) { visible_ = visible; PostMessageW(child_, WM_CLIP_VISIBLE, visible, 0); }
+}
+
+void Video::onEvent(WPARAM, LPARAM gen) {
+    if (gen != gen_ || !proc_ || child_) return;
+    child_ = FindWindowExW(parent_, nullptr, kClass, nullptr);
+    if (!child_) return;
+    RECT r = r_; r_ = {};
+    bool v = visible_; visible_ = true;
+    place(r, v);
+}
+
+bool Video::shown() const { return child_ && IsWindowVisible(child_); }
+
+size_t Video::processBytes() const {
+    PROCESS_MEMORY_COUNTERS_EX m = { sizeof m };
+    return proc_ && GetProcessMemoryInfo(proc_, (PROCESS_MEMORY_COUNTERS*)&m, sizeof m) ? m.PrivateUsage : 0;
+}
+
+void Video::stop() {
+    if (proc_) {
+        TerminateProcess(proc_, 0);
+        WaitForSingleObject(proc_, 3000);   // its window goes with it
+        CloseHandle(proc_);
+        proc_ = nullptr;
+    }
+    child_ = nullptr;
+    url_.clear();
+    failed_ = false;
+    visible_ = true;
+    gen_++;
+}
+
+// ================================================================================================ clip process
 namespace {
 
 // The attribute GUIDs (mfmediaengine.h only declares them)
@@ -12,45 +109,13 @@ const GUID kPlaybackHwnd = { 0xd988879b, 0x67c9, 0x4d92, { 0xba, 0xa7, 0x6e, 0xa
 const GUID kOutputFormat = { 0x5066893c, 0x8cf9, 0x42bc, { 0x8b, 0x8a, 0x47, 0x22, 0x12, 0xe5, 0x27, 0x26 } };
 const CLSID kFactory = { 0xb44392da, 0x499b, 0x446b, { 0xa4, 0xcb, 0x00, 0x5f, 0xea, 0xd0, 0xe6, 0xd5 } };
 
-// Media Foundation, loaded on the first video
 typedef HRESULT(WINAPI* StartupFn)(ULONG, DWORD);
 typedef HRESULT(WINAPI* AttrsFn)(IMFAttributes**, UINT32);
-typedef HRESULT(WINAPI* ShutdownFn)();
-AttrsFn g_attrs = nullptr;
-ShutdownFn g_shutdown = nullptr;
-bool g_started = false;
-// started for each clip and shut down after it (its work queues and threads go with it)
-bool loadMf() {
-    if (g_started) return true;
-    HMODULE m = LoadLibraryExW(L"mfplat.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (!m) return false;
-    auto startup = (StartupFn)(void*)GetProcAddress(m, "MFStartup");
-    g_attrs = (AttrsFn)(void*)GetProcAddress(m, "MFCreateAttributes");
-    g_shutdown = (ShutdownFn)(void*)GetProcAddress(m, "MFShutdown");
-    if (!startup || !g_attrs || !g_shutdown || FAILED(startup(MF_VERSION, MFSTARTUP_FULL))) return false;
-    g_started = true;
-    return true;
-}
-void unloadMf() { if (g_started) { g_shutdown(); g_started = false; } }
 
-// The video's window: the engine draws into it; the mouse goes through to the window under it
-LRESULT CALLBACK videoProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    switch (m) {
-    case WM_NCHITTEST: return HTTRANSPARENT;
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(h, &ps); EndPaint(h, &ps); return 0; }
-    }
-    return DefWindowProcW(h, m, w, l);
-}
-
-} // namespace
-
-// The engine's events (a Media Foundation thread): posted to the window, which applies them on its own thread.
-struct Video::Notify final : IMFMediaEngineNotify {
+// The engine's events (a Media Foundation thread), posted to the clip window.
+struct Notify final : IMFMediaEngineNotify {
     LONG refs = 1;
-    HWND hwnd;
-    LPARAM gen;
-    Notify(HWND h, LPARAM g) : hwnd(h), gen(g) {}
+    HWND hwnd = nullptr;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** p) override {
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IMFMediaEngineNotify)) { *p = (IMFMediaEngineNotify*)this; AddRef(); return S_OK; }
         *p = nullptr;
@@ -60,103 +125,111 @@ struct Video::Notify final : IMFMediaEngineNotify {
     ULONG STDMETHODCALLTYPE Release() override { LONG r = InterlockedDecrement(&refs); if (!r) delete this; return (ULONG)r; }
     HRESULT STDMETHODCALLTYPE EventNotify(DWORD event, DWORD_PTR, DWORD) override {
         if (event == MF_MEDIA_ENGINE_EVENT_FIRSTFRAMEREADY || event == MF_MEDIA_ENGINE_EVENT_PLAYING || event == MF_MEDIA_ENGINE_EVENT_ERROR)
-            PostMessageW(hwnd, WM_APP_VIDEO, event, gen);
+            PostMessageW(hwnd, WM_CLIP_EVENT, event, 0);
         return S_OK;
     }
 };
 
-bool Video::play(HWND parent, const std::string& url, RECT r, int radius, uint32_t border) {
-    stop();
-    url_ = url;
-    if (url.compare(0, 8, "https://") || !loadMf()) { failed_ = true; return false; }
-    static bool registered = false;
-    if (!registered) {
-        WNDCLASSW wc = {};
-        wc.lpfnWndProc = videoProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"RnVideo";
-        RegisterClassW(&wc);
-        registered = true;
+struct Clip {
+    HWND parent = nullptr, hwnd = nullptr;
+    IMFMediaEngine* engine = nullptr;
+    int radius = 0;
+    LPARAM gen = 0;
+    bool ready = false, visible = true;
+    void apply() {
+        bool show = ready && visible;
+        if (show && engine) engine->Play(); else if (engine) engine->Pause();
+        ShowWindow(hwnd, show ? SW_SHOWNA : SW_HIDE);
     }
-    parent_ = parent; r_ = r; radius_ = radius; gen_++;
-    hwnd_ = CreateWindowExW(0, L"RnVideo", L"", WS_CHILD | WS_CLIPSIBLINGS, r.left, r.top, r.right - r.left, r.bottom - r.top,
-                            parent, nullptr, GetModuleHandleW(nullptr), nullptr);
+    void region() {
+        // the preview's left corners are rounded: so is the clip
+        RECT c; GetClientRect(hwnd, &c);
+        if (radius > 0) SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, c.right + 1 + radius * 2, c.bottom + 1, radius * 2, radius * 2), TRUE);
+    }
+};
+Clip g_clip;
+
+LRESULT CALLBACK clipProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_NCHITTEST: return HTTRANSPARENT;   // the mouse goes to the launcher's window under it
+    case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(h, &ps); EndPaint(h, &ps); return 0; }
+    case WM_SIZE: g_clip.region(); return 0;
+    case WM_TIMER: if (!IsWindow(g_clip.parent)) DestroyWindow(h); return 0;   // the launcher's window is gone
+    case WM_CLIP_VISIBLE: g_clip.visible = w != 0; g_clip.apply(); return 0;
+    case WM_CLIP_EVENT:
+        if (w == MF_MEDIA_ENGINE_EVENT_ERROR) { DestroyWindow(h); return 0; }   // the launcher sees the exit: image stays
+        if (!g_clip.ready) {
+            g_clip.ready = true;
+            g_clip.apply();
+            PostMessageW(g_clip.parent, WM_APP_VIDEO, 1, g_clip.gen);
+        }
+        return 0;
+    case WM_DESTROY: PostQuitMessage(0); return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+
+} // namespace
+
+int clipMain(int argc, wchar_t** argv) {
+    if (argc < 11) return 2;
+    Clip& c = g_clip;
+    c.parent = (HWND)(UINT_PTR)_wcstoui64(argv[2], nullptr, 10);
+    int x = _wtoi(argv[3]), y = _wtoi(argv[4]), w = _wtoi(argv[5]), h = _wtoi(argv[6]);
+    c.radius = _wtoi(argv[7]);
+    uint32_t border = (uint32_t)wcstoul(argv[8], nullptr, 10);
+    c.gen = (LPARAM)_wtoi64(argv[9]);
+    std::wstring url = argv[10];
+    if (!IsWindow(c.parent) || url.compare(0, 8, L"https://")) return 3;
+
+    HMODULE mf = LoadLibraryExW(L"mfplat.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    auto startup = mf ? (StartupFn)(void*)GetProcAddress(mf, "MFStartup") : nullptr;
+    auto attrsFn = mf ? (AttrsFn)(void*)GetProcAddress(mf, "MFCreateAttributes") : nullptr;
+    if (!startup || !attrsFn || FAILED(startup(MF_VERSION, MFSTARTUP_FULL))) return 4;
+
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = clipProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = kClass;
+    RegisterClassW(&wc);
+    // a child of the launcher's window (hidden until the first frame): never activated, never in the taskbar
+    c.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, kClass, L"", WS_CHILD | WS_CLIPSIBLINGS, x, y, w, h, c.parent, nullptr, wc.hInstance, nullptr);
+    if (!c.hwnd) return 5;
+    c.region();
+    SetTimer(c.hwnd, 1, 1000, nullptr);
+
+    Notify* n = new Notify();
+    n->hwnd = c.hwnd;
     IMFMediaEngineClassFactory* f = nullptr;
     IMFAttributes* a = nullptr;
-    notify_ = new Notify(parent, gen_);
-    bool ok = hwnd_ && SUCCEEDED(CoCreateInstance(kFactory, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IMFMediaEngineClassFactory), (void**)&f)) &&
-              SUCCEEDED(g_attrs(&a, 3)) && SUCCEEDED(a->SetUnknown(kCallback, (IMFMediaEngineNotify*)notify_)) &&
-              SUCCEEDED(a->SetUINT64(kPlaybackHwnd, (UINT64)(UINT_PTR)hwnd_)) && SUCCEEDED(a->SetUINT32(kOutputFormat, 87 /*DXGI_FORMAT_B8G8R8A8_UNORM*/)) &&
-              SUCCEEDED(f->CreateInstance(0, a, &engine_));
+    bool ok = SUCCEEDED(CoCreateInstance(kFactory, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IMFMediaEngineClassFactory), (void**)&f)) &&
+              SUCCEEDED(attrsFn(&a, 3)) && SUCCEEDED(a->SetUnknown(kCallback, (IMFMediaEngineNotify*)n)) &&
+              SUCCEEDED(a->SetUINT64(kPlaybackHwnd, (UINT64)(UINT_PTR)c.hwnd)) && SUCCEEDED(a->SetUINT32(kOutputFormat, 87 /*DXGI_FORMAT_B8G8R8A8_UNORM*/)) &&
+              SUCCEEDED(f->CreateInstance(0, a, &c.engine));
     if (a) a->Release();
     if (f) f->Release();
     if (ok) {
         // no sound ever, loops like the page's <video muted loop autoplay>
-        engine_->SetMuted(TRUE);
-        engine_->SetLoop(TRUE);
-        engine_->SetAutoPlay(TRUE);
+        c.engine->SetMuted(TRUE);
+        c.engine->SetLoop(TRUE);
+        c.engine->SetAutoPlay(TRUE);
         IMFMediaEngineEx* ex = nullptr;
-        if (SUCCEEDED(engine_->QueryInterface(__uuidof(IMFMediaEngineEx), (void**)&ex))) {
+        if (SUCCEEDED(c.engine->QueryInterface(__uuidof(IMFMediaEngineEx), (void**)&ex))) {
             MFARGB b = { (BYTE)(border & 255), (BYTE)((border >> 8) & 255), (BYTE)((border >> 16) & 255), 255 };
             ex->UpdateVideoStream(nullptr, nullptr, &b);
             ex->Release();
         }
-        std::wstring w(url.begin(), url.end());
-        BSTR s = SysAllocString(w.c_str());
-        ok = s && SUCCEEDED(engine_->SetSource(s));
+        BSTR s = SysAllocString(url.c_str());
+        ok = s && SUCCEEDED(c.engine->SetSource(s));
         SysFreeString(s);
     }
-    if (!ok) { stop(); url_ = url; failed_ = true; return false; }
-    return true;
-}
-
-void Video::place(RECT r, bool visible) {
-    if (!hwnd_) return;
-    bool moved = memcmp(&r, &r_, sizeof r) != 0;
-    if (moved) {
-        r_ = r;
-        // contain: the clip at its own aspect, centred (the preview's gradient shows around it)
-        RECT f = r;
-        int bw = r.right - r.left, bh = r.bottom - r.top;
-        if (vw_ && vh_ && bw > 0 && bh > 0) {
-            if ((int64_t)bw * vh_ > (int64_t)bh * vw_) { int w = (int)((int64_t)bh * vw_ / vh_); f.left = r.left + (bw - w) / 2; f.right = f.left + w; }
-            else { int h = (int)((int64_t)bw * vh_ / vw_); f.top = r.top + (bh - h) / 2; f.bottom = f.top + h; }
-        }
-        SetWindowPos(hwnd_, nullptr, f.left, f.top, f.right - f.left, f.bottom - f.top, SWP_NOZORDER | SWP_NOACTIVATE);
-        fit_ = f;
-    }
-    if (moved || visible != visible_ || (ready_ && !shown_ && visible)) {
-        visible_ = visible;
-        bool show = visible && ready_;
-        if (show && radius_ > 0) {
-            // the preview's left corners are rounded: so is the video
-            int w = fit_.right - fit_.left, h = fit_.bottom - fit_.top;
-            HRGN g = CreateRoundRectRgn(0, 0, w + 1 + radius_ * 2, h + 1, radius_ * 2, radius_ * 2);
-            SetWindowRgn(hwnd_, g, FALSE);
-        }
-        ShowWindow(hwnd_, show ? SW_SHOWNA : SW_HIDE);
-        shown_ = show;
-        if (engine_) { if (visible) engine_->Play(); else engine_->Pause(); }
-    }
-}
-
-void Video::onEvent(WPARAM event, LPARAM gen) {
-    if (gen != gen_ || !engine_) return;
-    if (event == MF_MEDIA_ENGINE_EVENT_ERROR) { RECT r = r_; std::string u = url_; stop(); url_ = u; r_ = r; failed_ = true; return; }
-    if (!ready_) {
-        ready_ = true;
-        engine_->GetNativeVideoSize(&vw_, &vh_);
-        RECT r = r_; r_ = {}; place(r, visible_);
-    }
-}
-
-void Video::stop() {
-    if (engine_) { engine_->Shutdown(); engine_->Release(); engine_ = nullptr; }
-    if (notify_) { notify_->Release(); notify_ = nullptr; }
-    if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
-    unloadMf();
-    url_.clear();
-    ready_ = shown_ = failed_ = false;
-    vw_ = vh_ = 0;
-    visible_ = true;
+    if (ok) {
+        MSG msg;
+        while (GetMessageW(&msg, nullptr, 0, 0) > 0) DispatchMessageW(&msg);
+    } else if (IsWindow(c.hwnd)) DestroyWindow(c.hwnd);
+    if (c.engine) { c.engine->Shutdown(); c.engine->Release(); }
+    n->Release();
+    return ok ? 0 : 6;
 }
 
 } // namespace rn

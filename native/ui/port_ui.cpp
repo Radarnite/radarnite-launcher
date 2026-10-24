@@ -975,10 +975,13 @@ void App::drawPortPop() {
                     base_ = saved; rt_->SetTransform(base_);
                 } else {
                     box(cr, 8, on ? N::ink : hov ? N::surf2 : N::surf, 1, on ? N::ink : hov ? N::l25b : N::line);
-                    float tw2 = textW(l, cf), nw = textW(cs, Font{ Face::UI, 11, 500, false, true });
-                    float sx = (cr.left + cr.right) / 2 - (tw2 + 6 + nw) / 2;
-                    text(l, cf, sx, cr.top, std::min(tw2 + 1, colW - 16 - nw - 6), 33, on ? N::on : cnt ? N::ink : N::dim);
-                    text(cs, Font{ Face::UI, 11, 500, false, true }, sx + tw2 + 6, cr.top, nw + 2, 33, on ? N::oncount : N::mut);
+                    // a long label with a big count ("Not imported 10,250") gets a smaller label rather than an ellipsis
+                    Font lf = cf, nf2{ Face::UI, 11, 500, false, true };
+                    float gap = 6, tw2 = textW(l, lf), nw = textW(cs, nf2);
+                    if (tw2 + gap + nw > colW - 12) { lf.size = 11.5f; gap = 4; nf2.size = 10.5f; tw2 = textW(l, lf); nw = textW(cs, nf2); }
+                    float sx = std::max(cr.left + 6, (cr.left + cr.right) / 2 - (tw2 + gap + nw) / 2);
+                    text(l, lf, sx, cr.top, std::min(tw2 + 1, colW - 12 - nw - gap), 33, on ? N::on : cnt ? N::ink : N::dim);
+                    text(cs, nf2, sx + std::min(tw2, colW - 12 - nw - gap) + gap, cr.top, nw + 2, 33, on ? N::oncount : N::mut);
                 }
                 hit(id, cr, F_FOCUS | F_HAND, 8);
             }
