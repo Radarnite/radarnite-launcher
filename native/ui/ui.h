@@ -55,6 +55,7 @@ public:
     HBRUSH editBrush(HWND edit, HDC dc);       // WM_CTLCOLOREDIT: the field's colors (the EDITs are opaque)
     void openActivity(bool open);
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
+    void openSheet(bool open);                  // the match settings sheet (selftest: render a scenario with it open)
     // Transitions on/off (Windows "Show animations"; off without a window, so offscreen renders are the rest state)
     void setMotion(bool on);
     bool motion() const { return anim_.motion; }
@@ -89,7 +90,7 @@ private:
                      bool lazy = false, want = false;   // lazy: the EDIT only shows while it has the focus (drawn text otherwise)
                      uint32_t bg = C::bg2; };
     struct Thumb { std::wstring skin; ArtImage img; UINT req = 0; ID2D1Bitmap* bmp = nullptr; ID2D1BitmapBrush* brush = nullptr; };
-    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; bool bare; };
+    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; bool bare; std::wstring ghost; };
 
     void invalidate();
     void dirty(D2D1_RECT_F r);             // repaint only r (client DIPs)
@@ -146,11 +147,15 @@ private:
     // parts
     void drawTitle(float W);
     void drawStage(float top, float bottom);                   // season gradient, rays, skin and fades (cached bitmap)
-    void drawTop(float y, float W);                             // build tabs, +, Cosmetics, Build
-    void drawHero(float x, float right, float top, float bottom);
+    void drawTop(float y, float W);                             // build switcher, +, Cosmetics, Activity, Build
+    void drawPoster(float x, float right, float top, float bottom);   // the season's title (bottom left)
+    float drawDock(float x, float w, float top, float bottom);  // summary or sheet, status line, Launch; returns its top
+    float okline(float x, float y, float w);                    // the status line; returns the height
+    float summary(float x, float y, float w);                   // returns the height
+    float drawSheet(float x, float w, float top, float bottom); // returns its top
+    float sheetBody(float x, float y, float w);                 // returns the bottom
     void drawLaunch(D2D1_RECT_F pr, uint32_t glow);
-    void drawPanel(float x, float y, float w, float h);
-    float panelBody(float x, float y, float w);                 // returns the height
+    void stepBuild(int d);                                      // previous / next build (Q / E, ‹ ›, arrows)
     void drawActivity(float x, float y, float w, float h);
     // season art
     void ensureArt(const wchar_t* skin, UINT px);
@@ -237,6 +242,9 @@ private:
     D2D1_RECT_F tabClip_{};
     int tabEnsure_ = -1;        // build index to scroll into view on the next frame
     D2D1_RECT_F playRect_{};
+    float playRadius_ = 16;
+    bool sheetOpen_ = false;
+    D2D1_RECT_F sheetRect_{};
     bool playShown_ = false, playDisabled_ = false;
     float toastRight_ = 0, toastBottom_ = 0;
     HWND tip_ = nullptr;        // one comctl32 tooltip, its tool = the hovered control

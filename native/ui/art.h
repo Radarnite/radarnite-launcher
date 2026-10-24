@@ -14,6 +14,7 @@ struct SeasonArt {
     const wchar_t* name;    // "Nexus War" ("" when it has none)
     uint32_t c[4];          // radial gradient: center, 30 %, 55 %, edge
     const wchar_t* skin;    // cosmetic id of the skin (nullptr: no art)
+    const wchar_t* hero;    // the skin's name ("Thor"; nullptr when it has none)
 };
 // The season of a build version (chapter 1 season 1 = 1, ..., 1:1 with the major after 2.x); the neutral entry when
 // the version is unknown.

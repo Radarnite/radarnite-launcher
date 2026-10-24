@@ -15,37 +15,37 @@ namespace rn {
 // Colors: the mockup's 14.30 blue, then a hue that matches each season's key art; skin = its battle-pass face.
 static const SeasonArt kSeasons[] = {
     { L"", { 0x5B6476, 0x2A3040, 0x171B26, 0x0B0D12 }, nullptr },   // 0: unknown version
-    { L"", { 0xFF7A59, 0xA8382A, 0x5C1C1A, 0x1A0A0C }, L"cid_028_athena_commando_f" },                    // Renegade Raider
-    { L"Medieval", { 0x8FA6C9, 0x3E5276, 0x1F2B45, 0x0A0E18 }, L"cid_035_athena_commando_m_medieval" },   // Black Knight
-    { L"Space Explorers", { 0xA06BFF, 0x5A2FB0, 0x2C1866, 0x0E0A24 }, L"cid_084_athena_commando_m_assassin" },   // The Reaper
-    { L"Superheroes", { 0xFF4D5E, 0xA3202F, 0x561320, 0x16070B }, L"cid_116_athena_commando_m_carbideblack" },    // Omega
-    { L"Worlds Collide", { 0xFFB547, 0xA8641E, 0x5A3412, 0x170D06 }, L"cid_165_athena_commando_m_darkviking" },   // Ragnarok
-    { L"Darkness Rises", { 0xE46BFF, 0x8A2FB0, 0x461863, 0x140A1E }, L"cid_237_athena_commando_f_cowgirl" },      // Calamity
-    { L"You Better Watch Out", { 0x7FD8FF, 0x2F86C4, 0x174A78, 0x081627 }, L"cid_288_athena_commando_m_iceking" },   // Ice King
-    { L"X Marks the Spot", { 0x3FC6B8, 0x1B7A7E, 0x0E4250, 0x061A20 }, L"cid_347_athena_commando_m_pirateprogressive" },   // Blackheart
-    { L"The Future Is Yours", { 0x4AD9FF, 0x2A6FD6, 0x18307A, 0x090F2A }, L"cid_403_athena_commando_m_rooster" },   // Sentinel
-    { L"Out of Time", { 0x7B6BFF, 0x3A33B8, 0x1D1A66, 0x0A0A24 }, L"cid_484_athena_commando_m_knightremix" },   // Ultima Knight
-    { L"New World", { 0x3FD9A8, 0x1C8A78, 0x0F4A48, 0x061A1C }, L"cid_572_athena_commando_m_viper" },         // Fusion
-    { L"Top Secret", { 0xFFD36B, 0xB88A2A, 0x5E4415, 0x181006 }, L"cid_694_athena_commando_m_catburglar" },   // Midas
-    { L"Splash Down", { 0x4FB6FF, 0x1F6FB8, 0x123D6E, 0x06142A }, L"cid_772_athena_commando_m_sandcastle" },  // Aquaman
-    { L"Nexus War", { 0x5D86FF, 0x2A3F9E, 0x152A6E, 0x0A1028 }, L"cid_845_athena_commando_m_hightowertapas" },   // Thor
-    { L"Zero Point", { 0xE8C27A, 0x9A7A3E, 0x4E3D22, 0x14100A }, L"cid_960_athena_commando_m_cosmos" },       // The Mandalorian
-    { L"Primal", { 0x9BE15D, 0x4F8F2A, 0x284C18, 0x0B1608 }, L"cid_a_038_athena_commando_f_towersentinel" },  // Spire Assassin
-    { L"Invasion", { 0x3FE0D0, 0x178A8F, 0x0C4A55, 0x05181F }, L"cid_a_110_athena_commando_m_alientrooper" },  // Kymera
-    { L"Cubed", { 0xFF3B4F, 0xA0182E, 0x55101E, 0x170609 }, L"cid_a_197_athena_commando_m_clash" },          // Carnage
-    { L"Flipped", { 0xFF6363, 0xB8233A, 0x3A1F6E, 0x0B0B24 }, L"cid_a_293_athena_commando_m_parallelcomic" },  // Spider-Man
-    { L"Resistance", { 0xFFA24A, 0xB5521F, 0x5A2A1A, 0x170B08 }, L"cid_a_367_athena_commando_m_mystic" },    // Doctor Strange
-    { L"Vibin'", { 0xFF2D3D, 0x8F1020, 0x460A14, 0x100406 }, L"cid_a_422_athena_commando_m_realm" },         // Darth Vader
-    { L"Paradise", { 0xFF7AD1, 0xB03A92, 0x5A1F55, 0x170A1A }, L"character_rosedust" },                      // Spider-Gwen
-    { L"Pillars", { 0x9FD9A0, 0x4F8A5A, 0x284A35, 0x0A1610 }, L"character_magicmeadow" },                    // Geralt
-    { L"MEGA", { 0x7FB2D9, 0x3E6A8F, 0x1F3A52, 0x0A141C }, L"character_clearradius" },                       // Eren Jaeger
-    { L"Wilds", { 0x6FE08A, 0x2E9450, 0x174D2C, 0x07180E }, L"character_loudphoenix" },                      // Optimus Prime
-    { L"Last Resort", { 0xC39BFF, 0x6B47B8, 0x352466, 0x0E0A22 }, L"character_smarthyena" },                 // Ahsoka Tano
-    { L"OG", { 0x5AB0FF, 0x2A62C4, 0x163470, 0x08112A }, L"character_rebelclaw_aviator" },                   // Renegade Lynx
-    { L"Underground", { 0x4FD1FF, 0x1F7FBF, 0x114270, 0x061428 }, L"character_zebrascramble_bacon" },        // Peter Griffin
-    { L"Myths & Mortals", { 0xF5C96B, 0xA87A2A, 0x4F3A1A, 0x120D06 }, L"character_stunningmountain_armor" },  // Zeus
-    { L"Wrecked", { 0xFF8A3D, 0xB04A1A, 0x5A2512, 0x170906 }, L"character_megatoof_valve" },                 // Megalo Don
-    { L"Absolute Doom", { 0x5DFF8A, 0x1F9A4A, 0x104D28, 0x06170C }, L"character_soilblend_haunt" },          // Mysterio
+    { L"", { 0xFF7A59, 0xA8382A, 0x5C1C1A, 0x1A0A0C }, L"cid_028_athena_commando_f", L"Renegade Raider" },
+    { L"Medieval", { 0x8FA6C9, 0x3E5276, 0x1F2B45, 0x0A0E18 }, L"cid_035_athena_commando_m_medieval", L"Black Knight" },
+    { L"Space Explorers", { 0xA06BFF, 0x5A2FB0, 0x2C1866, 0x0E0A24 }, L"cid_084_athena_commando_m_assassin", L"The Reaper" },
+    { L"Superheroes", { 0xFF4D5E, 0xA3202F, 0x561320, 0x16070B }, L"cid_116_athena_commando_m_carbideblack", L"Omega" },
+    { L"Worlds Collide", { 0xFFB547, 0xA8641E, 0x5A3412, 0x170D06 }, L"cid_165_athena_commando_m_darkviking", L"Ragnarok" },
+    { L"Darkness Rises", { 0xE46BFF, 0x8A2FB0, 0x461863, 0x140A1E }, L"cid_237_athena_commando_f_cowgirl", L"Calamity" },
+    { L"You Better Watch Out", { 0x7FD8FF, 0x2F86C4, 0x174A78, 0x081627 }, L"cid_288_athena_commando_m_iceking", L"Ice King" },
+    { L"X Marks the Spot", { 0x3FC6B8, 0x1B7A7E, 0x0E4250, 0x061A20 }, L"cid_347_athena_commando_m_pirateprogressive", L"Blackheart" },
+    { L"The Future Is Yours", { 0x4AD9FF, 0x2A6FD6, 0x18307A, 0x090F2A }, L"cid_403_athena_commando_m_rooster", L"Sentinel" },
+    { L"Out of Time", { 0x7B6BFF, 0x3A33B8, 0x1D1A66, 0x0A0A24 }, L"cid_484_athena_commando_m_knightremix", L"Ultima Knight" },
+    { L"New World", { 0x3FD9A8, 0x1C8A78, 0x0F4A48, 0x061A1C }, L"cid_572_athena_commando_m_viper", L"Fusion" },
+    { L"Top Secret", { 0xFFD36B, 0xB88A2A, 0x5E4415, 0x181006 }, L"cid_694_athena_commando_m_catburglar", L"Midas" },
+    { L"Splash Down", { 0x4FB6FF, 0x1F6FB8, 0x123D6E, 0x06142A }, L"cid_772_athena_commando_m_sandcastle", L"Aquaman" },
+    { L"Nexus War", { 0x5D86FF, 0x2A3F9E, 0x152A6E, 0x0A1028 }, L"cid_845_athena_commando_m_hightowertapas", L"Thor" },
+    { L"Zero Point", { 0xE8C27A, 0x9A7A3E, 0x4E3D22, 0x14100A }, L"cid_960_athena_commando_m_cosmos", L"The Mandalorian" },
+    { L"Primal", { 0x9BE15D, 0x4F8F2A, 0x284C18, 0x0B1608 }, L"cid_a_038_athena_commando_f_towersentinel", L"Spire Assassin" },
+    { L"Invasion", { 0x3FE0D0, 0x178A8F, 0x0C4A55, 0x05181F }, L"cid_a_110_athena_commando_m_alientrooper", L"Kymera" },
+    { L"Cubed", { 0xFF3B4F, 0xA0182E, 0x55101E, 0x170609 }, L"cid_a_197_athena_commando_m_clash", L"Carnage" },
+    { L"Flipped", { 0xFF6363, 0xB8233A, 0x3A1F6E, 0x0B0B24 }, L"cid_a_293_athena_commando_m_parallelcomic", L"Spider-Man" },
+    { L"Resistance", { 0xFFA24A, 0xB5521F, 0x5A2A1A, 0x170B08 }, L"cid_a_367_athena_commando_m_mystic", L"Doctor Strange" },
+    { L"Vibin'", { 0xFF2D3D, 0x8F1020, 0x460A14, 0x100406 }, L"cid_a_422_athena_commando_m_realm", L"Darth Vader" },
+    { L"Paradise", { 0xFF7AD1, 0xB03A92, 0x5A1F55, 0x170A1A }, L"character_rosedust", L"Spider-Gwen" },
+    { L"Pillars", { 0x9FD9A0, 0x4F8A5A, 0x284A35, 0x0A1610 }, L"character_magicmeadow", L"Geralt" },
+    { L"MEGA", { 0x7FB2D9, 0x3E6A8F, 0x1F3A52, 0x0A141C }, L"character_clearradius", L"Eren Jaeger" },
+    { L"Wilds", { 0x6FE08A, 0x2E9450, 0x174D2C, 0x07180E }, L"character_loudphoenix", L"Optimus Prime" },
+    { L"Last Resort", { 0xC39BFF, 0x6B47B8, 0x352466, 0x0E0A22 }, L"character_smarthyena", L"Ahsoka Tano" },
+    { L"OG", { 0x5AB0FF, 0x2A62C4, 0x163470, 0x08112A }, L"character_rebelclaw_aviator", L"Renegade Lynx" },
+    { L"Underground", { 0x4FD1FF, 0x1F7FBF, 0x114270, 0x061428 }, L"character_zebrascramble_bacon", L"Peter Griffin" },
+    { L"Myths & Mortals", { 0xF5C96B, 0xA87A2A, 0x4F3A1A, 0x120D06 }, L"character_stunningmountain_armor", L"Zeus" },
+    { L"Wrecked", { 0xFF8A3D, 0xB04A1A, 0x5A2512, 0x170906 }, L"character_megatoof_valve", L"Megalo Don" },
+    { L"Absolute Doom", { 0x5DFF8A, 0x1F9A4A, 0x104D28, 0x06170C }, L"character_soilblend_haunt", L"Mysterio" },
 };
 
 const SeasonArt& seasonArt(int major, int minor) {

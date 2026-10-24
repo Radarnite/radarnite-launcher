@@ -12,16 +12,17 @@ enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
     ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3,
     ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_LINES, ID_ACT, ID_PLAY,
-    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_MODE0, ID_MODE1, ID_CELL0, ID_MENU0 = 200, ID_BUILD0 = 1000,
+    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_MODE0, ID_MODE1, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT, ID_SHEET, ID_SHEETX, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
 const UINT_PTR T_SPIN = 1, T_TOAST = 2, T_ANIM = 3;
 // animation keys: kind | control id
 const uint32_t K_HOVER = 1u << 16, K_COLOR = 2u << 16, K_PRESS = 3u << 16, K_SWITCH = 4u << 16, K_TOAST = 5u << 16,
-               K_SHEEN = 6u << 16, K_GREET = 7u << 16, K_SHIMMER = 8u << 16;
+               K_SHEEN = 6u << 16, K_GREET = 7u << 16, K_SHIMMER = 8u << 16, K_SHEET = 9u << 16;
 const float TB = 40;
 // lobby screen colors (the mockup's): glass fill, the opaque fields under the EDITs, the ready green, dark text
 const uint32_t GLASS = 0x090D1C, FIELD = 0x0B0E19, GREEN = 0x3DFF6E, INK = 0x101114;
+const uint32_t FROST = 0x0C1126;   // .frost: the dock's summary and settings sheet, rgba(12,17,38,.55)
 const size_t MAXLOG = 3000;
 const float LOG_LH = 19.2f;   // 12px * 1.6
 
@@ -155,6 +156,40 @@ LRESULT CALLBACK editProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD
     return DefSubclassProc(h, m, w, l);
 }
 
+// An IDWriteTextRenderer that turns a layout's glyph runs into path geometries (the poster's outlined version)
+class OutlineRenderer final : public IDWriteTextRenderer {
+public:
+    struct Run { ID2D1PathGeometry* geo; float x, y; };
+    explicit OutlineRenderer(ID2D1Factory* f) : f_(f) {}
+    ~OutlineRenderer() { for (auto& r : runs) release(r.geo); }
+    std::vector<Run> runs;
+    ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** p) override {
+        if (id == __uuidof(IUnknown) || id == __uuidof(IDWritePixelSnapping) || id == __uuidof(IDWriteTextRenderer)) { *p = this; return S_OK; }
+        *p = nullptr; return E_NOINTERFACE;
+    }
+    HRESULT STDMETHODCALLTYPE IsPixelSnappingDisabled(void*, BOOL* v) override { *v = TRUE; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetCurrentTransform(void*, DWRITE_MATRIX* m) override { *m = { 1, 0, 0, 1, 0, 0 }; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetPixelsPerDip(void*, FLOAT* v) override { *v = 1; return S_OK; }
+    HRESULT STDMETHODCALLTYPE DrawGlyphRun(void*, FLOAT x, FLOAT y, DWRITE_MEASURING_MODE, const DWRITE_GLYPH_RUN* run, const DWRITE_GLYPH_RUN_DESCRIPTION*, IUnknown*) override {
+        ID2D1PathGeometry* g = nullptr; ID2D1GeometrySink* k = nullptr;
+        if (SUCCEEDED(f_->CreatePathGeometry(&g)) && SUCCEEDED(g->Open(&k))) {
+            k->SetFillMode(D2D1_FILL_MODE_WINDING);
+            run->fontFace->GetGlyphRunOutline(run->fontEmSize, run->glyphIndices, run->glyphAdvances, run->glyphOffsets, run->glyphCount, run->isSideways, run->bidiLevel % 2, k);
+            k->Close();
+            runs.push_back({ g, x, y }); g = nullptr;
+        }
+        release(k); release(g);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DrawUnderline(void*, FLOAT, FLOAT, const DWRITE_UNDERLINE*, IUnknown*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE DrawStrikethrough(void*, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH*, IUnknown*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE DrawInlineObject(void*, FLOAT, FLOAT, IDWriteInlineObject*, BOOL, BOOL, IUnknown*) override { return S_OK; }
+private:
+    ID2D1Factory* f_;
+};
+
 } // namespace
 
 // ================================================================================================ lifetime
@@ -162,7 +197,7 @@ App::App(Gfx& g, Core* core) : g_(g), core_(core) {
     InitializeCriticalSection(&cs_);
     anim_.motion = false;   // offscreen renders show the rest state (the page's tests run with reduced motion)
     edits_[0].id = ID_NAME; edits_[0].f = { Face::UI, 13, 600, false }; edits_[0].bg = FIELD;
-    edits_[1].id = ID_BOTS; edits_[1].f = { Face::Display, 26, 900, true }; edits_[1].bg = FIELD; edits_[1].lazy = true;
+    edits_[1].id = ID_BOTS; edits_[1].f = { Face::Display, 24, 900, true }; edits_[1].bg = FIELD; edits_[1].lazy = true;
     edits_[2].id = ID_SEARCH; edits_[2].f = { Face::UI, 12, 400, false };
     edits_[3].id = ID_P_SEARCH; edits_[3].f = { Face::UI, 13, 400, false }; edits_[3].bg = FIELD;   // the panel's search: a field on the season art, like the name
     float h = 0;
@@ -258,10 +293,12 @@ void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
     release(gs);
     if (SUCCEEDED(rt_->CreateGradientStopCollection(sk, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gs))) rt_->CreateLinearGradientBrush({}, gs, &shimmer_);
     release(gs);
-    // .md cards: linear-gradient(160deg, #6fd96f, #1f5420) and (160deg, #b06cff, #4a1f80); the bots range: #8b5cf6 -> #c084fc
-    const uint32_t grads[3][2] = { { 0x6FD96F, 0x1F5420 }, { 0xB06CFF, 0x4A1F80 }, { 0x8B5CF6, 0xC084FC } };
+    // .sheet .m cards: linear-gradient(160deg, rgba(88,211,107,.45), rgba(31,138,58,.35)) and (160deg, #b26bff, #6a2bd0);
+    // the bots slider: #8c6bff -> #b79bff
+    const uint32_t grads[3][2] = { { 0x58D36B, 0x1F8A3A }, { 0xB26BFF, 0x6A2BD0 }, { 0x8C6BFF, 0xB79BFF } };
+    const float galpha[3][2] = { { .45f, .35f }, { 1, 1 }, { 1, 1 } };
     for (int i = 0; i < 3; i++) {
-        const D2D1_GRADIENT_STOP st[] = { { 0, rgb(grads[i][0]) }, { 1, rgb(grads[i][1]) } };
+        const D2D1_GRADIENT_STOP st[] = { { 0, rgb(grads[i][0], galpha[i][0]) }, { 1, rgb(grads[i][1], galpha[i][1]) } };
         if (SUCCEEDED(rt_->CreateGradientStopCollection(st, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs))) rt_->CreateLinearGradientBrush({}, gs, i < 2 ? &modeBr_[i] : &rangeBr_);
         release(gs);
     }
@@ -466,6 +503,25 @@ void App::select(const std::wstring& name, bool click) {
     invalidate();
 }
 
+// The match settings sheet: fades in over the summary; closing it takes the focus out of it (the callers put it back
+// on the Match settings button)
+void App::openSheet(bool open) {
+    if (sheetOpen_ == open) return;
+    sheetOpen_ = open;
+    contentScroll_ = 0;
+    if (open) { anim_.to(K_SHEET, 0, 1, T2, Curve::Ui); animate(); }
+    else anim_.stop(K_SHEET);
+    invalidate();
+}
+
+void App::stepBuild(int d) {
+    if (busy() || st_.builds.empty()) return;
+    int i = 0;
+    for (size_t k = 0; k < st_.builds.size(); k++) if (st_.builds[k].name == selected_) i = (int)k;
+    int j = std::max(0, std::min((int)st_.builds.size() - 1, i + d));
+    if (j != i) select(st_.builds[j].name, true);
+}
+
 void App::openActivity(bool open) {
     actOpen_ = open;
     if (open) { unseen_ = 0; unseenLevel_ = 0; logFollow_ = true; }
@@ -524,8 +580,14 @@ void App::editKey(int id, UINT vk, bool ctrl, bool shift) {
     if (vk == VK_ESCAPE) {   // search: clear it; name/bots: back to the saved value
         if (id == ID_P_SEARCH) { if (pQ_.empty()) key(VK_ESCAPE, false, false); else SetWindowTextW(edits_[3].hwnd, L""); }
         else if (id == ID_SEARCH) SetWindowTextW(edits_[2].hwnd, L"");
-        else if (id == ID_NAME) SetWindowTextW(edits_[0].hwnd, st_.config.displayName.c_str());
-        else SetWindowTextW(edits_[1].hwnd, std::to_wstring(st_.config.bots).c_str());
+        else {   // name / bots: back to the saved value; already there: Escape closes the sheet
+            wchar_t buf[64] = L"";
+            EditBox& e = edits_[id == ID_NAME ? 0 : 1];
+            std::wstring saved = id == ID_NAME ? st_.config.displayName : std::to_wstring(st_.config.bots);
+            GetWindowTextW(e.hwnd, buf, 64);
+            if (saved == buf) key(VK_ESCAPE, false, false);
+            else SetWindowTextW(e.hwnd, saved.c_str());
+        }
         return;
     }
     if (id == ID_BOTS && (vk == VK_UP || vk == VK_DOWN)) {
@@ -784,9 +846,10 @@ void App::drawScrollbar(int id, float x, float y, float h, float scroll, float t
 }
 
 // ================================================================================================ paint
-// The main screen ("B · Lobby"): the selected build's season art fills the window under the title bar; build tabs and
-// the Cosmetics / Build buttons on top, the version, its status and Launch at the bottom left, a glass side panel
-// with the status cells, modes and settings on the right, Activity docked at the bottom when open.
+// The main screen ("E · Poster"): the selected build's season art fills the window under the title bar, its version
+// as a huge outlined poster number behind the skin; the build switcher and the Cosmetics / Activity / Build buttons on
+// top, the season's name at the bottom left, one Launch at the bottom right with the match summary and the status
+// line above it (the settings open as a sheet in the summary's place), Activity docked at the bottom when open.
 void App::paint(float W, float H) {
     if (!rt_) return;
     W_ = W; H_ = H;
@@ -801,26 +864,30 @@ void App::paint(float W, float H) {
     rt_->Clear(rgb(C::bg));
 
     // Activity docks over the bottom (the art stays the same size under it: no new decode or stage bitmap when it
-    // opens or its grip moves); the hero and the panel keep at least 220 DIPs above it
+    // opens or its grip moves); the title and the dock keep at least 220 DIPs above it
     float actTop = H;
     if (actOpen_) actTop = H - std::max(140.f, std::min(actH_, H - TB - 220));
     drawStage(TB, H);
     drawTitle(W);
 
-    float pw = std::max(280.f, std::min(340.f, W * 0.27f));
-    float px = W - 24 - pw, py = TB + 90, pb = actTop - 24;
-    bool panel = pb - py >= 70 && !pOpen_;
-    drawTop(TB + 18, W);
+    // "E · Poster": the switcher and the icon buttons on top, the season's title at the bottom left, the dock (summary
+    // or settings sheet, status line, Launch) at the bottom right; 48 DIPs from the edges on a large window
+    float mx = std::max(24.f, std::min(48.f, W * .0234f)), my = std::max(24.f, std::min(48.f, (H - TB) * .045f));
+    drawTop(TB + 24, W);
     contentClip_ = {};
-    if (pOpen_) drawPort(0, TB + 76, W, actTop - TB - 76);   // the cosmetics panel under the tabs
+    float dockTop = actTop - 24;
+    playShown_ = false;
+    if (pOpen_) { sheetRect_ = {}; drawPort(0, TB + 76, W, actTop - TB - 76); }   // the cosmetics panel under the switcher
     else {
-        drawHero(W < 900 ? 24.f : 34.f, (panel ? px : W) - 24, py, actTop - (actTop - TB < 600 ? 24.f : 34.f));
-        if (panel) drawPanel(px, py, pw, pb - py);
+        float dw = std::max(300.f, std::min(540.f, W * .264f));
+        float dx = W - mx - dw;
+        dockTop = drawDock(dx, dw, TB + 84, actTop - my);
+        drawPoster(mx, dx - 24, TB + 84, actTop - my - 8);
     }
     if (actOpen_) drawActivity(0, actTop, W, H - actTop);
-    if (playShown_ && !pOpen_) hit(ID_PLAY, playRect_, F_FOCUS | F_HAND | (playDisabled_ ? F_DISABLED : 0), 16);   // the last control, like the page
-    toastRight_ = panel ? px - 16 : W - 24;
-    toastBottom_ = actTop - 24;
+    if (playShown_ && !pOpen_) hit(ID_PLAY, playRect_, F_FOCUS | F_HAND | (playDisabled_ ? F_DISABLED : 0), playRadius_);   // the last control, like the page
+    toastRight_ = pOpen_ ? W - 24 : W - mx;
+    toastBottom_ = pOpen_ ? actTop - 24 : dockTop - 12;
     drawMenu();
     drawPortOverlays();
     drawToasts(W, H);
@@ -876,7 +943,7 @@ float App::gbutton(int id, float x, float y, float h, const wchar_t* label, Icon
     if (measure) return w;
     D2D1_RECT_F r = rc(x, y, w, h);
     int owner = menu_ == 1 ? ID_ADD : menu_ == 2 ? ID_BUILDMENU : menu_ == 3 ? ID_COSMETICS : 0;
-    float hv = fx(K_HOVER | id, hover_ == id || owner == id ? 1.f : 0.f, r);
+    float hv = fx(K_HOVER | id, hover_ == id || owner == id || (id == ID_ACT && actOpen_) || (id == ID_P_OPEN && pOpen_) ? 1.f : 0.f, r);
     glass(r, 12, .62f + .2f * hv, .12f + .16f * hv);
     if (hasIcon) icon(ic, iconOnly ? x + (w - 16) / 2 : x + pad, y + (h - 16) / 2, 16, C::white);
     if (tw > 0 && text(label, f, x + pad + (hasIcon ? 24 : 0), y, tw + 1, h, C::white)) issues.push_back(std::wstring(L"clipped btn: ") + label);
@@ -956,10 +1023,13 @@ void App::drawStage(float top, float bottom) {
     const Build* b = loaded_ ? sel() : nullptr;
     const SeasonArt& sa = b ? seasonArt(b->major, b->minor) : seasonArt(0, 0);
     float W = W_, sh = bottom - top;
-    ensureArt(sa.skin, (UINT)lroundf(sh * scale_));
-    BgKey k = { W, top, bottom, scale_, &sa, artGen_, rt_, pOpen_ };   // bare: the cosmetics panel shows the season without the skin
+    // img.skin: 1180 DIPs tall at a 1064 DIP stage, 30 below its top, centered at 46.4 % of the width
+    const float SKIN_H = 1180.f / 1064, SKIN_T = 30.f / 1064, SKIN_X = .464f;
+    ensureArt(sa.skin, (UINT)lroundf(sh * SKIN_H * scale_));
+    // bare: the cosmetics panel shows the season without the skin and the version
+    BgKey k = { W, top, bottom, scale_, &sa, artGen_, rt_, pOpen_, b && !pOpen_ ? verLabel(*b) : std::wstring() };
     bool same = bg_ && k.w == bgKey_.w && k.top == bgKey_.top && k.bottom == bgKey_.bottom && k.scale == bgKey_.scale && k.sa == bgKey_.sa &&
-                k.artGen == bgKey_.artGen && k.rt == bgKey_.rt && k.bare == bgKey_.bare;
+                k.artGen == bgKey_.artGen && k.rt == bgKey_.rt && k.bare == bgKey_.bare && k.ghost == bgKey_.ghost;
     if (!same) {
         release(bg_); release(bgRT_);
         D2D1_SIZE_U px = D2D1::SizeU((UINT32)ceilf(W * scale_ - 0.01f), (UINT32)ceilf(sh * scale_ - 0.01f));
@@ -968,16 +1038,16 @@ void App::drawStage(float top, float bottom) {
             t->BeginDraw();
             t->Clear(rgb(sa.c[3]));
             ID2D1GradientStopCollection* gs = nullptr;
-            // .bg: radial-gradient(90% 120% at 70% 35%, c0 0%, c1 30%, c2 55%, c3 100%)
-            const D2D1_GRADIENT_STOP bgs[] = { { 0, rgb(sa.c[0]) }, { .30f, rgb(sa.c[1]) }, { .55f, rgb(sa.c[2]) }, { 1, rgb(sa.c[3]) } };
+            // .bg: radial-gradient(80% 110% at 42% 40%, c0 0%, c1 32%, c2 58%, c3 100%)
+            const D2D1_GRADIENT_STOP bgs[] = { { 0, rgb(sa.c[0]) }, { .32f, rgb(sa.c[1]) }, { .58f, rgb(sa.c[2]) }, { 1, rgb(sa.c[3]) } };
             ID2D1RadialGradientBrush* rb = nullptr;
             if (SUCCEEDED(t->CreateGradientStopCollection(bgs, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
-                SUCCEEDED(t->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(D2D1::Point2F(.70f * W, .35f * sh), {}, .9f * W, 1.2f * sh), gs, &rb)))
+                SUCCEEDED(t->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(D2D1::Point2F(.42f * W, .40f * sh), {}, .8f * W, 1.1f * sh), gs, &rb)))
                 t->FillRectangle(D2D1::RectF(0, 0, W, sh), rb);
             release(rb); release(gs);
-            // .rays: repeating-conic-gradient(from 190deg at 66% 42%, rgba(255,255,255,.055) 0 5deg, transparent 5deg 15deg),
-            // masked by radial-gradient(55% 75% at 66% 42%, #000, transparent): 24 wedges under a fading radial brush
-            float cx = .66f * W, cy = .42f * sh, R = 2 * (W + sh);
+            // .rays: repeating-conic-gradient(from 190deg at 42% 44%, rgba(255,255,255,.055) 0 5deg, transparent 5deg 15deg),
+            // masked by radial-gradient(55% 75% at 42% 44%, #000, transparent): 24 wedges under a fading radial brush
+            float cx = .42f * W, cy = .44f * sh, R = 2 * (W + sh);
             ID2D1PathGeometry* pg = nullptr; ID2D1GeometrySink* gk = nullptr;
             if (SUCCEEDED(g_.d2d->CreatePathGeometry(&pg)) && SUCCEEDED(pg->Open(&gk))) {
                 for (int i = 0; i < 24; i++) {
@@ -995,25 +1065,51 @@ void App::drawStage(float top, float bottom) {
                 release(rb); release(gs);
             }
             release(gk); release(pg);
-            // img.art: height = the stage, bottom 16 % below it, translateX(-46%) from the middle; its drop shadow is in
-            // the pixels
+            // .ghost: the version, italic 900 at 600 DIPs on a 1064 DIP stage (narrower to fit the width), -.06em, 150 DIPs
+            // from the left and the top (line-height .8); a .05 white fill and a 3px .16 white outline
+            if (!k.ghost.empty()) {
+                Font gf{ Face::Display, 100, 900, true };
+                IDWriteTextLayout* l = nullptr;
+                if (SUCCEEDED(g_.dw->CreateTextLayout(k.ghost.c_str(), (UINT32)k.ghost.size(), g_.format(gf), 1e5f, 1e4f, &l))) {
+                    IDWriteTextLayout1* l1 = nullptr;
+                    if (SUCCEEDED(l->QueryInterface(__uuidof(IDWriteTextLayout1), (void**)&l1))) { l1->SetCharacterSpacing(0, -6.f, 0, { 0, (UINT32)k.ghost.size() }); l1->Release(); }
+                    DWRITE_TEXT_METRICS m{}; l->GetMetrics(&m);
+                    float size = std::min(600.f / 1064 * sh, m.width > 0 ? .92f * W / m.width * 100 : 1e9f), s = size / 100;
+                    float asc, hh; g_.fontBox(gf, &asc, &hh);
+                    float left = 150.f / 2048 * W, base = 150.f / 1064 * sh + ((80 - hh) / 2 + asc) * s;
+                    OutlineRenderer o(g_.d2d);
+                    l->Draw(nullptr, &o, 0, 0);
+                    ID2D1SolidColorBrush* gb = nullptr;
+                    if (SUCCEEDED(t->CreateSolidColorBrush(rgb(C::white, .05f), &gb))) {
+                        for (auto& r : o.runs) {
+                            t->SetTransform(D2D1::Matrix3x2F::Translation(r.x, 0) * D2D1::Matrix3x2F::Scale(s, s) * D2D1::Matrix3x2F::Translation(left, base));
+                            gb->SetColor(rgb(C::white, .05f)); t->FillGeometry(r.geo, gb);
+                            gb->SetColor(rgb(C::white, .16f)); t->DrawGeometry(r.geo, gb, 3 / s);
+                        }
+                        t->SetTransform(D2D1::Matrix3x2F::Identity());
+                    }
+                    release(gb);
+                    l->Release();
+                }
+            }
+            // img.skin: its drop shadow is in the pixels
             if (!artImg_.px.empty() && !k.bare) {
                 ID2D1Bitmap* bm = nullptr;
                 D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
                 if (SUCCEEDED(t->CreateBitmap(D2D1::SizeU(artImg_.w, artImg_.h), artImg_.px.data(), artImg_.w * 4, bp, &bm))) {
-                    float boxH = (float)(artImg_.h - artImg_.padT - artImg_.padB), kk = sh / boxH;
+                    float boxH = (float)(artImg_.h - artImg_.padT - artImg_.padB), kk = sh * SKIN_H / boxH;
                     float boxW = (artImg_.w - artImg_.padL - artImg_.padR) * kk;
-                    float left = .5f * W - .46f * boxW, bot = sh * (1 + 120.f / 760.f), tp = bot - sh;
+                    float left = SKIN_X * W - .5f * boxW, tp = SKIN_T * sh, bot = tp + sh * SKIN_H;
                     t->DrawBitmap(bm, D2D1::RectF(left - artImg_.padL * kk, tp - artImg_.padT * kk, left + boxW + artImg_.padR * kk, bot + artImg_.padB * kk), 1,
                                   D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                 }
                 release(bm);
             }
-            // .fade: linear-gradient(0deg, rgba(6,9,22,.92) 0%, rgba(6,9,22,.35) 32%, transparent 55%),
-            //        linear-gradient(90deg, rgba(6,9,22,.7) 0%, transparent 35%, transparent 65%, rgba(6,9,22,.75) 100%)
+            // .fade: linear-gradient(0deg, rgba(6,9,22,.85) 0%, rgba(6,9,22,.25) 30%, transparent 50%),
+            //        linear-gradient(90deg, rgba(6,9,22,.5) 0%, transparent 25%, transparent 60%, rgba(6,9,22,.7) 100%)
             const uint32_t fc = 0x060916;
-            const D2D1_GRADIENT_STOP f1[] = { { 0, rgb(fc, .92f) }, { .32f, rgb(fc, .35f) }, { .55f, rgb(fc, 0) }, { 1, rgb(fc, 0) } };
-            const D2D1_GRADIENT_STOP f2[] = { { 0, rgb(fc, .7f) }, { .35f, rgb(fc, 0) }, { .65f, rgb(fc, 0) }, { 1, rgb(fc, .75f) } };
+            const D2D1_GRADIENT_STOP f1[] = { { 0, rgb(fc, .85f) }, { .30f, rgb(fc, .25f) }, { .50f, rgb(fc, 0) }, { 1, rgb(fc, 0) } };
+            const D2D1_GRADIENT_STOP f2[] = { { 0, rgb(fc, .5f) }, { .25f, rgb(fc, 0) }, { .60f, rgb(fc, 0) }, { 1, rgb(fc, .7f) } };
             ID2D1LinearGradientBrush* lb = nullptr;
             if (SUCCEEDED(t->CreateGradientStopCollection(f1, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs)) &&
                 SUCCEEDED(t->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, sh), D2D1::Point2F(0, 0)), gs, &lb)))
@@ -1043,115 +1139,144 @@ void App::drawStage(float top, float bottom) {
 }
 
 // ------------------------------------------------------------------------------------------------ top row
-// .top: build tabs (version, "C2 · S4", the skin faded on the right; the selected one white), the + tab, then the glass
-// Cosmetics and Build buttons on the right. Tabs shrink towards 112 DIPs, then scroll (wheel, keyboard, selection).
+// .sw (top left): ‹, the builds as labels (version + "C2 S4"; the selected one white with a 3px underline), ›, + and
+// the Q / E keycaps; the labels scroll (wheel, keyboard, selection) when they do not fit. .tr (top right): Cosmetics,
+// Activity and Build as 44 DIP glass icon buttons with their badges.
 void App::drawTop(float y, float W) {
     const Build* b = loaded_ ? sel() : nullptr;
-    bool compact = W < 860;
-    float bw = 0, cw = 0, right = W - 24;
-    int cosId = ID_COSMETICS;
-    if (b) {
-        bw = gbutton(ID_BUILDMENU, 0, 0, 40, L"Build", Icon::More, compact, true);
-        cw = gbutton(ID_COSMETICS, 0, 0, 40, L"Cosmetics", Icon::Cos, compact, true);
-        cosId = b->port ? (int)ID_P_OPEN : (int)ID_COSMETICS;   // where cosmetics can be imported: the cosmetics panel
-        right -= bw + 10 + cw + 16;
+    const float bs = 44, ty = y - 6, ah = 40;
+    float right = W - 24;
+    if (loaded_) {
+        int nb = b ? 3 : 1;
+        float x = W - 24 - nb * bs - (nb - 1) * 10;
+        right = x;
+        if (b) {
+            int cosId = b->port ? (int)ID_P_OPEN : (int)ID_COSMETICS;   // where cosmetics can be imported: the cosmetics panel
+            gbutton(cosId, x, ty, bs, L"Cosmetics", Icon::Cos, true);
+            if (cosId == ID_P_OPEN && !pOpen_) {
+                // cosmetics of the current game can be imported: a brighter ring and, once listed, how many are new
+                box(rc(x, ty, bs, bs), 12, 0, 0, C::white, .42f);
+                std::wstring n = pNewAll_ > 0 && pBuild_ == selected_ ? (pNewAll_ > 9999 ? fmt(L"%dk", pNewAll_ / 1000) : thousands(pNewAll_)) : L"";
+                Font nf{ Face::UI, 10.5f, 700, false, true };
+                float nw = std::max(18.f, textW(n, nf) + 12), nx = x + bs + 10 - nw, ny = ty - 8;
+                if (!n.empty()) { fill(rc(nx, ny, nw, 18), C::white, 1, 9); text(n, nf, nx, ny, nw, 18, INK, 1); }
+            }
+            if (menu_ == 3) menuAnchor_ = rc(x, ty, bs, bs);
+            x += bs + 10;
+        }
+        // Activity: the lines it got while closed, colored by their worst level
+        gbutton(ID_ACT, x, ty, bs, L"Activity", Icon::Log, true);
+        if (unseen_) {
+            std::wstring n = unseen_ > 999 ? L"999+" : std::to_wstring(unseen_);
+            Font nf{ Face::UI, 10.5f, 700, false, true };
+            float nw = std::max(18.f, textW(n, nf) + 10), nx = x + bs + 7 - nw, ny = ty - 7;
+            uint32_t bg = unseenLevel_ == 2 ? C::bad : unseenLevel_ == 1 ? C::warn : C::white;
+            fill(rc(nx, ny, nw, 18), bg, 1, 9);
+            text(n, nf, nx, ny, nw, 18, unseenLevel_ == 2 ? C::white : INK, 1);
+        }
+        x += bs + 10;
+        if (b) {
+            gbutton(ID_BUILDMENU, x, ty, bs, L"Build", Icon::More, true);
+            if (menu_ == 2) menuAnchor_ = rc(x, ty, bs, bs);
+        }
     }
-    const float x0 = 24;
-    float avail = std::max(0.f, right - x0 - 10 - 52);
-    Font vf{ Face::Display, 22, 900, true }, sf{ Face::UI, 10.5f, 400, false };
-    int n = loaded_ ? (int)st_.builds.size() : 3;
-    std::vector<float> tw((size_t)n, 150.f);
+
+    const float L = std::max(24.f, std::min(40.f, W * .0195f));
+    int n = loaded_ ? (int)st_.builds.size() : 3, cur = -1;
+    if (loaded_) for (int i = 0; i < n; i++) if (st_.builds[i].name == selected_) cur = i;
+    Font vf{ Face::Display, 22, 900, true }, sf{ Face::UI, 11, 600, false };
+    auto small = [&](const Build& bd) { std::wstring s = seasonShort(bd.major, bd.minor); size_t p = s.find(L" · "); if (p != std::wstring::npos) s.replace(p, 3, L" "); return s; };
+    std::vector<float> lw((size_t)n, 100.f);
     float total = 0;
     for (int i = 0; i < n; i++) {
         if (loaded_) {
             const Build& bd = st_.builds[i];
-            tw[i] = std::min(220.f, std::max(150.f, 28 + 2 + std::max(textW(verLabel(bd), vf, -0.44f), textW(seasonShort(bd.major, bd.minor), sf))));
+            std::wstring s = small(bd);
+            lw[i] = 16 + textW(verLabel(bd), vf) + 2 + (s.empty() ? 0 : 8 + textW(s, sf)) + 16;
         }
-        total += tw[i] + (i ? 10 : 0);
+        total += lw[i] + (i ? 6 : 0);
     }
-    if (total > avail && n) {
-        float gaps = 10.f * (n - 1), k = std::max(0.f, avail - gaps) / (total - gaps);
-        total = gaps;
-        for (auto& w : tw) { w = std::max(112.f, floorf(w * k)); total += w; }
-    }
+    bool keys = W >= 980;
+    float fixedR = 6 + ah + 12 + ah + (keys ? 10 + 22 + 4 + 22 : 0);
+    float lx0 = L + ah + 6;
+    float avail = std::max(0.f, right - 24 - lx0 - fixedR);
     float viewW = std::min(total, avail);
     tabMax_ = std::max(0.f, total - avail);
     if (tabEnsure_ >= 0 && tabEnsure_ < n) {
         float a = 0;
-        for (int i = 0; i < tabEnsure_; i++) a += tw[i] + 10;
+        for (int i = 0; i < tabEnsure_; i++) a += lw[i] + 6;
         if (a < tabScroll_) tabScroll_ = a;
-        else if (a + tw[tabEnsure_] > tabScroll_ + viewW) tabScroll_ = a + tw[tabEnsure_] - viewW;
+        else if (a + lw[tabEnsure_] > tabScroll_ + viewW) tabScroll_ = a + lw[tabEnsure_] - viewW;
     }
     tabEnsure_ = -1;
     tabScroll_ = std::max(0.f, std::min(tabScroll_, tabMax_));
     tabScroll_ = roundf(tabScroll_ * scale_) / scale_;
 
+    // ‹ and ›: the previous / next build (Q / E); dim at the ends and while a session runs
+    auto arrow = [&](int id, float ax, Icon ic, bool on) {
+        D2D1_RECT_F r = rc(ax, y, ah, ah);
+        float hv = fx(K_HOVER | id, on && hover_ == id ? 1.f : 0.f, r);
+        glass(r, 12, .62f + .2f * hv, .12f + .16f * hv);
+        icon(ic, ax + 12, y + 12, 16, C::white, on ? 1.f : .35f);
+        hit(id, r, F_FOCUS | F_HAND | (on ? 0 : F_DISABLED), 12);
+    };
+    bool canPrev = loaded_ && cur > 0 && !busy(), canNext = loaded_ && cur >= 0 && cur + 1 < n && !busy();
+    arrow(ID_PREV, L, Icon::ChevL, canPrev);
+
     D2D1_RECT_F saved = clip_;
-    tabClip_ = clip_ = { x0 - 4, y - 6, x0 + viewW + 4, y + 52 + 6 };
+    tabClip_ = clip_ = { lx0 - 4, y - 6, lx0 + viewW + 4, y + ah + 6 };
     rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
-    float x = x0 - tabScroll_;
+    float x = lx0 - tabScroll_;
     for (int i = 0; i < n; i++) {
-        D2D1_RECT_F r = rc(x, y, tw[i], 52);
-        x += tw[i] + 10;
+        D2D1_RECT_F r = rc(x, y, lw[i], ah);
+        x += lw[i] + 6;
         if (!loaded_) { skeleton(i, r); continue; }
         const Build& bd = st_.builds[i];
         int id = ID_BUILD0 + i;
-        bool on = bd.name == selected_;
-        float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);   // background and border 120 ms (selection is instant)
-        if (on) fill(r, C::white, 1, 12); else box(r, 12, 0x080C1A, .55f + .15f * hv, C::white, 0);
-        const SeasonArt& sa = seasonArt(bd.major, bd.minor);
-        if (ID2D1BitmapBrush* tb = thumb(sa.skin)) {
-            const ArtImage* im = nullptr;
-            for (auto& t : thumbs_) if (t.brush == tb) im = &t.img;
-            float ih = im->h / scale_, s = 78 / ih, iw = im->w / scale_ * s;
-            tb->SetTransform(D2D1::Matrix3x2F::Scale(s, s) * D2D1::Matrix3x2F::Translation(r.right + 8 - iw, r.top - 4));
-            tb->SetOpacity((on ? 1.f : .85f) * alpha_);
-            rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 12, 12), tb);
-        }
-        if (!on) box(r, 12, 0, 0, C::white, .12f + .14f * hv);
-        float ty = y + (52 - 22 - 12.6f) / 2;
-        text(verLabel(bd), vf, r.left + 14, ty, tw[i] - 28, 22, on ? INK : C::white, 0, -0.44f);
-        text(seasonShort(bd.major, bd.minor), sf, r.left + 14, ty + 22, tw[i] - 28, 12.6f, on ? 0x4B5160 : C::white, 0, 0, on ? 1.f : .7f);
-        hit(id, r, F_FOCUS | F_HAND, 12);
+        bool on = i == cur;
+        float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);   // color 120 ms (selection is instant)
+        float a = on ? 1.f : .55f + .3f * hv;
+        std::wstring v = verLabel(bd), s = small(bd);
+        float vw = textW(v, vf);
+        text(v, vf, r.left + 16, y, vw + 4, ah, C::white, 0, 0, a);
+        if (!s.empty()) text(s, sf, r.left + 16 + vw + 2 + 8, y + 1, lw[i] - 32 - vw - 10 + 2, ah, C::white, 0, 0, a * .8f);
+        if (on) fill(rc(r.left, r.bottom - 3, lw[i], 3), C::white);
+        hit(id, r, F_FOCUS | F_HAND, 8);
     }
     rt_->PopAxisAlignedClip();
     clip_ = saved;
 
+    float nx = lx0 + viewW + (n ? 6 : 0);
+    arrow(ID_NEXT, nx, Icon::ChevR, canNext);
     // .tab.add
-    D2D1_RECT_F ar = rc(x0 + viewW + (n ? 10 : 0), y, 52, 52);
+    D2D1_RECT_F ar = rc(nx + ah + 12, y, ah, ah);
     float hv = fx(K_HOVER | ID_ADD, hover_ == ID_ADD || menu_ == 1 ? 1.f : 0.f, ar);
-    box(ar, 12, 0x080C1A, .55f + .2f * hv, C::white, .12f + .16f * hv);
-    icon(Icon::Plus, ar.left + 18, ar.top + 18, 16, C::white, .75f + .25f * hv);
+    glass(ar, 12, .62f + .2f * hv, .12f + .16f * hv);
+    icon(Icon::Plus, ar.left + 12, ar.top + 12, 16, C::white);
     hit(ID_ADD, ar, F_FOCUS | F_HAND, 12);
     if (menu_ == 1) menuAnchor_ = ar;
-
-    if (b) {
-        float bx = W - 24 - bw, cx = bx - 10 - cw;
-        gbutton(cosId, cx, y + 6, 40, L"Cosmetics", Icon::Cos, compact);
-        if (cosId == ID_P_OPEN && !pOpen_) {
-            // cosmetics of the current game can be imported: a brighter ring and, once listed, how many are new
-            box(rc(cx, y + 6, cw, 40), 12, 0, 0, C::white, .42f);
-            // the count once listed for this build (nothing new: no badge)
-            std::wstring n = pNewAll_ > 0 && pBuild_ == selected_ ? (pNewAll_ > 9999 ? fmt(L"%dk", pNewAll_ / 1000) : thousands(pNewAll_)) : L"";
-            Font nf{ Face::UI, 10.5f, 700, false, true };
-            float nw = std::max(20.f, textW(n, nf) + 12), nx = cx + cw - nw + 6, ny = y + 6 - 8;
-            if (!n.empty()) { fill(rc(nx, ny, nw, 20), C::white, 1, 10); text(n, nf, nx, ny, nw, 20, INK, 1); }
+    if (keys && n > 1) {
+        // .kbd: Q and E switch builds
+        Font kf{ Face::UI, 11, 700, false };
+        float kx = ar.right + 6 + 10;
+        for (const wchar_t* k : { L"Q", L"E" }) {
+            D2D1_RECT_F r = rc(kx, y + 9, 22, 22);
+            box(r, 6, 0, 0, C::white, .28f);
+            fill(rc(kx + 4, r.bottom - 2, 14, 1), C::white, .28f);   // border-bottom: 2px
+            text(k, kf, kx, r.top, 22, 21, C::white, 1, 0, .8f);
+            kx += 22 + 4;
         }
-        if (menu_ == 3) menuAnchor_ = rc(cx, y + 6, cw, 40);
-        gbutton(ID_BUILDMENU, bx, y + 6, 40, L"Build", Icon::More, compact);
-        if (menu_ == 2) menuAnchor_ = rc(bx, y + 6, bw, 40);
     }
 }
 
-// ------------------------------------------------------------------------------------------------ hero (bottom left)
-// Bottom up: Launch, the status row (.sea: badge + meta, or the launch stages), the version (italic 900, 168 DIPs at
-// most, smaller to fit), the season badge, and the notices above it.
-void App::drawHero(float x, float right, float top, float bottom) {
-    playShown_ = false;
+// ------------------------------------------------------------------------------------------------ poster title (bottom left)
+// Bottom up: the meta line (Fortnite version · CL · UE · the season's skin), the season's name (italic 900, 92 DIPs
+// at most, smaller to fit), the season pill, and the notices above it.
+void App::drawPoster(float x, float right, float top, float bottom) {
     float w = std::max(0.f, right - x);
     if (!loaded_) {   // skeleton while the host loads
-        skeleton(3, rc(x, bottom - 68 - 20 - 21 - 14 - 110, std::min(w, 380.f), 110));
-        skeleton(4, rc(x, bottom - 68, std::min(w, 330.f), 68));
+        skeleton(3, rc(x, bottom - 19 - 10 - 83, std::min(w, 420.f), 83));
+        skeleton(4, rc(x, bottom - 19, std::min(w, 300.f), 19));
         return;
     }
     const Build* b = sel();
@@ -1179,84 +1304,22 @@ void App::drawHero(float x, float right, float top, float bottom) {
         float y = by - 20 - th;
         rich(help, hf, x, y, hw, 18.75f, C::ink2, C::white);
         Font v100{ Face::Display, 100, 900, true };
-        float vw = textW(L"No build", v100, -5.f);
-        float size = std::max(36.f, std::min(96.f, vw > 0 ? w / vw * 98 : 96.f));
-        float vy = y - 14 - .8f * size;
-        text(L"No build", Font{ Face::Display, size, 900, true }, x, vy, w + size, .8f * size, C::white, 0, -.05f * size);
-        if (vy - 16 - 21 > top) pill(x, vy - 16 - 21, L"GET STARTED", -1);
+        float vw = textW(L"NO BUILD", v100, -3.f);
+        float size = std::max(36.f, std::min(92.f, vw > 0 ? (w - 8) / vw * 100 : 92.f));
+        float vy = y - 14 - .9f * size;
+        text(L"NO BUILD", Font{ Face::Display, size, 900, true }, x, vy, w + size, .9f * size, C::white, 0, -.03f * size);
+        if (vy - 12 - 21 > top) pill(x, vy - 12 - 21, L"GET STARTED", -1);
         return;
     }
 
     const SeasonArt& sa = seasonArt(b->major, b->minor);
-    bool isBusy = busy();
-    float bw = std::min(330.f, w);
-    D2D1_RECT_F pr = rc(x, bottom - 68, bw, 68);
-
-    // .sea: the badge and a meta line; while a session runs, its state and the launch stages
-    auto sea = [&](float sy) -> float {
-        Font mf{ Face::UI, 12, 400, false, true };
-        static const struct { int cls; const wchar_t* label; } MP[] = {
-            { -1, L"" }, { -1, L"MATCH READY" }, { 0, L"IN THE MATCH" }, { 0, L"IN THE MATCH" }, { 0, L"IN THE MATCH" },
-            { 0, L"IN THE MATCH" }, { -1, L"MATCH OVER" }, { 2, L"SERVER STOPPED" } };
-        float h = 21;
-        if (se_.state == SessionState::Error) {
-            float pw = pill(x, sy, L"FAILED", 2);
-            std::wstring m = (se_.message.empty() ? L"Launch failed" : se_.message) + L" **Details in Activity.**";
-            float mx = x + pw + 10, mw = std::max(40.f, x + w - mx);
-            Font ef{ Face::UI, 12.5f, 400, false };
-            float th = rich(m, ef, mx, sy + 1.5f, mw, 18, C::badText, C::white, 0, !measuring_);
-            h = std::max(h, th + 1.5f);
-        } else if (isBusy) {
-            bool ph = se_.state == SessionState::Running && se_.phase != MatchPhase::None;
-            int pcls = ph ? MP[(int)se_.phase].cls : 0;
-            std::wstring label = se_.state == SessionState::Stopping ? L"STOPPING" : se_.state == SessionState::Launching ? L"LAUNCHING"
-                               : ph ? MP[(int)se_.phase].label : L"RUNNING";
-            int pd = se_.state == SessionState::Running ? (pcls == 2 ? 2 : 0) : 3;
-            float pw = pill(x, sy, label, pd);
-            float mx = x + pw + 10, mw = std::max(0.f, x + w - mx), my = sy + (21 - 17.4f) / 2;
-            if (se_.state == SessionState::Stopping) text(L"Stopping the game and the local servers…", mf, mx, my, mw, 17.4f, C::ink2);
-            else if (ph) text(se_.matchDetail, mf, mx, my, mw, 17.4f, pcls == 0 ? C::white : pcls == 2 ? C::badText : C::ink2);
-            else {
-                struct St { Stage s; const wchar_t* l; } steps[3] = { { se_.backend, L"Backend" }, { se_.game, L"Game" }, { se_.server, L"Match server" } };
-                int nst = se_.hasServer ? 3 : 2;
-                float zx = mx;
-                for (int i = 0; i < nst; i++) {
-                    if (i) { fill(rc(zx + 6, my + 8.2f, 14, 1), C::white, .3f); zx += 6 + 14 + 6; }
-                    Stage s = steps[i].s;
-                    if (s == Stage::Ok) { icon(Icon::Check, zx, my + 0.7f, 16, GREEN); zx += 16; }
-                    else if (s == Stage::Bad) { icon(Icon::X, zx, my + 0.7f, 16, C::bad); zx += 16; }
-                    else if (s == Stage::Run) { spinner(zx, my + 1.7f, 14); zx += 14; }
-                    else { dot(zx + 4, my + 8.7f, 8, C::dim); zx += 8; }
-                    if (W_ > 900) { zx += 6; text(steps[i].l, mf, zx, my, 200, 17.4f, C::ink2); zx += textW(steps[i].l, mf); }
-                }
-            }
-        } else {
-            bool no = b->lobby == Support::No;
-            float pw = pill(x, sy, no ? L"NOT SUPPORTED" : L"READY", no ? 2 : level(*b));
-            float mx = x + pw + 10, mw = std::max(0.f, x + w - mx), my = sy + (21 - 17.4f) / 2;
-            std::wstring meta = no ? b->lobbyWhy
-                              : fmt(L"CL %u · UE %ls · %ls", b->cl, b->engine.c_str(), b->cosmetics ? (thousands(b->cosmetics) + L" cosmetics").c_str() : L"no cosmetics list yet");
-            if (!no && b->name != verLabel(*b)) {
-                bool hasCl = b->cl && b->name.find(std::to_wstring(b->cl)) != std::wstring::npos;
-                meta = b->name + L" · " + (hasCl ? meta.substr(meta.find(L"UE ")) : meta);
-            }
-            text(meta, mf, mx, my, mw, 17.4f, C::white, 0, 0, .7f);
-            hit(ID_META, rc(mx, my, std::min(mw, textW(meta, mf)), 17.4f), 0, 0);   // tooltip only
-        }
-        return h;
-    };
-    measuring_ = true;
-    float seaH = sea(0);
-    measuring_ = false;
-    float seaTop = pr.top - 20 - seaH;
-
+    std::wstring ver = verLabel(*b);
     // notices (.notice of the page): why it cannot launch, or what is missing, with their buttons
     struct Notice { int cls; std::wstring html; int btn; const wchar_t* label; };
     std::vector<Notice> notices;
-    bool fwOk = b->firewall == L"OK";
-    if (b->lobby == Support::No) notices.push_back({ 2, L"**Fortnite " + verLabel(*b) + L" cannot be launched.** " + b->lobbyWhy + L".", 0, nullptr });
+    if (b->lobby == Support::No) notices.push_back({ 2, L"**Fortnite " + ver + L" cannot be launched.** " + b->lobbyWhy + L".", 0, nullptr });
     else {
-        if (!fwOk) notices.push_back({ 1, L"**Firewall rules missing.** " + b->firewall + L". They are created before launch (administrator prompt).", ID_NOTICE_FW, L"Create now" });
+        if (b->firewall != L"OK") notices.push_back({ 1, L"**Firewall rules missing.** " + b->firewall + L". They are created before launch (administrator prompt).", ID_NOTICE_FW, L"Create now" });
         if (!b->cosmetics) notices.push_back({ 1, L"**No cosmetics list yet.** Only the default items will show in the locker.", ID_NOTICE_COS, L"Generate" });
     }
     float nw = std::min(w, 520.f);
@@ -1269,110 +1332,242 @@ void App::drawHero(float x, float right, float top, float bottom) {
     float notesH = 0;
     for (auto& n : notices) { float a, c; notesH += noticeH(n, &a, &c) + 10; }
 
-    // the version: as big as fits the width and what is left of the height (168 at most)
-    Font v100{ Face::Display, 100, 900, true };
-    std::wstring ver = verLabel(*b);
-    float vw100 = textW(ver, v100, -5.f);
-    float byW = vw100 > 0 ? (w - 8) / vw100 * 96 : 168.f;   // the italic leans out: a little room on the right
-    float room = seaTop - 14 - top - notesH;
-    bool showSeason = true;
-    float size = std::min({ 168.f, byW, (room - 21 - 16) / .8f });
-    if (size < 56) { showSeason = false; size = std::min({ 168.f, byW, room / .8f }); }
-    bool showVer = size >= 32;
-    float vTop = seaTop - 14 - .8f * size;
-    if (showVer) {
-        text(ver, Font{ Face::Display, size, 900, true }, x, vTop, w + size, .8f * size, C::white, 0, -.05f * size);
-        float ny = vTop;
-        if (showSeason) {
-            std::wstring s = season(b->major, b->minor);
-            if (sa.name && *sa.name && b->major) s += std::wstring(L" · ") + sa.name;
-            ny = vTop - 16 - 21;
-            pill(x, ny, caps(s), -1);
-        }
-        ny -= 12;
-        for (auto it = notices.rbegin(); it != notices.rend(); ++it) {
-            float tw, nbw, h = noticeH(*it, &tw, &nbw);
-            ny -= h;
-            if (ny < top - 70) break;
-            D2D1_RECT_F r = rc(x, ny, nw, h);
-            uint32_t tc = it->cls == 2 ? C::badText : C::warnText;
-            glass(r, 12, .72f);
-            fill(r, it->cls == 2 ? C::bad : C::warn, .14f, 12);
-            icon(Icon::Warn, x + 14, ny + 12 + 1.4f, 16, tc);
-            rich(it->html, nf, x + 14 + 16 + 10, ny + 12, tw, 18.75f, tc, C::white);
-            if (it->btn) gbutton(it->btn, r.right - 14 - nbw, ny + (h - 28) / 2, 28, it->label, Icon::Count, false);
-            ny -= 10;
-        }
+    // .m: "Fortnite 14.30 · CL 14456520 · UE 4.26 · Thor" (the folder too when it is not the version)
+    Font mf{ Face::UI, 13, 400, false };
+    const float mlh = 18.85f;
+    std::wstring meta = L"Fortnite " + ver;
+    if (b->cl) meta += fmt(L" · CL %u", b->cl);
+    if (!b->engine.empty()) meta += L" · UE " + b->engine;
+    if (sa.hero && b->major) meta += std::wstring(L" · ") + sa.hero;
+    if (b->name.rfind(ver, 0) != 0) meta += L" · " + b->name;
+    float my = bottom - mlh;
+    text(meta, mf, x, my, w, mlh, C::white, 0, 0, .7f);
+    hit(ID_META, rc(x, my, std::min(w, textW(meta, mf)), mlh), 0, 0);   // tooltip only: the build's folder
+
+    // .n: the season's name, as big as fits the width and what is left of the height (92 at most)
+    std::wstring name = sa.name && *sa.name && b->major ? caps(sa.name) : L"FORTNITE " + ver;
+    Font n100{ Face::Display, 100, 900, true };
+    float nw100 = textW(name, n100, -3.f);
+    float byW = nw100 > 0 ? (w - 8) / nw100 * 100 : 92.f;   // the italic leans out: a little room on the right
+    float room = my - 10 - top - notesH;
+    bool showPill = b->major != 0;
+    float size = std::min({ 92.f, byW, (room - (showPill ? 12 + 21 : 0)) / .9f });
+    if (size < 40 && showPill) { showPill = false; size = std::min({ 92.f, byW, room / .9f }); }
+    if (size < 24) return;
+    float ny = my - 10 - .9f * size;
+    text(name, Font{ Face::Display, size, 900, true }, x, ny, w + size, .9f * size, C::white, 0, -.03f * size);
+    if (showPill) { ny -= 12 + 21; pill(x, ny, caps(season(b->major, b->minor)), -1); }
+    ny -= 12;
+    for (auto it = notices.rbegin(); it != notices.rend(); ++it) {
+        float tw, nbw, h = noticeH(*it, &tw, &nbw);
+        ny -= h;
+        if (ny < top) break;
+        D2D1_RECT_F r = rc(x, ny, nw, h);
+        uint32_t tc = it->cls == 2 ? C::badText : C::warnText;
+        glass(r, 12, .72f);
+        fill(r, it->cls == 2 ? C::bad : C::warn, .14f, 12);
+        icon(Icon::Warn, x + 14, ny + 12 + 1.4f, 16, tc);
+        rich(it->html, nf, x + 14 + 16 + 10, ny + 12, tw, 18.75f, tc, C::white);
+        if (it->btn) gbutton(it->btn, r.right - 14 - nbw, ny + (h - 28) / 2, 28, it->label, Icon::Count, false);
+        ny -= 10;
     }
-    sea(seaTop);
-    drawLaunch(pr, sa.c[0]);
 }
 
-// .play: white, 68 DIPs, radius 16, a glow in the season's color; Stop while a session runs. Its hit is added at the
-// end of the frame (the last control in the focus order, like the page).
-void App::drawLaunch(D2D1_RECT_F pr, uint32_t glow) {
+// ------------------------------------------------------------------------------------------------ dock (bottom right)
+// .dock: the match summary (or the settings sheet in its place), the status line and Launch, from the bottom up.
+// Returns its top (the toasts go above it).
+float App::drawDock(float x, float w, float top, float bottom) {
+    playShown_ = false;
+    sheetRect_ = {};
+    float lh = std::max(68.f, std::min(112.f, (H_ - TB) * .1053f));
+    D2D1_RECT_F pr = rc(x, bottom - lh, w, lh);
+    if (!loaded_) {
+        skeleton(5, pr);
+        float sy = pr.top - 12 - 19 - 14 - 108;
+        if (sy >= top) { skeleton(6, rc(x, sy, w, 108)); return sy; }
+        return pr.top;
+    }
     const Build* b = sel();
-    bool stopStyle = busy();
-    bool disabled = stopStyle ? se_.state == SessionState::Stopping : (!b || b->lobby == Support::No);
-    playRect_ = pr; playShown_ = true; playDisabled_ = disabled;
-    float bw = pr.right - pr.left;
-    D2D1_RECT_F area = grow(pr, 4);
-    bool phov = hover_ == ID_PLAY && !disabled;
-    // background 120 ms; the hover ring 120 ms; :active scale(.985) 120 ms var(--ease). Text, style and width change at once.
-    uint32_t bg = fxc(K_COLOR | ID_PLAY, disabled ? 0x1A1E2B : stopStyle ? (phov ? 0x1C2338 : 0x0E1222) : C::white, area);
-    float ring = fx(K_HOVER | ID_PLAY, phov ? 1.f : 0.f, area);
-    float press = fx(K_PRESS | ID_PLAY, press_ == ID_PLAY && !disabled ? 1.f : 0.f, area, T1, Curve::Ui);
-    // box-shadow: 0 16px 50px -8px <season color> .8
-    if (!stopStyle && !disabled) shadow(grow(pr, -8), 8, 50, 16, 1.f, glow);   // .8 in CSS; the browser's blur reads brighter
-    D2D1_MATRIX_3X2_F saved = base_;
-    if (press > 0) {
-        float k = 1 - 0.015f * press;
-        base_ = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2)) * base_;
-        rt_->SetTransform(base_);
-    }
-    if (ring > 0 && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, 1.5f), 17.5f, 17.5f), br(C::white, 0.16f * ring), 3);
-    if (stopStyle || disabled) box(pr, 16, bg, .9f, C::white, .18f);
+    if (!b) return bottom;
+    const SeasonArt& sa = seasonArt(b->major, b->minor);
+    measuring_ = true;
+    float oh = okline(x + 4, 0, w - 4);
+    measuring_ = false;
+    float okTop = pr.top - 12 - oh;
+    okline(x + 4, okTop, w - 4);
+    float dockTop = okTop;
+    if (sheetOpen_) dockTop = drawSheet(x, w, top, okTop - 6);
     else {
-        fill(pr, bg, 1, 16);
-        if (!measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, .5f), 16.5f, 16.5f), br(C::white, .4f), 1);   // 0 0 0 1px rgba(255,255,255,.4)
+        measuring_ = true;
+        float ch = summary(x, 0, w);
+        measuring_ = false;
+        if (okTop - 14 - ch >= top) { summary(x, okTop - 14 - ch, w); dockTop = okTop - 14 - ch; }
     }
-    // .play::after sheen (greet wins over hover, like the later CSS rule); out of the button at rest
-    float sh = anim_.running(K_GREET) ? tw(K_GREET, -1.2f, area) : anim_.running(K_SHEEN) ? tw(K_SHEEN, -1.2f, area) : -1.2f;
-    if (sh > -1.2f && sh < 1.2f && sheen_ && !measuring_) {
-        float bh = pr.bottom - pr.top;
-        const float dx = 0.9659258f, dy = 0.2588190f;   // 105deg: (sin a, -cos a)
-        float len = bw * dx + bh * dy, gx = (pr.left + pr.right) / 2 + sh * bw, gy = (pr.top + pr.bottom) / 2;
-        sheen_->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
-        sheen_->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
-        sheen_->SetOpacity(alpha_);
-        rt_->FillRoundedRectangle(D2D1::RoundedRect(pr, 16, 16), sheen_);
-    }
-    // ▶ LAUNCH <small>version</small>: italic 900 34px, gap 14px; the version in 14px #5b6170
-    Font pf{ Face::Display, 34, 900, true }, sf{ Face::Display, 14, 900, true };
-    const wchar_t* pl = stopStyle ? L"STOP" : L"LAUNCH";
-    std::wstring ver = stopStyle || !b ? L"" : verLabel(*b);
-    float iconS = stopStyle ? 30.f : 40.f, gap = 14;
-    float g0 = 4.5f / 16 * iconS, gw = (stopStyle ? 7.f : 8.7f) / 16 * iconS;   // the glyph inside the icon box
-    float ptw = textW(pl, pf, -0.34f), stw = ver.empty() ? 0 : textW(ver, sf);
-    float cw = gw + gap + ptw + (stw > 0 ? gap + stw : 0);
-    if (cw > bw - 32) { stw = 0; cw = gw + gap + ptw; }
-    uint32_t pc = disabled ? 0x6B7080 : stopStyle ? C::white : INK;
-    float cx = pr.left + (bw - cw) / 2, cy = (pr.top + pr.bottom) / 2;
-    icon(stopStyle ? Icon::X : Icon::Play, cx - g0, cy - iconS / 2, iconS, pc);
-    if (text(pl, pf, cx + gw + gap, pr.top, ptw + 2, pr.bottom - pr.top, pc, 0, -0.34f)) issues.push_back(L"clipped play");
-    if (stw > 0) text(ver, sf, cx + gw + gap + ptw + gap, pr.top + 2, stw + 2, pr.bottom - pr.top, disabled ? 0x6B7080 : 0x5B6170);
-    base_ = saved;
-    rt_->SetTransform(base_);
+    drawLaunch(pr, sa.c[0]);
+    return dockTop;
 }
 
-// ------------------------------------------------------------------------------------------------ side panel
-// .right.glass: 340 wide (280 at least), from below the tabs to the bottom; its content scrolls when it does not fit,
-// the Activity button stays at its bottom.
-void App::drawPanel(float x, float y, float w, float h) {
-    glass(rc(x, y, w, h), 16);
-    D2D1_RECT_F ar = rc(x + 18, y + h - 16 - 38, w - 36, 38);
-    float viewTop = y + 1, viewBottom = ar.top - 8, viewH = std::max(0.f, viewBottom - viewTop);
+// .okline: a dot by level, "Ready" (or the session's state) and what the build has: lobby · local match · cosmetics ·
+// firewall, each with its reason as the tooltip (the old status cells). Wraps under itself. Returns the height.
+float App::okline(float x, float y, float w) {
+    const Build* b = sel();
+    Font f{ Face::UI, 13, 400, false }, fb{ Face::UI, 13, 600, false };
+    const float lh = 18.85f;
+    auto statusDot = [&](float cy, uint32_t c) {
+        if (measuring_) return;
+        rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x + 3.5f, cy + lh / 2), 5.5f, 5.5f), br(c, .35f));
+        dot(x + 3.5f, cy + lh / 2, 7, c);
+    };
+    const float x0 = x + 7 + 10;
+    if (se_.state == SessionState::Error) {
+        statusDot(y, C::bad);
+        std::wstring m = L"**Failed** " + (se_.message.empty() ? L"Launch failed" : se_.message) + L" **Details in Activity.**";
+        return std::max(lh, rich(m, f, x0, y, std::max(40.f, x + w - x0), lh, C::badText, C::white, 0, !measuring_));
+    }
+    // the flow: pieces of text (and the launch stages' glyphs) separated by " · " or a dash, wrapping under the label
+    struct Seg { std::wstring s; uint32_t c; float a; int id; int flags; int glyph; int sep; bool bold; };   // glyph: 1 ok, 2 bad, 3 spinner, 4 waiting; sep: 1 " · ", 2 dash, 3 gap
+    std::vector<Seg> segs;
+    const float mut = .62f;
+    if (busy()) {
+        static const struct { int cls; const wchar_t* label; } MP[] = {
+            { -1, L"" }, { -1, L"Match ready" }, { 0, L"In the match" }, { 0, L"In the match" }, { 0, L"In the match" },
+            { 0, L"In the match" }, { -1, L"Match over" }, { 2, L"Server stopped" } };
+        bool ph = se_.state == SessionState::Running && se_.phase != MatchPhase::None;
+        int pcls = ph ? MP[(int)se_.phase].cls : 0;
+        std::wstring label = se_.state == SessionState::Stopping ? L"Stopping" : se_.state == SessionState::Launching ? L"Launching" : ph ? MP[(int)se_.phase].label : L"Running";
+        if (se_.state == SessionState::Running) statusDot(y, pcls == 2 ? C::bad : GREEN);
+        else if (!measuring_) spinner(x - 2, y + (lh - 11) / 2, 11);
+        segs.push_back({ label, C::white, 1, 0, 0, 0, 0, true });
+        if (se_.state == SessionState::Stopping) segs.push_back({ L"Stopping the game and the local servers…", C::white, mut, 0, 0, 0, 3, false });
+        else if (ph) segs.push_back({ se_.matchDetail, pcls == 0 ? C::white : pcls == 2 ? C::badText : C::white, pcls == 0 ? 1.f : pcls == 2 ? 1.f : mut, 0, 0, 0, 3, false });
+        else {
+            struct St { Stage s; const wchar_t* l; } steps[3] = { { se_.backend, L"Backend" }, { se_.game, L"Game" }, { se_.server, L"Match server" } };
+            int nst = se_.hasServer ? 3 : 2;
+            for (int i = 0; i < nst; i++) {
+                Stage s = steps[i].s;
+                int g = s == Stage::Ok ? 1 : s == Stage::Bad ? 2 : s == Stage::Run ? 3 : 4;
+                segs.push_back({ steps[i].l, C::white, s == Stage::Ok || s == Stage::Run ? 1.f : mut, 0, 0, g, i ? 2 : 3, false });
+            }
+        }
+    } else if (b && b->lobby == Support::No) {
+        statusDot(y, C::bad);
+        segs.push_back({ L"Not supported", C::white, 1, 0, 0, 0, 0, true });
+        segs.push_back({ b->lobbyWhy, C::badText, 1, ID_CELL0, 0, 0, 3, false });
+    } else if (b) {
+        int lv = level(*b);
+        statusDot(y, lv == 0 ? GREEN : C::warn);
+        segs.push_back({ L"Ready", C::white, 1, 0, 0, 0, 0, true });
+        bool exp = b->lobby == Support::Experimental;
+        segs.push_back({ exp ? L"Lobby (experimental)" : L"Lobby", exp ? C::warnText : C::white, exp ? 1.f : mut, ID_CELL0, 0, 0, 3, false });
+        bool mexp = b->match == Support::Experimental;
+        segs.push_back({ !matchOk(b) ? L"no local match" : mexp ? L"local match (experimental)" : L"local match", mexp && matchOk(b) ? C::warnText : C::white,
+                         mexp && matchOk(b) ? 1.f : mut, ID_CELL0 + 1, 0, 0, 1, false });
+        segs.push_back({ b->cosmetics ? thousands(b->cosmetics) + L" cosmetics" : L"no cosmetics list", b->cosmetics ? C::white : C::warnText, b->cosmetics ? mut : 1.f, ID_CELL0 + 2, 0, 0, 1, false });
+        if (b->port) segs.push_back({ L"Import ›", C::white, 1, ID_P_CELL, F_FOCUS | F_HAND, 0, 3, false });
+        bool fw = b->firewall == L"OK";
+        segs.push_back({ fw ? L"firewall local only" : L"firewall rules missing", fw ? C::white : C::badText, fw ? mut : 1.f, ID_CELL0 + 3, 0, 0, 1, false });
+    }
+    float sepW = textW(L" · ", f);
+    float cx = x0, cy = y;
+    for (auto& s : segs) {
+        const Font& ft = s.bold ? fb : f;
+        float sw = s.sep == 1 ? sepW : s.sep == 2 ? 26.f : s.sep == 3 ? 10.f : 0.f;
+        float gw = s.glyph ? (s.glyph == 4 ? 8.f : s.glyph == 3 ? 14.f : 16.f) + (s.s.empty() ? 0 : 6) : 0;
+        float tw = s.s.empty() ? 0 : textW(s.s, ft);
+        if (cx > x0 && cx + sw + gw + tw > x + w + 0.5f) { cx = x0; cy += lh; sw = 0; }
+        if (s.sep == 1 && sw > 0) text(L" · ", f, cx, cy, sw + 1, lh, C::white, 0, 0, mut);
+        if (s.sep == 2 && sw > 0) fill(rc(cx + 6, cy + lh / 2 - .5f, 14, 1), C::white, .3f);
+        cx += sw;
+        float sx = cx;
+        if (s.glyph == 1) icon(Icon::Check, cx, cy + (lh - 16) / 2, 16, GREEN);
+        else if (s.glyph == 2) icon(Icon::X, cx, cy + (lh - 16) / 2, 16, C::bad);
+        else if (s.glyph == 3 && !measuring_) spinner(cx, cy + (lh - 14) / 2, 14);
+        else if (s.glyph == 4) dot(cx + 4, cy + lh / 2, 8, C::dim);
+        cx += gw;
+        float vis = std::min(tw + 1, x + w - cx);
+        if (tw > 0) text(s.s, ft, cx, cy, vis, lh, s.c, 0, 0, s.a);
+        if (s.id == ID_P_CELL) {
+            float hv = fx(K_HOVER | ID_P_CELL, hover_ == ID_P_CELL ? 1.f : 0.f, rc(cx, cy, tw, lh));
+            fill(rc(cx, cy + lh - 2, std::max(0.f, vis - 8), 1), C::white, .2f + .5f * hv);
+        }
+        if (s.id) hit(s.id, rc(sx, cy, cx - sx + std::max(0.f, vis), lh), s.flags, 4);
+        cx += tw;
+    }
+    return cy - y + lh;
+}
+
+// .sum: what Launch starts (title, the switches as chips) and the Match settings button. Returns the height.
+float App::summary(float x, float y, float w) {
+    const Build* b = sel();
+    const Config& c = st_.config;
+    bool dis = b->lobby == Support::No, hasMatch = matchOk(b);
+    const float px = 18, iw = w - 2 * px - 2;
+    struct Chip { Icon ic; std::wstring s; uint32_t c; };
+    std::vector<Chip> chips;
+    if (hasMatch) {
+        chips.push_back({ Icon::Bots, c.bots == 1 ? std::wstring(L"1 bot") : fmt(L"%d bots", c.bots), C::white });
+        if (c.infiniteMaterials) chips.push_back({ Icon::Count, L"Infinite materials", C::white });
+        if (c.infiniteAmmo) chips.push_back({ Icon::Count, L"Infinite ammo", C::white });
+        chips.push_back({ Icon::Count, c.lateGame ? L"Late game" : L"Late game off", C::white });
+        if (c.botsAI) chips.push_back({ Icon::Warn, L"Bot AI on", C::warnText });
+    } else chips.push_back({ Icon::Count, L"Lobby, locker and styles", C::white });
+    if (!c.displayName.empty()) chips.push_back({ Icon::Lobby, c.displayName, C::white });
+    Font cf{ Face::UI, 12, 600, false };
+    std::vector<D2D1_RECT_F> cr;
+    float cx = 0, cy = 0;
+    for (auto& ch : chips) {
+        float cw = std::min(iw, 10 + (ch.ic != Icon::Count ? 16 + 6 : 0) + textW(ch.s, cf) + 10);
+        if (cx > 0 && cx + cw > iw) { cx = 0; cy += 28 + 6; }
+        cr.push_back(rc(cx, cy, cw, 28));
+        cx += cw + 6;
+    }
+    float h = 1 + 16 + 34 + 12 + cy + 28 + 16 + 1;
+    if (measuring_) return h;
+    D2D1_RECT_F r = rc(x, y, w, h);
+    if (dis) { alpha_ = .5f; noHit_ = true; }
+    box(r, 18, FROST, .55f, C::white, .14f);
+    float ty = y + 17, lx = x + 1 + px;
+    Font bf{ Face::UI, 13, 600, false };
+    float bw = 12 + 16 + 8 + textW(L"Match settings", bf) + 12;
+    D2D1_RECT_F brr = rc(x + w - 1 - px - bw, ty, bw, 34);
+    float hv = fx(K_HOVER | ID_SHEET, hover_ == ID_SHEET ? 1.f : 0.f, brr);
+    fill(brr, C::white, .12f + .08f * hv, 10);
+    icon(Icon::Cog, brr.left + 12, ty + 9, 16, C::white);
+    text(L"Match settings", bf, brr.left + 36, ty, bw - 48 + 1, 34, C::white);
+    hit(ID_SHEET, brr, F_FOCUS | F_HAND, 10);
+    // .md: what the match is (modes are picked in the game: Practice or Battle Royale)
+    std::wstring t = hasMatch ? L"LOCAL MATCH" : L"LOBBY ONLY";
+    float tw30 = textW(t, Font{ Face::Display, 30, 900, true }), avail = brr.left - 12 - lx;
+    float ts = std::max(16.f, std::min(30.f, tw30 > 0 ? (avail - 4) / tw30 * 30 : 30.f));
+    text(t, Font{ Face::Display, ts, 900, true }, lx, ty, avail, 34, C::white);
+    float chy = ty + 34 + 12;
+    for (size_t i = 0; i < chips.size(); i++) {
+        D2D1_RECT_F q = cr[i];
+        q = { lx + q.left, chy + q.top, lx + q.right, chy + q.bottom };
+        fill(q, C::white, .1f, 14);
+        float tx = q.left + 10;
+        if (chips[i].ic != Icon::Count) { icon(chips[i].ic, tx, q.top + 6, 16, chips[i].c); tx += 16 + 6; }
+        text(chips[i].s, cf, tx, q.top, q.right - 10 - tx, 28, chips[i].c);
+    }
+    alpha_ = 1; noHit_ = false;
+    return h;
+}
+
+// .sheet: the match settings in place of the summary, above the status line (Esc or a click outside closes it); its
+// content scrolls when the window is short. Returns its top.
+float App::drawSheet(float x, float w, float top, float bottom) {
+    measuring_ = true;
+    float ch = sheetBody(x + 23, 0, w - 46) + 20;
+    measuring_ = false;
+    float h = std::min(ch + 2, std::max(80.f, bottom - top));
+    D2D1_RECT_F r = rc(x, bottom - h, w, h);
+    sheetRect_ = r;
+    float a = tw(K_SHEET, 1, grow(r, 2));   // fades in when it opens (180 ms)
+    alpha_ = a;
+    box(r, 20, FROST, .55f, C::white, .14f);
+    float viewTop = r.top + 1, viewBottom = r.bottom - 1, viewH = std::max(0.f, viewBottom - viewTop);
     contentView_ = viewH;
+    contentH_ = ch;
     bool sb = contentH_ > viewH + 0.5f;
     contentScroll_ = std::max(0.f, std::min(contentScroll_, std::max(0.f, contentH_ - viewH)));
     contentScroll_ = roundf(contentScroll_ * scale_) / scale_;
@@ -1382,195 +1577,200 @@ void App::drawPanel(float x, float y, float w, float h) {
     base_ = D2D1::Matrix3x2F::Translation(0, oy_);
     rt_->SetTransform(base_);
     inContent_ = true;
-    float ch = panelBody(x + 18, 15, w - 36);
+    sheetBody(x + 23, 19, w - 46);
     inContent_ = false;
     base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0;
     rt_->SetTransform(base_);
     rt_->PopAxisAlignedClip();
     clip_ = { -1e9f, -1e9f, 1e9f, 1e9f };
-    if (fabsf(ch - contentH_) > 0.5f) { contentH_ = ch; invalidate(); }
-    if (sb) drawScrollbar(ID_SB_CONTENT, x + w - 12, viewTop + 6, viewH - 12, contentScroll_, contentH_, viewH);
-
-    // .act: Activity with its count (unseen lines colored by their worst level)
-    float av = fx(K_HOVER | ID_ACT, hover_ == ID_ACT || actOpen_ ? 1.f : 0.f, ar);   // background 120 ms
-    fill(ar, C::white, .06f + .07f * av, 10);
-    icon(Icon::Log, ar.left + 12, ar.top + 11, 16, C::white);
-    text(L"Activity", Font{ Face::UI, 12.5f, 600, false }, ar.left + 12 + 24, ar.top, 100, 38, C::white);
-    int badgeN = unseen_ ? unseen_ : (int)logs_.size();
-    std::wstring bn = std::to_wstring(badgeN);
-    Font badge{ Face::UI, 11, 700, false, true };   // tabular-nums
-    float bw = std::max(20.f, 12 + textW(bn, badge));
-    D2D1_RECT_F brr = rc(ar.right - 12 - bw, ar.top + 9, bw, 20);
-    if (unseen_ && unseenLevel_ == 2) fill(brr, C::bad, 1, 10);
-    else if (unseen_ && unseenLevel_ == 1) fill(brr, C::warn, 1, 10);
-    else fill(brr, C::white, .14f, 10);
-    text(bn, badge, brr.left, brr.top, bw, 20, unseen_ && unseenLevel_ == 1 ? 0x111111 : unseen_ && unseenLevel_ == 2 ? C::white : C::ink2, 1);
-    hit(ID_ACT, ar, F_FOCUS | F_HAND, 10);
+    if (sb) drawScrollbar(ID_SB_CONTENT, x + w - 12, viewTop + 10, viewH - 20, contentScroll_, contentH_, viewH);
+    alpha_ = 1;
+    return r.top;
 }
 
-float App::panelBody(float x, float y0, float w) {
+float App::sheetBody(float x, float y0, float w) {
     float y = y0;
-    const Config& c = st_.config;
-    Font h3{ Face::Display, 18, 900, true }, lbl{ Face::UI, 10.5f, 600, false };
-    auto head = [&](const wchar_t* s) { text(s, h3, x, y, w, 18, C::white); y += 18 + 11; };
-    auto label = [&](const wchar_t* s) { text(s, lbl, x, y, w, 15, C::white, 0, 0.74f, .55f); y += 15; };
-    if (!loaded_) {
-        skeleton(5, rc(x, y, w, 120)); y += 120 + 11;
-        skeleton(6, rc(x, y, w, 74)); y += 74 + 11;
-        skeleton(7, rc(x, y, w, 38)); y += 38;
-        return y + 8;
-    }
     const Build* b = sel();
-    bool dis = b && b->lobby == Support::No, hasMatch = matchOk(b);
-    if (b) {
-        // STATUS: the four cells (.st), a dot by level
-        head(L"STATUS");
-        Sup lob = sup(b->lobby), mat = b->matchServer ? sup(b->match) : Sup{ 2, L"No server" };
-        bool fwOk = b->firewall == L"OK";
-        struct Cell { const wchar_t* k; std::wstring v; int cls; } cells[4] = {
-            { L"LOBBY", lob.label, lob.cls },
-            { L"LOCAL MATCH", mat.label, mat.cls },
-            { L"COSMETICS", b->cosmetics ? thousands(b->cosmetics) : L"Missing", b->cosmetics ? 0 : 1 },
-            { L"FIREWALL", fwOk ? L"Local only" : L"Missing", fwOk ? 0 : 2 },
-        };
-        float cw = (w - 8) / 2, chh = 10 + 14 + 2 + 18 + 10;
-        for (int i = 0; i < 4; i++) {
-            float cx = x + (i % 2) * (cw + 8), cy = y + (i / 2) * (chh + 8);
-            fill(rc(cx, cy, cw, chh), C::white, .06f, 11);
-            text(cells[i].k, Font{ Face::UI, 10, 600, false }, cx + 12, cy + 10, cw - 24, 14, C::white, 0, 0.7f, .55f);
-            dot(cx + 12 + 3.5f, cy + 10 + 14 + 2 + 9, 7, cells[i].cls == 0 ? GREEN : clsColor(cells[i].cls));
-            text(cells[i].v, Font{ Face::UI, 13, 700, false }, cx + 12 + 13, cy + 10 + 14 + 2, cw - 24 - 13, 18,
-                 cells[i].cls == 0 ? C::white : cells[i].cls == 1 ? C::warnText : C::badText);
-            if (i == 2 && b->port) {
-                D2D1_RECT_F cr = rc(cx, cy, cw, chh);
-                float hv = fx(K_HOVER | ID_P_CELL, hover_ == ID_P_CELL ? 1.f : 0.f, cr);
-                if (hv > 0) fill(cr, C::white, .06f * hv, 11);
-                Font af{ Face::UI, 11, 600, false };
-                float aw = textW(L"Import \u203A", af);
-                text(L"Import \u203A", af, cx + cw - 12 - aw, cy + 10, aw + 1, 14, C::white, 0, 0, .7f + .3f * hv);
-                hit(ID_P_CELL, cr, F_FOCUS | F_HAND, 11);
-            } else hit(ID_CELL0 + i, rc(cx, cy, cw, chh), 0, 0);   // tooltip only
-        }
-        y += 2 * chh + 8 + 11;
+    const Config& c = st_.config;
+    bool dis = b->lobby == Support::No, hasMatch = matchOk(b);
+    Font lf{ Face::UI, 10.5f, 600, false }, mf{ Face::UI, 12, 400, false }, rf{ Face::UI, 13.5f, 400, false };
+    // header: MATCH SETTINGS · 14.30, and "Esc to close" (a button too)
+    const float hh = 17.4f;
+    float ew = textW(L"Esc to close", mf);
+    text(L"MATCH SETTINGS · " + verLabel(*b), lf, x, y, w - ew - 12, hh, C::white, 0, .84f, .62f);
+    D2D1_RECT_F er = rc(x + w - ew, y, ew, hh);
+    float ev = fx(K_HOVER | ID_SHEETX, hover_ == ID_SHEETX ? 1.f : 0.f, er);
+    text(L"Esc to close", mf, er.left, y, ew + 1, hh, C::white, 0, 0, .62f + .38f * ev);
+    hit(ID_SHEETX, grow(er, 3), F_FOCUS | F_HAND, 6);
+    y += hh + 10;
+    float a0 = alpha_;
+    if (dis) { alpha_ = .5f * a0; noHit_ = true; }
 
-        // MODES: Practice / Battle Royale cards (picked in the game), or lobby only
-        if (dis) { alpha_ = .5f; noHit_ = true; }
-        head(L"MODES");
-        Font tf{ Face::Display, 16, 900, true }, df{ Face::UI, 11, 400, false };
-        if (hasMatch) {
-            float mw = (w - 8) / 2;
-            const wchar_t* mt[2] = { L"PRACTICE", L"BATTLE ROYALE" };
-            const wchar_t* md[2] = { L"Creative · Playground", L"Solo to Squads" };
-            float th[2] = { rich(mt[0], tf, 0, 0, mw - 24, 16, C::white, C::white, 0, false), rich(mt[1], tf, 0, 0, mw - 24, 16, C::white, C::white, 0, false) };
-            float mh = std::max(74.f, 10 + std::max(th[0], th[1]) + 5 + 15 + 10);
-            for (int i = 0; i < 2; i++) {
-                D2D1_RECT_F r = rc(x + i * (mw + 8), y, mw, mh);
-                // linear-gradient(160deg, ...): the line through the center along (sin 160, -cos 160)
-                if (modeBr_[i] && !measuring_) {
-                    const float dx = 0.3420201f, dy = 0.9396926f;
-                    float len = mw * dx + mh * dy, gx = (r.left + r.right) / 2, gy = (r.top + r.bottom) / 2;
-                    modeBr_[i]->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
-                    modeBr_[i]->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
-                    modeBr_[i]->SetOpacity(alpha_);
-                    rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 12, 12), modeBr_[i]);
-                }
-                rich(mt[i], tf, r.left + 12, r.top + 10, mw - 24, 16, C::white, C::white);
-                text(md[i], df, r.left + 12, r.top + 10 + th[i] + 5, mw - 24, 15, C::white, 0, 0, .85f);
-                hit(ID_MODE0 + i, r, 0, 0);   // tooltip only
-            }
-            y += mh + 11;
-        } else {
-            D2D1_RECT_F r = rc(x, y, w, 58);
-            fill(r, C::white, .06f, 12);
-            text(L"LOBBY ONLY", tf, r.left + 12, r.top + 10, w - 24, 16, C::white);
-            text(L"No local match on this build: lobby, locker and styles", df, r.left + 12, r.top + 10 + 16 + 5, w - 24, 15, C::white, 0, 0, .75f);
-            hit(ID_MODE0, r, 0, 0);
-            y += 58 + 11;
-        }
-    }
-
-    // player name (a native EDIT on an opaque field)
-    label(L"PLAYER NAME"); y += 6;
-    {
-        EditBox& e = edits_[0];
-        bool foc = hwnd_ && GetFocus() == e.hwnd;
-        D2D1_RECT_F fr = rc(x, y, w, 38);
-        float fv = fx(K_COLOR | ID_NAME, foc ? 1.f : hover_ == ID_NAME ? .45f : 0.f, fr);   // border 120 ms on hover and focus
-        box(fr, 10, FIELD, 1, C::white, .12f + .3f * fv);
-        D2D1_RECT_F inner = { x + 12, y + 1, x + w - 12, y + 37 };
-        if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
-        if (!e.show || measuring_) text(c.displayName, Font{ Face::UI, 13, 600, false }, inner.left, y, inner.right - inner.left, 38, C::white);
-        hit(ID_NAME, fr, F_FOCUS | F_EDIT, 10);
-        y += 38 + 11;
-    }
-
+    // .modes: Practice and Battle Royale (both picked in the game), or lobby only
+    Font df{ Face::UI, 11.5f, 400, false };
     if (hasMatch) {
-        // bots: the number (an EDIT while it has the focus), the slider, - and +
-        label(L"BOTS"); y += 4;
-        int bots = botsDrag_ >= 0 ? botsDrag_ : c.bots;
-        const float rowH = 34;
-        EditBox& e = edits_[1];
-        D2D1_RECT_F nr = rc(x, y, 52, rowH);
-        bool editing = hwnd_ && (e.want || GetFocus() == e.hwnd);
-        if (!measuring_) { e.r = { nr.left + 3, nr.top + 1 + oy_, nr.right - 3, nr.bottom - 1 + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
-        if (editing && !dis) box(nr, 8, FIELD, 1, C::white, .42f);
-        else text(std::to_wstring(bots), Font{ Face::Display, 32, 900, true }, x, y, 60, rowH, C::white, 0, -0.32f);
-        hit(ID_BOTS, nr, F_FOCUS | F_EDIT, 8);
-        float cy = y + rowH / 2, s2 = x + w - 26, s1 = s2 - 6 - 26;
-        float rx = x + 52 + 8, rw = std::max(40.f, s1 - 12 - rx);
-        fill({ rx, cy - 3, rx + rw, cy + 3 }, C::white, .12f, 3);
-        float tx = rx + 8 + (rw - 16) * bots / 99.f;
-        if (!measuring_) {
-            if (rangeBr_) {   // linear-gradient(90deg, #8b5cf6, #c084fc) up to the knob
-                rangeBr_->SetStartPoint(D2D1::Point2F(rx, 0)); rangeBr_->SetEndPoint(D2D1::Point2F(std::max(rx + 1, tx), 0));
-                rangeBr_->SetOpacity(alpha_);
-                rt_->FillRoundedRectangle(D2D1::RoundedRect({ rx, cy - 3, std::max(rx + 6, tx), cy + 3 }, 3, 3), rangeBr_);
+        float mw = (w - 8) / 2;
+        const wchar_t* mt[2] = { L"PRACTICE", L"BATTLE ROYALE" };
+        const wchar_t* md[2] = { L"Creative · Playground", L"Solo to Squads" };
+        float t20 = std::max(textW(mt[0], Font{ Face::Display, 20, 900, true }), textW(mt[1], Font{ Face::Display, 20, 900, true }));
+        float ts = std::max(12.f, std::min(20.f, t20 > 0 ? (mw - 28 - 4) / t20 * 20 : 20.f));
+        for (int i = 0; i < 2; i++) {
+            D2D1_RECT_F r = rc(x + i * (mw + 8), y, mw, 74);
+            // linear-gradient(160deg, ...): the line through the center along (sin 160, -cos 160)
+            if (modeBr_[i] && !measuring_) {
+                const float dx = 0.3420201f, dy = 0.9396926f;
+                float len = mw * dx + 74 * dy, gx = (r.left + r.right) / 2, gy = (r.top + r.bottom) / 2;
+                modeBr_[i]->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
+                modeBr_[i]->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
+                modeBr_[i]->SetOpacity(alpha_);
+                rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 12, 12), modeBr_[i]);
             }
-            if (hover_ == ID_RANGE || drag_ == ID_RANGE) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(tx, cy), 12, 12), br(C::white, 0.12f));
-            rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(tx, cy), 8, 8), br(C::white));
+            text(mt[i], Font{ Face::Display, ts, 900, true }, r.left + 14, r.bottom - 12 - 16.7f - 24.2f, mw - 28 + ts, 24.2f, C::white);
+            text(md[i], df, r.left + 14, r.bottom - 12 - 16.7f, mw - 28, 16.7f, C::white, 0, 0, .85f);
+            hit(ID_MODE0 + i, r, 0, 0);   // tooltip only
         }
-        hit(ID_RANGE, rc(rx, y, rw, rowH), F_FOCUS | F_HAND, 6);
-        auto step = [&](int id, float sx, const wchar_t* t) {
-            D2D1_RECT_F r = rc(sx, cy - 13, 26, 26);
-            float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, r);
-            fill(r, C::white, .08f + .1f * hv, 13);
-            text(t, Font{ Face::UI, 15, 600, false }, sx, cy - 13, 26, 26, C::white, 1);
-            hit(id, r, F_FOCUS | F_HAND, 13);
-        };
-        step(ID_STEP_DN, s1, L"−");
-        step(ID_STEP_UP, s2, L"+");
-        y += rowH + 11;
+    } else {
+        D2D1_RECT_F r = rc(x, y, w, 74);
+        fill(r, C::white, .06f, 12);
+        text(L"LOBBY ONLY", Font{ Face::Display, 20, 900, true }, r.left + 14, r.bottom - 12 - 16.7f - 24.2f, w - 28, 24.2f, C::white);
+        text(L"No local match on this build: lobby, locker and styles", df, r.left + 14, r.bottom - 12 - 16.7f, w - 28, 16.7f, C::white, 0, 0, .75f);
+        hit(ID_MODE0, r, 0, 0);
+    }
+    y += 74 + 14;
+
+    auto row = [&](const wchar_t* label) { fill(rc(x, y, w, 1), C::white, .1f); text(label, rf, x, y, w * .55f, 44, C::white); };
+    if (hasMatch) {
+        // bots: the slider, then the number (an EDIT while it has the focus)
+        row(L"Bots");
+        int bots = botsDrag_ >= 0 ? botsDrag_ : c.bots;
+        float gw = std::min(280.f, w - textW(L"Bots", rf) - 24), gx = x + w - gw;
+        const float numW = 34;
+        float cy = y + 22, tx0 = gx, tw = std::max(30.f, gw - 12 - numW);
+        float kx = tx0 + tw * bots / 99.f;
+        fill({ tx0, cy - 2, tx0 + tw, cy + 2 }, C::white, .16f, 2);
+        if (!measuring_) {
+            if (rangeBr_) {   // linear-gradient(90deg, #8c6bff, #b79bff) up to the knob
+                rangeBr_->SetStartPoint(D2D1::Point2F(tx0, 0)); rangeBr_->SetEndPoint(D2D1::Point2F(std::max(tx0 + 1, kx), 0));
+                rangeBr_->SetOpacity(alpha_);
+                rt_->FillRoundedRectangle(D2D1::RoundedRect({ tx0, cy - 2, std::max(tx0 + 4, kx), cy + 2 }, 2, 2), rangeBr_);
+            }
+            if (hover_ == ID_RANGE || drag_ == ID_RANGE) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(kx, cy), 12, 12), br(C::white, 0.12f));
+            rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(kx, cy + 1), 8, 8), br(0x000000, .18f));   // 0 1px 4px rgba(0,0,0,.4)
+            rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(kx, cy), 7, 7), br(C::white));
+        }
+        hit(ID_RANGE, rc(tx0 - 8, y + 8, tw + 16, 28), F_FOCUS | F_HAND, 6);
+        EditBox& e = edits_[1];
+        D2D1_RECT_F nr = rc(x + w - numW, y + 6, numW, 32);
+        bool editing = hwnd_ && (e.want || GetFocus() == e.hwnd);
+        if (!measuring_) { e.r = { nr.left + 2, nr.top + 1 + oy_, nr.right - 2, nr.bottom - 1 + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
+        if (editing && !dis) box(nr, 8, FIELD, 1, C::white, .42f);
+        else text(std::to_wstring(bots), Font{ Face::Display, 24, 900, true }, nr.left - 6, y, numW + 6, 44, C::white, 2);
+        hit(ID_BOTS, nr, F_FOCUS | F_EDIT, 8);
+        y += 44;
 
         // .tg: the four switches (their details are the tooltips)
         struct Tg { const wchar_t* label; bool on; } tg[4] = {
             { L"Bots use the game's AI", c.botsAI }, { L"Late game", c.lateGame }, { L"Infinite materials", c.infiniteMaterials }, { L"Infinite ammo", c.infiniteAmmo },
         };
-        Font tgf{ Face::UI, 12.5f, 500, false };
         for (int i = 0; i < 4; i++) {
             int id = ID_TG0 + i;
-            D2D1_RECT_F r = rc(x, y, w, 30);
-            text(tg[i].label, tgf, x, y, w - 44, 30, C::white);
-            fill(rc(x, y + 29, w, 1), C::white, .07f);
-            float sx = x + w - 32, sy = y + 6;
-            // .sw: background and the knob 180 ms var(--ease)
-            float v = fx(K_SWITCH | id, tg[i].on ? 1.f : 0.f, rc(sx, sy, 32, 18), T2, Curve::Ui);
-            fill(rc(sx, sy, 32, 18), mix(0x474C5A, C::ok, v), 1, 9);
-            dot(sx + 2 + 7 + 14 * v, sy + 9, 14, mix(0xCFD2D6, C::white, v));
-            hit(id, r, F_FOCUS | F_HAND, 6);
-            y += 30;
-        }
-        if (c.botsAI) {   // the page's warning when the bots' AI is on
-            y += 10;
-            Font wf{ Face::UI, 11.5f, 400, false };
-            std::wstring note = L"**Bot AI is on.** On " + verLabel(*b) + L" it crashes the match server a few seconds after it starts.";
-            float th = rich(note, wf, 0, 0, w - 24, 16.5f, C::warnText, C::white, 0, false);
-            icon(Icon::Warn, x, y + 0.5f, 16, C::warn);
-            rich(note, wf, x + 24, y, w - 24, 16.5f, C::warnText, C::white);
-            y += th;
+            row(tg[i].label);
+            float sx = x + w - 30, sy = y + (44 - 17) / 2;
+            // background and the knob 180 ms var(--ease)
+            float v = fx(K_SWITCH | id, tg[i].on ? 1.f : 0.f, rc(sx, sy, 30, 17), T2, Curve::Ui);
+            if (v < 1) fill(rc(sx, sy, 30, 17), C::white, .18f * (1 - v), 8.5f);
+            if (v > 0) fill(rc(sx, sy, 30, 17), 0x3FC46A, v, 8.5f);
+            if (!measuring_) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(sx + 2 + 6.5f + 13 * v, sy + 8.5f), 6.5f, 6.5f), br(C::white, .85f + .15f * v));
+            hit(id, rc(x - 6, y + 1, w + 12, 43), F_FOCUS | F_HAND, 6);
+            y += 44;
+            if (i == 0 && c.botsAI) {   // the page's warning when the bots' AI is on
+                Font wf{ Face::UI, 11.5f, 400, false };
+                std::wstring note = L"**Bot AI is on.** On " + verLabel(*b) + L" it crashes the match server a few seconds after it starts.";
+                float th = rich(note, wf, 0, 0, w - 24, 16.5f, C::warnText, C::white, 0, false);
+                icon(Icon::Warn, x, y + 0.5f, 16, C::warn);
+                rich(note, wf, x + 24, y, w - 24, 16.5f, C::warnText, C::white);
+                y += th + 10;
+            }
         }
     }
-    alpha_ = 1; noHit_ = false;
-    return y + 10;
+
+    // player name (a native EDIT on an opaque field)
+    row(L"Player name");
+    {
+        EditBox& e = edits_[0];
+        bool foc = hwnd_ && GetFocus() == e.hwnd;
+        float fw = std::min(220.f, w - textW(L"Player name", rf) - 24);
+        D2D1_RECT_F fr = rc(x + w - fw, y + 6, fw, 32);
+        float fv = fx(K_COLOR | ID_NAME, foc ? 1.f : hover_ == ID_NAME ? .45f : 0.f, fr);   // border 120 ms on hover and focus
+        box(fr, 9, FIELD, 1, C::white, .1f + .3f * fv);
+        D2D1_RECT_F inner = { fr.left + 12, fr.top + 1, fr.right - 12, fr.bottom - 1 };
+        if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis; }
+        if (!e.show || measuring_) text(c.displayName, Font{ Face::UI, 13, 600, false }, inner.left, fr.top, inner.right - inner.left, 32, C::white);
+        hit(ID_NAME, fr, F_FOCUS | F_EDIT, 9);
+        y += 44;
+    }
+    alpha_ = a0; noHit_ = false;
+    return y;
+}
+
+// .launch: white, as tall as the window allows (68 to 112 DIPs), a glow in the season's color; Stop while a session
+// runs. Its hit is added at the end of the frame (the last control in the focus order, like the page).
+void App::drawLaunch(D2D1_RECT_F pr, uint32_t glow) {
+    const Build* b = sel();
+    bool stopStyle = busy();
+    bool disabled = stopStyle ? se_.state == SessionState::Stopping : (!b || b->lobby == Support::No);
+    playRect_ = pr; playShown_ = true; playDisabled_ = disabled;
+    float bw = pr.right - pr.left, bh = pr.bottom - pr.top, k = bh / 112;
+    float rr = std::max(16.f, std::min(22.f, bh * .196f));
+    playRadius_ = rr;
+    D2D1_RECT_F area = grow(pr, 4);
+    bool phov = hover_ == ID_PLAY && !disabled;
+    // background 120 ms; the hover ring 120 ms; :active scale(.985) 120 ms var(--ease). Text, style and width change at once.
+    uint32_t bg = fxc(K_COLOR | ID_PLAY, disabled ? 0x1A1E2B : stopStyle ? (phov ? 0x1C2338 : 0x0E1222) : C::white, area);
+    float ring = fx(K_HOVER | ID_PLAY, phov ? 1.f : 0.f, area);
+    float press = fx(K_PRESS | ID_PLAY, press_ == ID_PLAY && !disabled ? 1.f : 0.f, area, T1, Curve::Ui);
+    // box-shadow: 0 12px 40px <season color> .45
+    if (!stopStyle && !disabled) shadow(grow(pr, -4), rr, 40, 12, .6f, glow);
+    D2D1_MATRIX_3X2_F saved = base_;
+    if (press > 0) {
+        float s = 1 - 0.015f * press;
+        base_ = D2D1::Matrix3x2F::Scale(s, s, D2D1::Point2F((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2)) * base_;
+        rt_->SetTransform(base_);
+    }
+    if (ring > 0 && !measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, 1.5f), rr + 1.5f, rr + 1.5f), br(C::white, 0.16f * ring), 3);
+    if (stopStyle || disabled) box(pr, rr, bg, .9f, C::white, .18f);
+    else {
+        fill(pr, bg, 1, rr);
+        if (!measuring_) rt_->DrawRoundedRectangle(D2D1::RoundedRect(grow(pr, .5f), rr + .5f, rr + .5f), br(C::white, .4f), 1);   // 0 0 0 1px rgba(255,255,255,.4)
+    }
+    // .play::after sheen (greet wins over hover, like the later CSS rule); out of the button at rest
+    float sh = anim_.running(K_GREET) ? tw(K_GREET, -1.2f, area) : anim_.running(K_SHEEN) ? tw(K_SHEEN, -1.2f, area) : -1.2f;
+    if (sh > -1.2f && sh < 1.2f && sheen_ && !measuring_) {
+        const float dx = 0.9659258f, dy = 0.2588190f;   // 105deg: (sin a, -cos a)
+        float len = bw * dx + bh * dy, gx = (pr.left + pr.right) / 2 + sh * bw, gy = (pr.top + pr.bottom) / 2;
+        sheen_->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
+        sheen_->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
+        sheen_->SetOpacity(alpha_);
+        rt_->FillRoundedRectangle(D2D1::RoundedRect(pr, rr, rr), sheen_);
+    }
+    // ▶ LAUNCH <small>version</small>: italic 900 64px at 112 tall (scaled with the button), gap 14px; the version 20px at .6
+    float ps = std::max(34.f, 64 * k), ss = std::max(13.f, 20 * k);
+    Font pf{ Face::Display, ps, 900, true }, sf{ Face::Display, ss, 900, true };
+    const wchar_t* pl = stopStyle ? L"STOP" : L"LAUNCH";
+    std::wstring ver = stopStyle || !b ? L"" : verLabel(*b);
+    float iconS = std::max(40.f, 53.3f * k) * (stopStyle ? .75f : 1.f), gap = std::max(10.f, 14 * k);
+    float g0 = 4.5f / 16 * iconS, gw = (stopStyle ? 7.f : 8.7f) / 16 * iconS;   // the glyph inside the icon box
+    float ptw = textW(pl, pf), stw = ver.empty() ? 0 : textW(ver, sf);
+    float cw = gw + gap + ptw + (stw > 0 ? gap + stw : 0);
+    if (cw > bw - 32) { stw = 0; cw = gw + gap + ptw; }
+    if (cw > bw - 32) { ps = std::max(20.f, ps * (bw - 32) / cw); pf.size = ps; ptw = textW(pl, pf); cw = gw + gap + ptw; }
+    uint32_t pc = disabled ? 0x6B7080 : stopStyle ? C::white : INK;
+    float cx = pr.left + (bw - cw) / 2, cy = (pr.top + pr.bottom) / 2;
+    icon(stopStyle ? Icon::X : Icon::Play, cx - g0, cy - iconS / 2, iconS, pc);
+    if (text(pl, pf, cx + gw + gap, pr.top, ptw + 4, bh, pc)) issues.push_back(L"clipped play");
+    if (stw > 0) text(ver, sf, cx + gw + gap + ptw + gap, pr.top + 2 * k, stw + 2, bh, disabled ? 0x6B7080 : INK, 0, 0, disabled ? 1.f : .6f);
+    base_ = saved;
+    rt_->SetTransform(base_);
 }
 
 void App::drawTitle(float W) {
@@ -1852,6 +2052,11 @@ std::wstring App::tooltip(int id) const {
     case ID_TG2: return L"Battle Royale (practice always has them)";
     case ID_TG3: return L"Battle Royale (practice always has it)";
     case ID_BUILDMENU: return L"Build actions";
+    case ID_ACT: return L"Activity (Ctrl+L)";
+    case ID_PREV: return L"Previous build (Q)";
+    case ID_NEXT: return L"Next build (E)";
+    case ID_SHEET: return L"Bots, switches and player name";
+    case ID_SHEETX: return L"Close (Esc)";
     case ID_GRIP: return L"Drag to resize";
     case ID_COPY: return L"Copy activity";
     case ID_OPENLOGS: return L"Open the build's log folder";
@@ -1900,6 +2105,7 @@ void App::mouseDown(float x, float y) {
     int id = h ? h->id : 0;
     int toggle = menuOwner(menu_);
     if (menu_ && id != ID_POPUP && !(id >= ID_MENU0 && id < ID_MENU0 + 20) && id != toggle) { menu_ = 0; invalidate(); }
+    else if (sheetOpen_ && !inside(sheetRect_, x, y) && id != ID_SHEET && id != ID_TOAST && !(id >= ID_MENU0 && id < ID_BUILD0) && id != ID_POPUP) openSheet(false);
     if (!h || (h->flags & F_DISABLED) || id == ID_POPUP || id == ID_TOAST) {
         if (hwnd_ && GetFocus() != hwnd_) SetFocus(hwnd_);
         invalidate();
@@ -1998,10 +2204,6 @@ void App::activate(int id) {
     case ID_EMPTY_FOLDER: core_->command(Command::AddFolder, b); break;
     case ID_NOTICE_FW: core_->command(Command::Firewall, b); break;
     case ID_NOTICE_COS: core_->command(Command::Cosmetics, b); break;
-    case ID_STEP_DN: case ID_STEP_UP:
-        c.bots = std::max(0, std::min(99, st_.config.bots + (id == ID_STEP_UP ? 1 : -1)));
-        setConfig(ConfigPatch::Bots, c);
-        break;
     case ID_TG0: c.botsAI = !st_.config.botsAI; setConfig(ConfigPatch::BotsAI, c); break;
     case ID_TG1: c.lateGame = !st_.config.lateGame; setConfig(ConfigPatch::LateGame, c); break;
     case ID_TG2: c.infiniteMaterials = !st_.config.infiniteMaterials; setConfig(ConfigPatch::InfiniteMaterials, c); break;
@@ -2022,6 +2224,14 @@ void App::activate(int id) {
     case ID_OPENLOGS: core_->command(Command::OpenLogs, b); break;
     case ID_CLEAR: logs_.clear(); rows_.clear(); rowsDirty_ = true; invalidate(); break;
     case ID_ACT: openActivity(!actOpen_); break;
+    case ID_PREV: case ID_NEXT: stepBuild(id == ID_NEXT ? 1 : -1); break;
+    case ID_SHEET: {
+        bool kb = focusVisible_;
+        openSheet(!sheetOpen_);
+        if (sheetOpen_ && kb) focus_ = matchOk(sel()) && sel()->lobby != Support::No ? (int)ID_RANGE : (int)ID_SHEETX;   // keyboard: into the sheet
+        break;
+    }
+    case ID_SHEETX: openSheet(false); setFocus(ID_SHEET, focusVisible_); break;
     case ID_PLAY:
         if (se_.state == SessionState::Launching || se_.state == SessionState::Running) core_->command(Command::Stop, b);
         else if (!b.empty()) core_->command(Command::Launch, b);
@@ -2082,6 +2292,7 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     if (pOpen_ && !menu_ && portKey(vk, ctrl, shift)) return true;
     if (vk == VK_ESCAPE) {
         if (menu_) { int t = menuOwner(menu_); menu_ = 0; setFocus(t, focusVisible_); return true; }
+        if (sheetOpen_) { openSheet(false); setFocus(ID_SHEET, focusVisible_); return true; }
         return false;
     }
     if (ctrl && vk == VK_RETURN) { const Hit* p = hitById(ID_PLAY); if (p && !(p->flags & F_DISABLED)) activate(ID_PLAY); return true; }
@@ -2089,6 +2300,7 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     if (vk == VK_TAB) { if (menu_) { int t = menuOwner(menu_); menu_ = 0; focus_ = t; } moveFocus(shift ? -1 : 1); return true; }
     if (menu_ && (vk == VK_DOWN || vk == VK_UP)) { moveFocus(vk == VK_DOWN ? 1 : -1); return true; }
     int f = focus_;
+    if (!ctrl && !menu_ && !pOpen_ && (vk == 'Q' || vk == 'E')) { stepBuild(vk == 'E' ? 1 : -1); return true; }   // like the game's tabs
     if (f >= ID_BUILD0 && (vk == VK_DOWN || vk == VK_UP || vk == VK_LEFT || vk == VK_RIGHT)) {   // the tabs
         if (busy() || st_.builds.empty()) return true;
         int i = -1;
@@ -2123,9 +2335,13 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
         }
         if (d) { logScroll_ = std::max(0.f, std::min(logMax_, logScroll_ + d)); logFollow_ = logScroll_ >= logMax_ - 8; invalidate(); return true; }
     }
+    // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above)
+    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_) { stepBuild(vk == VK_RIGHT ? 1 : -1); return true; }
     if (vk == VK_RETURN || vk == VK_SPACE) {
         const Hit* h = hitById(f);
         if (h && !(h->flags & F_DISABLED) && f != ID_LINES) { focusVisible_ = true; activate(f); return true; }
+        // Enter with nothing focused launches (never stops: that stays on the button and Ctrl+Enter)
+        if (vk == VK_RETURN && !h && !menu_ && !pOpen_ && !busy()) { const Hit* p = hitById(ID_PLAY); if (p && !(p->flags & F_DISABLED)) activate(ID_PLAY); return true; }
     }
     if (vk == VK_PRIOR || vk == VK_NEXT) { contentScroll_ += (vk == VK_NEXT ? 1 : -1) * contentView_ * 0.9f; invalidate(); return true; }
     return false;
@@ -2140,14 +2356,16 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     auto check = [&](const wchar_t* name, bool ok) { out.push_back({ name, ok }); };
     frame(); frame();
 
+    click(ID_SHEET);
+    check(L"Match settings opens the sheet", sheetOpen_ && hitById(ID_TG1) && !hitById(ID_SHEET));
     bool late = st_.config.lateGame;
     click(ID_TG1);
     check(L"click switch toggles lateGame", st_.config.lateGame == !late);
     int bots = st_.config.bots;
-    click(ID_STEP_UP);
-    check(L"stepper + adds a bot", st_.config.bots == bots + 1);
-    click(ID_STEP_DN);
-    check(L"stepper - removes a bot", st_.config.bots == bots);
+    setFocus(ID_RANGE, true); key(VK_RIGHT, false, false); frame();
+    check(L"Right on the slider adds a bot", st_.config.bots == bots + 1);
+    key(VK_LEFT, false, false); frame();
+    check(L"Left on the slider removes it", st_.config.bots == bots);
     frame();
     { float x, y; center(ID_RANGE, &x, &y); D2D1_RECT_F r = rectOf(ID_RANGE); mouseDown(r.right - 2, y); mouseUp(r.right - 2, y); frame(); }
     check(L"slider drag to the end = 99 bots", st_.config.bots == 99);
@@ -2155,6 +2373,11 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     check(L"slider Home = 0 bots", st_.config.bots == 0);
     key(VK_RIGHT, false, false); key(VK_PRIOR, false, false); frame();
     check(L"slider Right + PageUp = 11 bots", st_.config.bots == 11);
+    key(VK_ESCAPE, false, false); frame();
+    check(L"Escape closes the sheet and focuses Match settings", !sheetOpen_ && focus_ == ID_SHEET && hitById(ID_SHEET));
+    click(ID_SHEET);
+    { float ox = 5, oy = TB + 200; mouseDown(ox, oy); mouseUp(ox, oy); frame(); }
+    check(L"a click outside the sheet closes it", !sheetOpen_);
 
     // focus order: Tab from nothing reaches every control once and wraps
     focus_ = 0; frame();
@@ -2175,6 +2398,14 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     check(L"Up goes back", selected_ == st_.builds[cur].name);
     key(VK_RIGHT, false, false); key(VK_LEFT, false, false); frame();
     check(L"Right and Left on the tabs move the selection and back", selected_ == st_.builds[cur].name && focus_ == ID_BUILD0 + (int)cur);
+    focus_ = 0; key('E', false, false); frame();
+    bool eNext = cur + 1 < st_.builds.size() ? selected_ == st_.builds[cur + 1].name : true;
+    key('Q', false, false); frame();
+    check(L"E selects the next build and Q goes back", eNext && selected_ == st_.builds[cur].name);
+    click(ID_NEXT);
+    bool nNext = cur + 1 < st_.builds.size() ? selected_ == st_.builds[cur + 1].name : true;
+    click(ID_PREV);
+    check(L"the arrow buttons select the next build and back", nNext && selected_ == st_.builds[cur].name);
 
     // build menu: click opens, Escape closes and returns the focus
     click(ID_BUILDMENU);
@@ -2221,6 +2452,7 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
 
     // keyboard on the other widgets
     bool mats = st_.config.infiniteMaterials;
+    click(ID_SHEET);
     setFocus(ID_TG2, true); key(VK_SPACE, false, false); frame();
     check(L"Space toggles the focused switch", st_.config.infiniteMaterials == !mats);
     openActivity(true); frame();
@@ -2241,14 +2473,15 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
           ncHit(300, 20) == HTCAPTION && ncHit(W - 23, 20) == HTCLIENT && ncHit(W - 23 - 46 * 2, 20) == HTCLIENT && ncHit(300, 60) == HTCLIENT);
     // tooltips: the page's title attributes
     bool tips = true;
-    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0, ID_MODE0, ID_TG0 };
+    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_ACT, ID_PREV, ID_NEXT, ID_SHEET, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0, ID_MODE0, ID_TG0 };
     for (int id : tipIds) tips = tips && !tooltip(id).empty();
     const Build* sb = sel();
     check(L"icon buttons, build items and status cells have the page's tooltips",
           tips && sb && tooltip(ID_CELL0) == sb->lobbyWhy && tooltip(ID_CELL0 + 1) == (sb->matchServer ? sb->matchWhy : L"launcher\\gameserver\\radarnite-server.dll is missing"));
 
-    key(VK_RETURN, true, false); drain(); frame();
-    check(L"Ctrl+Enter launches the selected build", se_.state == SessionState::Launching);
+    openSheet(false); focus_ = 0; frame();
+    key(VK_RETURN, false, false); drain(); frame();
+    check(L"Enter with nothing focused launches the selected build", se_.state == SessionState::Launching);
     return out;
 }
 

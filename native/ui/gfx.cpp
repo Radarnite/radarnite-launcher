@@ -50,6 +50,8 @@ static const IconSrc kIcons[(int)Icon::Count] = {
     { 16, R"(<path d="M5 3v10M2.8 10.8L5 13l2.2-2.2M11 13V3M8.8 5.2L11 3l2.2 2.2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
     { 16, R"(<circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
     { 16, R"(<path d="M3.5 8.4l3 3 6-6.6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M10 3.5L5.5 8L10 12.5" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
 };
 
 static bool attr(const char* el, const char* end, const char* name, std::string* out) {
