@@ -84,9 +84,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
           echo "makensis $(makensis -VERSION), zig $(zig version)"
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: 8.0.x
+      # setup-dotnet's bundled installer downloads from the old dotnetorigin storage, which now refuses public
+      # access (409); the current official script uses builds.dotnet.microsoft.com.
+      - name: .NET 8 SDK
+        run: |
+          curl -fsSL --retry 3 https://builds.dotnet.microsoft.com/dotnet/scripts/v1/dotnet-install.sh -o "$RUNNER_TEMP/dotnet-install.sh"
+          # an explicit version: with --channel the script tries the aka.ms link only, which points at the old storage
+          ver="$(curl -fsSL --retry 3 https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0/latest.version | tail -n1 | tr -d '\r')"
+          bash "$RUNNER_TEMP/dotnet-install.sh" --version "$ver" --install-dir "$HOME/.dotnet" --azure-feed https://builds.dotnet.microsoft.com/dotnet
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          "$HOME/.dotnet/dotnet" --version
       - name: Game start helper (dotnet publish, self-contained win-x64 single file)
         env:
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
