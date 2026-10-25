@@ -9,7 +9,7 @@
 #                   for that base and branch. <branch> = the name in lower case with every run of characters outside
 #                   [0-9a-z-] turned into one "-" (feat/3.0 -> feat-3-0): valid semver identifiers, so the updater
 #                   (native/core/update.cpp) orders them by semver precedence.
-# No release (publish=false) when the head commit's subject (first line) contains "[skip release]", or when HEAD already carries
+# No release (publish=false) when the head commit's subject (first line) ends with "[skip release]", or when HEAD already carries
 # this line's tag (a re-run). Prints key=value lines, also appended to $GITHUB_OUTPUT when it is set:
 #   version, tag, prerelease (true|false), base, since (the tag the notes start from, "" = none), publish, reason
 set -euo pipefail
@@ -67,7 +67,7 @@ publish=true; reason="new $([ "$prerelease" = true ] && echo prerelease || echo 
 msg="$(git log -1 --format=%s HEAD)"   # the subject only: a squash merge lists every commit's message in its body
 if [ "$prerelease" = true ]; then
   publish=false; reason="only main publishes: branch builds are checked, never released (no prereleases)"
-elif grep -qiF '[skip release]' <<<"$msg"; then
+elif [[ "${msg,,}" == *'[skip release]' ]]; then   # at the end only: a subject may name the marker
   publish=false; reason="the head commit message asks to skip the release"
 elif [ -n "$done_tags" ]; then
   publish=false; reason="HEAD is already released as ${done_tags//$'\n'/ }"
