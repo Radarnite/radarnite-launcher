@@ -102,6 +102,7 @@ const MockScenario kScenarios[] = {
     { L"20-match-server-bots-form", 1200, 800, 1.0f, false },
     { L"21-match-server-ai-on-900-125", 900, 640, 1.25f, false },
     { L"22-build-menu-toast", 1200, 800, 1.0f, false, 2 },
+    { L"22-toast-760x520", 760, 520, 1.0f, false },
     { L"23-keyboard-focus-switch", 1200, 800, 1.0f, false, 0, 18 },
     // the lobby screen at the mockup's size, at 125 % and at the minimum window size
     { L"24-lobby-1280x800", 1280, 800, 1.0f, false },
@@ -132,9 +133,10 @@ const MockScenario kScenarios[] = {
     { L"44-port-sheet-history-end", 1280, 800, 1.0f, false, 0, 0, 9 },
     { L"45-port-sheet-player", 1280, 800, 1.0f, false, 0, 0, 10 },
     { L"46-port-sheet-1920-125", 1536, 864, 1.25f, false, 0, 0, 8 },
-    // the poster main screen at the mockup's size (2560x1380 at 125 %) and its always-open match settings at 1280x800
-    // and at the minimum size (their content scrolls), with and without Activity
+    // the poster main screen at the mockup's size (2560x1380 at 125 %), lobby only and with a local match; the always-open
+    // match settings at 1280x800 and at the minimum size (their content scrolls), with and without Activity
     { L"47-poster-2048x1104-125", 2048, 1104, 1.25f, false },
+    { L"48-poster-settings-2048x1104-125", 2048, 1104, 1.25f, false },
     { L"49-poster-settings-1280x800", 1280, 800, 1.0f, false },
     { L"50-poster-settings-760x520", 760, 520, 1.0f, false },
     { L"51-poster-settings-activity-760x520", 760, 520, 1.0f, true },
@@ -276,12 +278,12 @@ public:
         else if (id.rfind(L"23-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.selected = L"17.50"; }
         else if (id.rfind(L"21-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.botsAI = true; st.selected = L"17.50"; }
         else if (id.rfind(L"22-", 0) == 0) { st.builds = withServer(many()); st.selected = L"12.41"; post = logs(5); }
-        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0 || (_wtoi(id.c_str()) >= 43 && _wtoi(id.c_str()) <= 48)) {
+        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0 || (_wtoi(id.c_str()) >= 43 && _wtoi(id.c_str()) <= 47)) {
             st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86";
             LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
             l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
         }
-        else if (_wtoi(id.c_str()) >= 49 && _wtoi(id.c_str()) <= 52) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.bots = 35; st.selected = L"17.50"; post = logs(40); }   // the match settings
+        else if (_wtoi(id.c_str()) >= 48 && _wtoi(id.c_str()) <= 52) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.bots = 35; st.selected = L"17.50"; post = logs(40); }   // the match settings
         else if (id.rfind(L"42-", 0) == 0) { st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86"; }
         else if (portScenario()) { st.builds = { b1750(), b1430() }; st.selected = L"14.30"; }
         lock(); state_ = st; unlock();

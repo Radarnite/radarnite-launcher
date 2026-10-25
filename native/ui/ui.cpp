@@ -874,6 +874,7 @@ void App::paint(float W, float H) {
     if (playShown_ && !pOpen_) hit(ID_PLAY, playRect_, F_FOCUS | F_HAND | (playDisabled_ ? F_DISABLED : 0), playRadius_);   // the last control, like the page
     toastRight_ = pOpen_ ? W - 24 : W - mx;
     toastBottom_ = pOpen_ ? actTop - 24 : dockTop - 12;
+    if (!pOpen_) toastBottom_ = std::min(actTop - 24, std::max(toastBottom_, TB + 76 + 64));   // a tall settings panel: over its top, never over the top row
     drawMenu();
     drawPortOverlays();
     drawToasts(W, H);
@@ -1511,7 +1512,7 @@ float App::drawSettings(float x, float w, float top, float bottom) {
     measuring_ = true;
     settingsCompact_ = false;
     float ch = settingsBody(x + 23, 18, w - 46) + 8;   // padding 18 22 8 (+ the 1px border); the last row has its own air
-    if (ch + 2 > bottom - top) { settingsCompact_ = true; ch = settingsBody(x + 23, 18, w - 46) + 8; }   // short: no subtitle
+    if (ch + 2 > bottom - top) { settingsCompact_ = true; ch = settingsBody(x + 23, 12, w - 46) + 8; }   // short: no subtitle, less air
     measuring_ = false;
     float h = std::max(0.f, std::min(ch + 2, bottom - top));
     if (h < 40) return bottom;   // no room at all (Activity over a tiny window): the status line and Launch only
@@ -1530,7 +1531,7 @@ float App::drawSettings(float x, float w, float top, float bottom) {
     base_ = D2D1::Matrix3x2F::Translation(0, oy_);
     rt_->SetTransform(base_);
     inContent_ = true;
-    settingsBody(x + 23, 18, w - 46);
+    settingsBody(x + 23, settingsCompact_ ? 12.f : 18.f, w - 46);
     inContent_ = false;
     base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0;
     rt_->SetTransform(base_);
@@ -1550,11 +1551,11 @@ float App::settingsBody(float x, float y0, float w) {
     const float hh = 17.4f, sh = 16.7f;
     text((hasMatch ? L"MATCH SETTINGS · " : L"SETTINGS · ") + verLabel(*b), lf, x, y, w, hh, C::white, 0, .84f, .62f);
     y += hh + 2;
-    const wchar_t* sub = !hasMatch ? L"No local match on this build: lobby, locker and styles"
+    const wchar_t* sub = dis ? L"Not supported on this build" : !hasMatch ? L"No local match on this build: lobby, locker and styles"
                        : L"Battle Royale · Creative/Playground always has infinite materials and ammo";
     if (hasMatch && textW(sub, df) > w) sub = L"For Battle Royale matches";
     if (!hasMatch && textW(sub, df) > w) sub = L"No local match: lobby, locker and styles";
-    if (!settingsCompact_ || !hasMatch) { text(sub, df, x, y, w, sh, C::white, 0, 0, .55f); y += sh; }
+    if (!settingsCompact_) { text(sub, df, x, y, w, sh, C::white, 0, 0, .55f); y += sh; }
     y += 8;
     float a0 = alpha_;
     if (dis) { alpha_ = .5f * a0; noHit_ = true; }
