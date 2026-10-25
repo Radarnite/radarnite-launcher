@@ -102,6 +102,11 @@ jobs:
           native/core/build.sh out
           mkdir -p native/ui/out
           native/ui/build.sh out/RadarniteLauncher.exe
+      - name: Body sliders DLL (zig cc, patches/fnbody.dll; ships, unlike the payload sources below)
+        run: |
+          mkdir -p pakpatch/out
+          zig cc -target x86_64-windows-gnu -O2 -shared -s -o pakpatch/out/fnbody.dll pakpatch/fnbody.c -luser32
+          echo "fnbody.dll: $(stat -c %s pakpatch/out/fnbody.dll) bytes"
       - name: Payload from the pinned 2.2.1 installer
         run: tools/payload-from-release.sh "$RUNNER_TEMP/payload"
       - name: Payload sources built here (informational, nothing of it ships)
@@ -124,7 +129,7 @@ jobs:
         run: >-
           tools/release.sh build --version "$VERSION" --launcher native/ui/out/RadarniteLauncher.exe
           --payload "$RUNNER_TEMP/payload" --out dist --makensis "$(command -v makensis)"
-          --play play/out/radarnite-play.exe
+          --play play/out/radarnite-play.exe --fnbody pakpatch/out/fnbody.dll
       - name: Program folder zip (the installer's content; no .sha256 asset, the updaters take any)
         run: |
           x="$RUNNER_TEMP/program"; rm -rf "$x"

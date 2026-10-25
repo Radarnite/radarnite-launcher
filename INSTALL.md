@@ -41,6 +41,8 @@ branch runs nothing (one trigger per job).
   patches, notices) comes from the v2.2.1 installer, pinned by sha256
   (`tools/payload-from-release.sh` says why it is not built in CI). A new payload = pin there the installer of a
   release built with `just release`, which takes it from the PC's dev tree.
+- `patches\fnbody.dll` (body sliders, 14.30 client) is the one game DLL built in CI: `zig cc` from `pakpatch/fnbody.c`,
+  passed to `tools/release.sh --fnbody`; `just test-fnbody` runs its mock test (never in CI).
 - Optional repository secret `RN_PRIVACY_BAN`: more strings for the privacy gate to ban, one per line.
 
 2.x releases were cut by hand on Windows; those build scripts are gone, `tools/release.sh` is the only packager.

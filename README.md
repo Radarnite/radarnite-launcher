@@ -21,6 +21,8 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - `redirect/` — the DLL that redirects the game's traffic to the local backend.
 - `gameserver-reboot/` — the local match server.
 - `cosmetics-gen/`, `pakpatch/` — cosmetics and pak tooling.
+- `pakpatch/fnbody.c` — `fnbody.dll`, injected by the launcher into the 14.30 client: turns the body-slider styles of
+  fn-port outfits into morph target weights (`pakpatch/test/fnbody-mock.c` runs it against a fake engine).
 - `paktools/` — the one copy of the pak signature fitter (sigfit) and the game guard the launcher ships
   (`tools/vendor-pak-tools.sh`).
 - `radarnite.nsi` — the NSIS installer script.

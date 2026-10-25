@@ -3,8 +3,8 @@
 # with makensis, 7z and perl works the same).
 #
 #   tools/release.sh build --version 3.0.0-rc.1 --launcher <RadarniteLauncher.exe> --play <radarnite-play.exe> \
-#       --payload <dir> [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>] [--ban <text>]...
-#       [--no-version-check]
+#       --fnbody <fnbody.dll> --payload <dir> [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>]
+#       [--ban <text>]... [--no-version-check]
 #   tools/release.sh privacy-scan <file|dir>...   the privacy gate alone (exit 1 on any hit)
 #   tools/release.sh scrub <dir>                  the payload's same-length path scrub alone, in place (vendor-pak-tools.sh)
 #   tools/release.sh sha256-line <file>           the .sha256 asset content for <file> (no trailing newline)
@@ -24,6 +24,8 @@
 # README-offline.md (tools/fetch-payload.sh copies it from the PC). The pak tools (tools\fn-modkit-sigfit,
 # sigfit-installed.ps1, game-guard.ps1, pak-tools.manifest) come only from paktools/ (tools/vendor-pak-tools.sh): a
 # payload that carries its own copy is refused, and the staged ones must match paktools/pak-tools.manifest.
+# --fnbody is patches\fnbody.dll (pakpatch/fnbody.c, zig cc -s): built from this checkout, not a payload binary, so it
+# replaces any copy the payload brings and is never scrubbed either.
 # Those prebuilt binaries get the same-length path scrub of the 2.x build. The 3.0 exes
 # are never scrubbed: they must come out of their builds clean (-s / strip, --remap-path-prefix), or the gate fails.
 #
@@ -143,13 +145,14 @@ product_version() {
 
 # ---------------------------------------------------------------- build
 cmd_build() {
-  local version="" launcher="" play="" payload="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
+  local version="" launcher="" play="" fnbody="" payload="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
   local nsi="$ROOT/radarnite.nsi" makensis="" keep=0 vcheck=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --version) version="$2"; shift 2 ;;
       --launcher) launcher="$2"; shift 2 ;;
-        --play) play="$2"; shift 2 ;;
+      --play) play="$2"; shift 2 ;;
+      --fnbody) fnbody="$2"; shift 2 ;;
       --payload) payload="$2"; shift 2 ;;
       --out) out="$2"; shift 2 ;;
       --icon) icon="$2"; shift 2 ;;
@@ -163,9 +166,9 @@ cmd_build() {
   done
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "--version must be semver (3.0.0, 3.0.0-rc.1 or 3.0.0-feat-3-0.1), got '$version'"
   local vnum="${version%%-*}"
-  for f in "$launcher" "$play" "$icon" "$nsi" "$ROOT/backend/server.mjs"; do [ -f "$f" ] || die "missing file: '$f'"; done
+  for f in "$launcher" "$play" "$fnbody" "$icon" "$nsi" "$ROOT/backend/server.mjs"; do [ -f "$f" ] || die "missing file: '$f'"; done
   [ -d "$payload" ] || die "missing payload folder: '$payload'"
-  for f in "$launcher" "$play"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
+  for f in "$launcher" "$play" "$fnbody"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
   if [ "$vcheck" = 1 ]; then
     local pv; pv="$(product_version "$launcher")"
     [ "$pv" = "$version" ] || die "the launcher's ProductVersion is '$pv', not $version: build it as $version (RN_VERSION=$version, just release $version)"
@@ -173,7 +176,7 @@ cmd_build() {
   [ -n "$makensis" ] || makensis="$(command -v makensis || echo /opt/homebrew/bin/makensis)"
   [ -x "$makensis" ] || die "makensis not found (brew install makensis, or --makensis)"
   command -v 7z >/dev/null || die "7z not found (brew install p7zip / sevenzip): needed to verify the installer"
-  add_ban "$(cd "$(dirname "$launcher")" && pwd)"; add_ban "$(cd "$(dirname "$play")" && pwd)"; add_ban "$(cd "$payload" && pwd)"
+  add_ban "$(cd "$(dirname "$launcher")" && pwd)"; add_ban "$(cd "$(dirname "$play")" && pwd)"; add_ban "$(cd "$(dirname "$fnbody")" && pwd)"; add_ban "$(cd "$payload" && pwd)"
 
   STAGE="$(mktemp -d "${TMPDIR:-/tmp}/radarnite-stage.XXXXXX")"; KEEP=$keep
   trap '[ "$KEEP" = 1 ] && echo "staging kept: $STAGE" || rm -rf "$STAGE"' EXIT
@@ -211,6 +214,7 @@ cmd_build() {
   [ -s "$app/node/node.exe" ] || die "the payload has no node/node.exe (the backend runs on it)"
   mkdir -p "$app/backend"; cp "$ROOT/backend/server.mjs" "$app/backend/"
   cp "$play" "$app/radarnite-play.exe"
+  mkdir -p "$app/patches"; cp "$fnbody" "$app/patches/fnbody.dll"
   cp "$icon" "$app/radarnite.ico"; cp "$icon" "$stage/radarnite.ico"
   echo "== privacy gate (staging)"
   privacy_scan "$app" "$stage/radarnite.ico" || die "privacy gate failed on the staging"

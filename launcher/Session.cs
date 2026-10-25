@@ -54,6 +54,8 @@ public sealed class Session
         a += $" -nocrashreports -AUTH_LOGIN={login} -AUTH_PASSWORD=offline -AUTH_TYPE=epic";
         // XMPP is pointed at the local backend by a hotfix file the backend serves (cloudstorage/system DefaultEngine.ini);
         // this build ignores -ini: command-line overrides.
+        // Developer: FNOFFLINE_EXTRA_ARGS adds arguments (a test run in the background: -windowed -WinX=... -nosound).
+        if (Environment.GetEnvironmentVariable("FNOFFLINE_EXTRA_ARGS") is { Length: > 0 } extra) a += " " + extra;
         return (a, ac);
     }
 
@@ -112,8 +114,8 @@ public sealed class Session
     }
 
     /// <summary>The game client alone, for a backend that already runs (StartAsync, and radarnite-play.exe for the 3.0
-    /// launcher): redirect DLL loaded at process start, the suspended stubs, the pak patch. false = Failure says why;
-    /// nothing is stopped here (the caller does).</summary>
+    /// launcher): redirect DLL loaded at process start, the suspended stubs, the pak patch, the body sliders. false =
+    /// Failure says why; nothing is stopped here (the caller does).</summary>
     public async Task<bool> StartClientAsync(string off)
     {
         var env = GameEnv(Path.Combine(off, "redirect-client.log"), "sandbox-client");
@@ -124,6 +126,7 @@ public sealed class Session
         StartFakeLaunchers(clientAc);
         if (!await InjectRedirect(_client, Path.Combine(off, "redirect-client.log"))) return false;
         LoadPakPatch(_client, "Game");
+        LoadBodySliders(_client);
         Stage?.Invoke("game", "ok");
         return true;
     }
@@ -357,6 +360,15 @@ public sealed class Session
     {
         if (!PakPatchBuilds.Contains(_b.Version) || !File.Exists(Paths.PakPatchDll)) return;
         _log(Native.Inject(p.Id, Paths.PakPatchDll) ? $"{who}: pak patch loaded (see offline\\sandbox-*\\pakpatch.log)." : $"Warning: {who}: could not load fnpakpatch.dll.");
+    }
+
+    // Body sliders of fn-port outfits (FortnitePorting tools/fn-port/BodySliders.cs): fnbody.dll (src\pakpatch\fnbody.c)
+    // turns their FNBody_* style values into morph target weights. Client only; it patches no game code.
+    static readonly string[] BodySliderBuilds = { "14.30" };
+    void LoadBodySliders(Process p)
+    {
+        if (!BodySliderBuilds.Contains(_b.Version) || !File.Exists(Paths.BodySlidersDll)) return;
+        _log(Native.Inject(p.Id, Paths.BodySlidersDll) ? "Game: body sliders loaded (see offline\\sandbox-client\\fnbody.log)." : "Warning: Game: could not load fnbody.dll.");
     }
 
     async Task<bool> CheckRedirect(string log)
