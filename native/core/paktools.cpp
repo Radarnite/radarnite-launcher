@@ -10,8 +10,12 @@ namespace rn {
 namespace paktools {
 
 namespace {
-// the top-level entries of a tools folder that belong to the pak tools (what a refresh replaces)
-const wchar_t* const kTop[] = { L"sigfit-installed.ps1", L"game-guard.ps1", L"pak-tools.manifest", L"fn-modkit-sigfit" };
+// the top-level entries of a tools folder that belong to the pak tools (what a refresh replaces). The tool folder
+// first and the script last: a running sigfit holds its DLLs, so that move fails before anything else has changed.
+const wchar_t* const kTop[] = { L"fn-modkit-sigfit", L"game-guard.ps1", L"pak-tools.manifest", L"sigfit-installed.ps1" };
+const size_t kTopN = sizeof kTop / sizeof kTop[0];
+bool exists(const std::wstring& p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
+bool move(const std::wstring& from, const std::wstring& to) { return MoveFileExW(from.c_str(), to.c_str(), 0) != 0; }
 std::mutex g_sync;
 }
 
@@ -46,28 +50,42 @@ bool syncDevTree(const LogFn& log) {
         log(L"Error: the launcher's own pak tools are damaged (" + own + L"): " + dev + L" was NOT refreshed. Reinstall the launcher.");
         return false;
     }
-    // the old copy goes aside whole: a stale DLL left in fn-modkit-sigfit could still be loaded by the new tool
+    // The new copy is made and checked next to the backup first; then the old entries go aside whole (a stale DLL left
+    // in fn-modkit-sigfit could still be loaded) and the new ones take their place. Any failure puts the old copy
+    // back as it was, so the dev tree is never left half-replaced or without its script.
     std::wstring bak = join(parentDir(dev), L"backup-pak-tools-" + nowTime(L"yyyyMMddHHmmss"));
-    if (!createDirs(bak)) { log(L"Error: " + ioError(GetLastError(), bak) + L": " + dev + L" still has an old sigfit."); return false; }
-    for (auto* t : kTop) {
-        std::wstring from = join(dev, t);
-        if (GetFileAttributesW(from.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-        if (!MoveFileExW(from.c_str(), join(bak, t).c_str(), MOVEFILE_COPY_ALLOWED)) {
-            log(L"Error: could not move " + from + L" aside (" + winError(GetLastError()) + L"; is a sigfit running?): " + dev + L" still has an old sigfit.");
-            return false;
-        }
-    }
+    std::wstring stage = join(bak, L"new");
     std::vector<std::wstring> files;
     for (auto& e : kPakTools) files.push_back(e.path);
     files.push_back(L"pak-tools.manifest");
     for (auto& f : files) {
-        std::wstring to = join(dev, f);
-        createDirs(parentDir(to));
-        if (!CopyFileW(join(dir(), f).c_str(), to.c_str(), FALSE)) {
-            log(L"Error: could not copy " + f + L" to " + dev + L": " + winError(GetLastError()));
+        std::wstring to = join(stage, f);
+        if (!createDirs(parentDir(to)) || !CopyFileW(join(dir(), f).c_str(), to.c_str(), FALSE)) {
+            log(L"Error: could not copy the pak tools to " + stage + L" (" + winError(GetLastError()) + L"): " + dev + L" still has an old sigfit.");
             return false;
         }
     }
+    std::wstring staged = verify(stage);
+    if (!staged.empty()) { log(L"Error: the copy in " + stage + L" does not match (" + staged + L"): " + dev + L" still has an old sigfit."); return false; }
+    size_t out = 0;   // old entries moved aside, in kTop order
+    bool had[kTopN] = {};
+    for (; out < kTopN; out++) {
+        std::wstring from = join(dev, kTop[out]);
+        if (!(had[out] = exists(from))) continue;
+        if (!move(from, join(bak, kTop[out]))) break;
+    }
+    size_t in = 0;    // new entries moved in
+    if (out == kTopN)
+        for (; in < kTopN; in++) if (!move(join(stage, kTop[in]), join(dev, kTop[in]))) break;
+    if (out < kTopN || in < kTopN) {
+        DWORD e = GetLastError();
+        for (size_t i = in; i-- > 0;) move(join(dev, kTop[i]), join(stage, kTop[i]));
+        for (size_t i = out; i-- > 0;) if (had[i]) move(join(bak, kTop[i]), join(dev, kTop[i]));
+        log(L"Error: could not replace " + join(dev, kTop[out < kTopN ? out : in]) + L" (" + winError(e) +
+            L"; is a sigfit running from there?): " + dev + L" still has an old sigfit; trying again at the next start.");
+        return false;
+    }
+    RemoveDirectoryW(stage.c_str());
     std::wstring after = verify(dev);
     if (!after.empty()) { log(L"Error: " + dev + L" still differs from the launcher's pak tools after the refresh: " + after + L"."); return false; }
     log(L"Pak tools: " + dev + L" refreshed to " + version() + L" (the old copy is in " + bak + L").");
