@@ -41,6 +41,7 @@ build:
     if just _cpu-ok mac; then just build-mac; else echo "Mac busy or away: building the core and the window on the PC" >&2; just build-pc; fi
     just build-backend
     just build-play
+    just build-fnbody
 
 # Build the core on the Mac: native/core/out/librncore.a and rn-core-cli.exe (as RN_VERSION when set)
 build-core: (_wait-cpu "mac") _sync-mac
@@ -85,6 +86,28 @@ build-play: (_wait-cpu "mac") _sync-mac
     mac get {{mac_dir}}/play/out/radarnite-play.exe play/out/radarnite-play.exe
     ls -l play/out/radarnite-play.exe
 
+# Build patches/fnbody.dll (pakpatch/fnbody.c, the body sliders of fn-port outfits in 14.30) and its mock test on the
+# Mac with zig cc, as release.yml does -> pakpatch/out
+build-fnbody: (_wait-cpu "mac") _sync-mac
+    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/pakpatch && rm -rf out && mkdir out && {{zig}} cc -target x86_64-windows-gnu -O2 -shared -s -o out/fnbody.dll fnbody.c -luser32 && {{zig}} cc -target x86_64-windows-gnu -O1 -o out/fnbody-mock.exe test/fnbody-mock.c -luser32'
+    mkdir -p pakpatch/out
+    mac get {{mac_dir}}/pakpatch/out/fnbody.dll pakpatch/out/fnbody.dll
+    mac get {{mac_dir}}/pakpatch/out/fnbody-mock.exe pakpatch/out/fnbody-mock.exe
+    ls -l pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe
+
+# fnbody.dll against the fake engine of pakpatch/test/fnbody-mock.c on the PC, names encoded as in 14.30 and plain
+# (exit 0 = pass; never in CI)
+test-fnbody:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f pakpatch/out/fnbody-mock.exe || just build-fnbody
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    pc sh '(if exist {{pc_dir}}\fnbody rmdir /s /q {{pc_dir}}\fnbody) & mkdir {{pc_dir}}\fnbody'
+    scp -q pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe 'windows:{{pc_fwd}}/fnbody/'
+    pc sh '{{pc_dir}}\fnbody\fnbody-mock.exe {{pc_dir}}\fnbody'
+    pc sh '{{pc_dir}}\fnbody\fnbody-mock.exe {{pc_dir}}\fnbody --plain'
+
 # Build the backend on the Mac (backend-build: radarnite-backend.exe + the Linux aarch64 binary for `just parity`)
 build-backend: _sync-mac
     just backend_mac='{{mac_dir}}' backend_cargo='{{mac_path}}; cd ~/{{mac_dir}}/backend-rs' backend-build
@@ -106,7 +129,7 @@ release version="3.0.0-rc.1":
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
     mac sh 'p=~/{{mac_dir}}-payload; for f in node/node.exe redirect/fnredirect.dll gameserver/radarnite-server.dll tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done; ls "$p"/patches/fnpakpatch.dll* >/dev/null || { echo "payload: no pak patch in patches/" >&2; exit 1; }'
     just _wait-cpu mac
-    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
+    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --fnbody pakpatch/out/fnbody.dll --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
     mkdir -p dist
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe dist/RadarniteLauncherSetup-{{version}}.exe
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe.sha256 dist/RadarniteLauncherSetup-{{version}}.exe.sha256

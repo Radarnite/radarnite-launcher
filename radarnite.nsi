@@ -189,7 +189,7 @@ Function ${UN}CheckRunning
   ${EndIf}
   retry:
   ClearErrors
-  ${ForEach} $1 0 5 + 1
+  ${ForEach} $1 0 6 + 1
     ${Select} $1
       ${Case} 0
         StrCpy $2 "$INSTDIR\${EXE}"
@@ -203,6 +203,8 @@ Function ${UN}CheckRunning
         StrCpy $2 "$INSTDIR\patches\fnpakpatch.dll"
       ${Case} 5
         StrCpy $2 "$INSTDIR\node\node.exe"
+      ${Case} 6
+        StrCpy $2 "$INSTDIR\patches\fnbody.dll"
     ${EndSelect}
     ${If} ${FileExists} $2
       FileOpen $0 $2 a
