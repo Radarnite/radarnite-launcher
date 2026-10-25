@@ -38,6 +38,8 @@ enum class Icon {
     Check, X, WMin, WMax, WRes, WClose,
     // the cosmetics panel (radarnite.com's icons, the page's PIC)
     PAll, POutfit, PEmote, PPickaxe, PBackpack, PGlider, PWrap, PLoading, PSpray, PEmoji, PFilters, PNew, PSort, PSearch, PChk,
+    // the item sheet and its player (radarnite.com's IC2 and RC_ICO)
+    VPlay, VPause, VVol, VMute, ChevL, ChevR, Info,
     Count
 };
 

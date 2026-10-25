@@ -6,6 +6,7 @@
 #include "net.h"
 #include "paths.h"
 #include "proc.h"
+#include "sheet.h"
 #include <math.h>
 #include <string.h>
 #include <algorithm>
@@ -682,7 +683,10 @@ bool Previews::parse(std::string& text, const std::vector<std::wstring>& keepLow
     yyjson_doc* doc = yyjson_read_opts(&text[0], n0, YYJSON_READ_INSITU | YYJSON_READ_ALLOW_BOM | YYJSON_READ_ALLOW_INVALID_UNICODE, nullptr, nullptr);
     if (!doc) return false;
     std::vector<P> out;
-    yyjson_val* items = key(yyjson_doc_get_root(doc), "items");
+    yyjson_val* root = yyjson_doc_get_root(doc);
+    std::string date = str(key(root, "date"));
+    int today = sheet::dayOf(date.c_str(), date.size());
+    yyjson_val* items = key(root, "items");
     size_t i, n;
     yyjson_val* it;
     // the numeric fortnite.gg id of "https://fnggcdn.com/items/<n>/video-sd.mp4" or "https://fortnite.gg/cosmetics?id=<n>"
@@ -693,6 +697,9 @@ bool Previews::parse(std::string& text, const std::vector<std::wstring>& keepLow
         for (size_t k = pl; k < s.size() - sl; k++) { if (s[k] < '0' || s[k] > '9') return 0; v = v * 10 + (uint32_t)(s[k] - '0'); }
         return v;
     };
+    auto day = [](yyjson_val* v) -> uint16_t { std::string d = str(v); int x = sheet::dayOf(d.c_str(), d.size()); return x > 0 && x < 65536 ? (uint16_t)x : 0; };
+    auto whole = [](yyjson_val* v, int max) -> int { if (!v || !yyjson_is_num(v)) return -1; double d = yyjson_get_num(v); return d < 0 ? -1 : (int)std::min<double>(max, floor(d + .5)); };
+    auto perMille = [](yyjson_val* v) -> int16_t { if (!v || !yyjson_is_num(v)) return -1; double d = yyjson_get_num(v); return (int16_t)std::max(0, std::min(1000, (int)floor(d * 1000 + .5))); };
     if (items && yyjson_is_arr(items))
         yyjson_arr_foreach(items, i, n, it) {
             std::string id = lowerA(str(key(it, "i")));
@@ -701,13 +708,31 @@ bool Previews::parse(std::string& text, const std::vector<std::wstring>& keepLow
             p.idLower = id;
             p.desc = str(key(it, "ds"));
             p.intro = str(key(it, "sz"));
-            uint32_t v = num(str(key(it, "v")), "https://fnggcdn.com/items/", "/video-sd.mp4");
-            uint32_t vh = num(str(key(it, "vh")), "https://fnggcdn.com/items/", "/video.mp4");
-            uint32_t g = num(str(key(it, "g")), "https://fortnite.gg/cosmetics?id=", "");
-            p.fngg = g ? g : v ? v : vh;
-            if (v && v == p.fngg) p.flags |= 1;
-            if (vh && vh == p.fngg) p.flags |= 2;
-            if (g) p.flags |= 4;
+            p.set = str(key(it, "st"));
+            int gg = whole(key(it, "gg"), INT32_MAX);
+            if (gg > 0) {   // catalog.min.json ("v":2): the fortnite.gg id, vv = it has the two clips
+                p.fngg = (uint32_t)gg;
+                p.flags |= 4;
+                yyjson_val* vv = key(it, "vv");
+                if (vv && (yyjson_is_true(vv) || (yyjson_is_num(vv) && yyjson_get_num(vv) != 0))) p.flags |= 3;
+            } else {
+                uint32_t v = num(str(key(it, "v")), "https://fnggcdn.com/items/", "/video-sd.mp4");
+                uint32_t vh = num(str(key(it, "vh")), "https://fnggcdn.com/items/", "/video.mp4");
+                uint32_t g = num(str(key(it, "g")), "https://fortnite.gg/cosmetics?id=", "");
+                p.fngg = g ? g : v ? v : vh;
+                if (v && v == p.fngg) p.flags |= 1;
+                if (vh && vh == p.fngg) p.flags |= 2;
+                if (g) p.flags |= 4;
+            }
+            yyjson_val* away = key(it, "away");
+            if (yyjson_is_true(key(it, "shop")) || (away && yyjson_is_num(away) && yyjson_get_num(away) == 0)) p.flags |= 8;
+            p.first = day(key(it, "first"));
+            p.last = day(key(it, "last"));
+            p.occ = (uint16_t)std::max(0, whole(key(it, "occ"), 65535));
+            yyjson_val* lp = key(it, "lp");
+            p.price = (uint16_t)std::max(0, whole(key(lp, "p"), 65535));
+            p.regular = (uint16_t)std::max(0, whole(key(lp, "r"), 65535));
+            if (key(it, "p7") && yyjson_is_num(key(it, "p7"))) { p.p7 = perMille(key(it, "p7")); p.p30 = perMille(key(it, "p30")); p.p60 = perMille(key(it, "p60")); }
             out.push_back(std::move(p));
         }
     yyjson_doc_free(doc);
@@ -715,20 +740,62 @@ bool Previews::parse(std::string& text, const std::vector<std::wstring>& keepLow
     out.shrink_to_fit();
     std::lock_guard<std::mutex> g(m_);
     items_.swap(out);
+    stays_.clear();
+    today_ = today;
     loaded_ = true;
     return true;
 }
 
+// history.json = {"<id lower-case>": [[[start, end], ...newest first], [last starts]]}: the stays of the kept ids
+bool Previews::parseHistory(std::string& text) {
+    size_t n0 = text.size();
+    text.append(YYJSON_PADDING_SIZE, '\0');
+    yyjson_doc* doc = yyjson_read_opts(&text[0], n0, YYJSON_READ_INSITU | YYJSON_READ_ALLOW_BOM | YYJSON_READ_ALLOW_INVALID_UNICODE, nullptr, nullptr);
+    if (!doc) return false;
+    std::lock_guard<std::mutex> g(m_);
+    stays_.clear();
+    for (auto& p : items_) p.stay0 = p.stays = 0;
+    size_t oi, on;
+    yyjson_val *kv, *v;
+    yyjson_obj_foreach(yyjson_doc_get_root(doc), oi, on, kv, v) {   // one pass over the file, the kept ids found by binary search
+        std::string k(yyjson_get_str(kv), yyjson_get_len(kv));
+        auto p = std::lower_bound(items_.begin(), items_.end(), k, [](const P& a, const std::string& x) { return a.idLower < x; });
+        if (p == items_.end() || p->idLower != k) continue;
+        yyjson_val* sh = yyjson_is_arr(v) ? yyjson_arr_get(v, 0) : nullptr;
+        if (!sh || !yyjson_is_arr(sh)) continue;
+        p->stay0 = (uint32_t)stays_.size();
+        size_t i, n;
+        yyjson_val* x;
+        yyjson_arr_foreach(sh, i, n, x) {
+            std::string a = str(yyjson_arr_get(x, 0)), b = str(yyjson_arr_get(x, 1));
+            int da = sheet::dayOf(a.c_str(), a.size()), db = sheet::dayOf(b.c_str(), b.size());
+            if (da <= 0 || da > 65535) continue;
+            stays_.push_back({ (uint16_t)da, (uint16_t)(db > 0 && db < 65536 ? db : da) });
+        }
+        p->stays = (uint32_t)stays_.size() - p->stay0;
+    }
+    stays_.shrink_to_fit();
+    yyjson_doc_free(doc);
+    return true;
+}
+
 bool Previews::load(const std::vector<std::wstring>& keepLower, const LogFn& log) {
-    std::wstring file = join(work(), L"radarnite-catalog.json");
-    if (mtime(file) + kDay < nowFt()) {
-        std::wstring error;
-        if (!net::fetchFile(L"https://radarnite.com/catalog.json", kUa, 60000, file, &error))
+    std::wstring file = join(work(), L"radarnite-catalog.json"), hist = join(work(), L"radarnite-history.json");
+    if (mtime(file) + kDay < nowFt() || mtime(hist) + kDay < nowFt()) {
+        std::wstring error, e2;
+        // the site's own files: catalog.min.json (the standard URLs left out), catalog.json on an older server
+        if (!net::fetchFile(L"https://radarnite.com/catalog.min.json", kUa, 60000, file, &error) &&
+            !net::fetchFile(L"https://radarnite.com/catalog.json", kUa, 60000, file, &e2))
             log(L"Warning: no previews of the cosmetics (radarnite.com: " + error + (fileExists(file) ? L"); the copy from before is used." : L")."));
+        else if (!net::fetchFile(L"https://radarnite.com/history.json", kUa, 60000, hist, &error))
+            log(L"Warning: no shop history of the cosmetics (radarnite.com: " + error + L").");
     }
     std::string text;
     if (!readFile(file, &text)) return false;
-    return parse(text, keepLower);
+    bool ok = parse(text, keepLower);
+    std::string().swap(text);
+    if (ok && readFile(hist, &text)) parseHistory(text);
+    return ok;
 }
 
 PortPreview Previews::get(const std::wstring& id) {
@@ -736,15 +803,22 @@ PortPreview Previews::get(const std::wstring& id) {
     r.id = id;
     std::string k = lowerA(narrow(id));
     std::lock_guard<std::mutex> g(m_);
+    r.today = today_;
     auto it = std::lower_bound(items_.begin(), items_.end(), k, [](const P& p, const std::string& x) { return p.idLower < x; });
     if (it == items_.end() || it->idLower != k) return r;
     r.found = true;
     r.description = widen(it->desc);
     r.introduced = widen(it->intro);
+    r.set = widen(it->set);
     char b[96];
     if (it->flags & 1) { snprintf(b, sizeof b, "https://fnggcdn.com/items/%u/video-sd.mp4", it->fngg); r.video = b; }
     if (it->flags & 2) { snprintf(b, sizeof b, "https://fnggcdn.com/items/%u/video.mp4", it->fngg); r.videoHd = b; }
     if (it->flags & 4) { snprintf(b, sizeof b, "https://fortnite.gg/cosmetics?id=%u", it->fngg); r.page = b; }
+    r.inShop = (it->flags & 8) != 0;
+    r.first = it->first; r.last = it->last; r.occ = it->occ;
+    r.price = it->price; r.regular = it->regular;
+    r.p7 = it->p7; r.p30 = it->p30; r.p60 = it->p60;
+    for (uint32_t s = 0; s < it->stays; s++) r.stays.push_back({ stays_[it->stay0 + s].first, stays_[it->stay0 + s].second });
     return r;
 }
 

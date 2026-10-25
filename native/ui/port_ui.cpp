@@ -183,6 +183,9 @@ void App::portEvent(Event& e) {
         if (pPv_ >= 0 && pCat_ && pPv_ < (int)pCat_->items.size() && !_wcsicmp(pCat_->items[pPv_].id.c_str(), e.pv.id.c_str())) {
             pPvData_ = e.pv;
             pPvWait_ = false;
+            const PortItem& it = pCat_->items[pPv_];
+            pSheet_ = sheet::build(pPvData_, it.type, !it.series.empty(), it.rarity);
+            pPvMonth_ = pSheet_.m;
         }
         break;
     }
@@ -191,6 +194,10 @@ void App::portEvent(Event& e) {
 
 bool App::portWheel(float x, float y, float delta) {
     if (!pOpen_) return false;
+    if (pPv_ >= 0 && !pDlg_ && !pPop_) {   // the sheet's column scrolls; nothing else under it
+        if (x >= pPvInfo_.left && x < pPvInfo_.right && y >= pPvInfo_.top && y < pPvInfo_.bottom) { pPvScroll_ -= delta / 120.f * 100; invalidate(); }
+        return true;
+    }
     if (pDlg_ || pPv_ >= 0 || pPop_) return true;   // nothing scrolls under an overlay
     D2D1_RECT_F r = pBody_;
     if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) return false;
@@ -1248,62 +1255,104 @@ void App::drawPortDialog() {
     layer_ = 0;
 }
 
-// The preview on click (radarnite.com's item card): media left, the item's details right.
+// The preview on click: radarnite.com's item sheet (.box.sheet). The media on the left (the clip, its player under
+// it), the sheet's column on the right with its own scroll: the header, the price, this build's actions, Shop history
+// (with the return prediction and its calendar), Chance of returning, Appearance history and Links, in the site's
+// order and wording (sheet.cpp computes the texts).
 void App::drawPortPreview() {
     if (!pCat_ || pPv_ < 0 || pPv_ >= (int)pCat_->items.size()) return;
     layer_ = 3;
     const PortItem& it = pCat_->items[pPv_];
-    const Build* b = sel();
     D2D1_RECT_F all = { 0, TB, W_, H_ };
     fill(all, 0x000000, .55f);
     overlays_.push_back(all);
     hit(ID_P_SCRIM, all, 0, 0);
-    float w = std::min(920.f, W_ - 48), h = std::min(560.f, H_ - TB - 48);
+    // .box.sheet: min(96vw, 1400) x min(92vh, 960), columns 7fr / minmax(340px, 3fr)
+    float w = std::min(1400.f, W_ - 48), h = std::min(960.f, H_ - TB - 40);
     float x = (W_ - w) / 2, y = TB + (H_ - TB - h) / 2;
     D2D1_RECT_F r = rc(x, y, w, h);
     shadow(r, 16, 50, 20, .6f);
     box(r, 16, N::panel, 1, C::line);
     hit(ID_P_PV, r, 0, 16);
-    // media: the rarity's gradient, the featured image (else the icon) fitted inside
-    float mw = std::min(w * .52f, h);
+    float iw = std::max(340.f, std::min(440.f, w * .3f));
+    if (w - iw < 280) iw = std::max(260.f, w - 280);
+    float mw = w - 2 - iw;
     D2D1_RECT_F m = rc(x + 1, y + 1, mw, h - 2);
-    RarBrush* rb = rarBrush(it.rarity);
-    if (rb && rb->bg && !measuring_) {
-        rb->bg->SetStartPoint(D2D1::Point2F(0, m.top)); rb->bg->SetEndPoint(D2D1::Point2F(0, m.bottom)); rb->bg->SetOpacity(1);
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(m, 15, 15);
-        rt_->FillRoundedRectangle(rr, rb->bg);
-        rt_->FillRectangle({ m.right - 16, m.top, m.right, m.bottom }, rb->bg);
+    // media: the site's --n-bg, the featured image (else the icon) contained, the clip over it
+    if (!measuring_) {
+        rt_->FillRoundedRectangle(D2D1::RoundedRect(m, 15, 15), br(N::bg));
+        rt_->FillRectangle({ m.right - 16, m.top, m.right, m.bottom }, br(N::bg));
     }
+    std::string clip = !pPvData_.videoHd.empty() ? pPvData_.videoHd : pPvData_.video;   // the site plays video_hd || video_mp4
+    bool player = !pPvWait_ && !clip.empty();
+    float barH = player ? 58 : 0;
+    D2D1_RECT_F vr = { m.left, m.top, m.right, m.bottom - barH };
     const std::string& url = !it.featured.empty() ? it.featured : it.icon;
     float pad = 24;
-    UINT pw = (UINT)lroundf((mw - 2 * pad) * scale_), ph = (UINT)lroundf((h - 2 - 2 * pad) * scale_);
+    UINT pw = (UINT)lroundf((mw - 2 * pad) * scale_), ph = (UINT)lroundf((vr.bottom - vr.top - 2 * pad) * scale_);
     bool failed = false;
     ID2D1Bitmap* bmp = url.empty() || measuring_ ? nullptr : img_.get(url, pw, ph, Images::Contain, &failed);
     if (bmp) {
         D2D1_SIZE_U s = bmp->GetPixelSize();
         float bw = s.width / scale_, bh = s.height / scale_;
-        float cx = (m.left + m.right) / 2, cy = (m.top + m.bottom) / 2;
+        float cx = (vr.left + vr.right) / 2, cy = (vr.top + vr.bottom) / 2;
         rt_->DrawBitmap(bmp, { cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2 }, 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-    } else if (url.empty() || failed) text(it.id, Font{ Face::Mono, 12, 500, false }, m.left, m.top, mw, h, C::white, 1, 0, .55f);
-    else spinner((m.left + m.right) / 2 - 9, (m.top + m.bottom) / 2 - 9, 18);
-    hit(ID_P_PV_MEDIA, m, 0, 15);
+    } else if (url.empty() || failed) text(it.id, Font{ Face::Mono, 12, 500, false }, vr.left, vr.top, mw, vr.bottom - vr.top, C::white, 1, 0, .55f);
+    else spinner((vr.left + vr.right) / 2 - 9, (vr.top + vr.bottom) / 2 - 9, 18);
+    hit(ID_P_PV_MEDIA, vr, player ? F_HAND : 0, 15);
     // the clip over it (a child window: live only), once the details say there is one; hidden under the dialog
-    if (hwnd_ && !pPvWait_ && !pPvData_.video.empty() && !measuring_) {
-        RECT px = { lroundf(m.left * scale_), lroundf(m.top * scale_), lroundf(m.right * scale_), lroundf(m.bottom * scale_) };
-        if (video_.url() != pPvData_.video) video_.play(hwnd_, pPvData_.video, px, lroundf(15 * scale_), rcOf(it.rarity).dark);
+    if (hwnd_ && player && !measuring_) {
+        RECT px = { lroundf(vr.left * scale_), lroundf(vr.top * scale_), lroundf(vr.right * scale_), lroundf(vr.bottom * scale_) };
+        if (video_.url() != clip) {
+            if (!pVolRead_) {   // the site's previewVolume (default 1) and previewSound
+                pVolRead_ = true;
+                std::wstring v = core_->uiPref(L"previewVolume"), snd = core_->uiPref(L"previewSound");
+                if (!v.empty()) pVol_ = std::max(0.f, std::min(1.f, (float)_wtof(v.c_str())));
+                pMuted_ = snd == L"0";
+            }
+            video_.play(hwnd_, clip, px, lroundf(15 * scale_), N::bg, pVol_, pMuted_);
+        }
         video_.place(px, !pDlg_);
     }
-    // close
+    if (player) drawPlayer(rc(m.left, m.bottom - barH, mw, barH));
+    else pPvBar_ = {};
+    // the sheet's column: its own scroll (wheel over it), clipped to the panel
+    vline(m.right, y + 1, y + h - 1, N::line);
+    D2D1_RECT_F info = { m.right + 1, y + 1, x + w - 1, y + h - 1 };
+    pPvInfo_ = info;
+    pPvView_ = info.bottom - info.top;
+    if (pPvTotal_ > 0) pPvScroll_ = std::max(0.f, std::min(pPvScroll_, std::max(0.f, pPvTotal_ - pPvView_)));
+    D2D1_RECT_F savedClip = clip_;
+    clip_ = inter(clip_, info);
+    if (!measuring_) rt_->PushAxisAlignedClip(clip_, D2D1_ANTIALIAS_MODE_ALIASED);
+    hit(ID_P_PV_INFO, info, 0, 0);
+    pPvTotal_ = drawSheet(info.left + 20, info.top + 20 - pPvScroll_, info.right - info.left - 40) + 20 + 24;
+    float maxS = std::max(0.f, pPvTotal_ - pPvView_);
+    if (pPvScroll_ > maxS) { pPvScroll_ = maxS; invalidate(); }   // drawn again at the end it can reach
+    if (!measuring_) rt_->PopAxisAlignedClip();
+    clip_ = savedClip;
+    drawScrollbar(ID_P_PV_SB, info.right - 11, info.top + 6, pPvView_ - 12, pPvScroll_, pPvTotal_, pPvView_);
+    // close (the site's round × at the top right)
     button(ID_P_PV_CLOSE, x + w - 1 - 12 - 28, y + 1 + 12, nullptr, Icon::X, true, true, true);
-    // details
-    float ix = m.right + 28, iw = x + w - 1 - 28 - ix, yy = y + 1 + 28;
-    // rarity badge (skewed) + TYPE
+    layer_ = 0;
+}
+
+// radarnite.com's .info column (openItem): header, price, actions, sections. Returns the height drawn.
+float App::drawSheet(float ix, float y0, float iw) {
+    const PortItem& it = pCat_->items[pPv_];
+    const Build* b = sel();
+    const sheet::Sheet& S = pSheet_;
+    float yy = y0;
+    float cx = ix + iw / 2;
+    // ---- header (.shead.fnh, centred): series/rarity badge + TYPE, NAME, description, introduced, Source · Set, id
     std::wstring lab = !it.series.empty() ? it.series : cap(it.rarity);
     for (auto& c : lab) c = (wchar_t)towupper(c);
+    std::wstring ty = kPT1[(int)it.type];
+    for (auto& c : ty) c = (wchar_t)towupper(c);
     Font bf{ Face::Display, 13, 900, true }, tf{ Face::Display, 13.5f, 900, true };
-    float bx = ix;
+    float bw = lab.empty() ? 0 : textW(lab, bf, .13f) + 18, tw = textW(ty, tf, .27f) + 2;
+    float bx = cx - (bw + (bw ? 8 : 0) + tw) / 2;
     if (!lab.empty()) {
-        float bw = textW(lab, bf, .13f) + 18;
         int ri = rarIndex(it.rarity);
         uint32_t c1 = ri >= 0 ? kRAR[ri].c1 : 0x3A3D45, c2 = ri >= 0 ? kRAR[ri].c2 : 0x3A3D45;
         D2D1_RECT_F br2 = rc(bx, yy, bw, 24);
@@ -1322,69 +1371,352 @@ void App::drawPortPreview() {
         text(lab, bf, bx + 9, yy, bw, 24, C::white, 0, .13f);
         bx += bw + 8;
     }
-    std::wstring ty = kPT1[(int)it.type];
-    for (auto& c : ty) c = (wchar_t)towupper(c);
-    text(ty, tf, bx, yy, ix + iw - bx, 24, N::mut, 0, .27f);
+    text(ty, tf, bx, yy, tw + 4, 24, N::mut, 0, .27f);
     yy += 24 + 8;
-    // name: bold italic
-    Font nf{ Face::Display, 32, 900, true };
     std::wstring name = it.name.empty() ? it.id : it.name;
     for (auto& c : name) c = (wchar_t)towupper(c);
-    yy += para(name, nf, ix, yy, iw, 33, 2, C::white);
-    // description, introduced in, set, id
-    Font df{ Face::UI, 14.5f, 400, false }, inf{ Face::UI, 14, 400, false }, xf{ Face::UI, 12.5f, 400, false };
+    yy += rich(name, Font{ Face::Display, 28, 900, true }, ix, yy, iw, 29.4f, C::white, C::white, 1);
     if (pPvWait_) {
-        yy += 10;
-        for (int i = 0; i < 2; i++) { fill(rc(ix, yy, iw * (i ? .6f : .9f), 14), C::surface, 1, 4); yy += 22; }
-    } else {
-        if (!pPvData_.description.empty()) { yy += 8; yy += para(pPvData_.description, df, ix, yy, iw, 20.3f, 4, N::ink); }
-        std::wstring when = introduced(pPvData_.introduced);
-        if (!when.empty()) { yy += 6; yy += rich(L"Introduced in **" + when + L"**.", inf, ix, yy, iw, 19.6f, 0xD4D4D8, N::ink); }
+        yy += 12;
+        for (int i = 0; i < 3; i++) { fill(rc(ix + iw * (i ? .2f : .1f), yy, iw * (i ? .6f : .8f), 14), C::surface, 1, 4); yy += 22; }
+        return yy - y0;
     }
-    if (!it.set.empty()) { yy += 6; yy += rich(L"Set **" + it.set + L"**", xf, ix, yy, iw, 17.5f, N::mut, 0xD4D4D8); }
+    const std::wstring& desc = pPvData_.description;
+    if (!desc.empty()) { yy += 8; yy += rich(desc, Font{ Face::UI, 15, 400, false }, ix, yy, iw, 21, N::ink, N::ink, 1); }
+    std::wstring when = introduced(pPvData_.introduced);
+    if (!when.empty()) { yy += 6; yy += rich(L"Introduced in **" + when + L"**.", Font{ Face::UI, 14, 400, false }, ix, yy, iw, 19.6f, 0xD4D4D8, N::ink, 1); }
+    std::wstring set = !pPvData_.set.empty() ? pPvData_.set : it.set, ex;
+    if (S.source) ex = L"Source **Shop**";
+    if (!set.empty()) ex += (ex.empty() ? L"" : L" · ") + std::wstring(L"Set **") + set + L"**";
+    Font xf{ Face::UI, 12.5f, 400, false };
+    if (!ex.empty()) { yy += 6; yy += rich(ex, xf, ix, yy, iw, 17.5f, N::mut, 0xD4D4D8, 1); }
     yy += 2;
-    text(it.id, xf, ix, yy, iw, 17.5f, N::mut);
+    text(it.id, xf, ix, yy, iw, 17.5f, N::mut, 1);
     yy += 17.5f;
-    // status in this build
-    yy += 16;
-    std::wstring ver = b ? b->version : L"";
-    std::wstring st; uint32_t sc;
-    if (it.path.empty()) { st = L"Not importable yet: the game is still being read"; sc = C::dim; }
-    else switch (it.status) {
-    case PortStatus::New: st = L"Not imported into " + ver; sc = C::dim; break;
-    case PortStatus::Imported: st = L"Imported into " + ver; sc = C::ok; break;
-    case PortStatus::Build: st = L"Already in " + ver + L" (its own item)"; sc = C::muted; break;
-    default: st = L"Not converted last time: importing tries again"; sc = C::bad; break;
+    // ---- price (.sprice: the V-Bucks icon + the last shop price, else the usual one)
+    if (S.price > 0) {
+        yy += 16;
+        Font pf{ Face::UI, 20, 700, false, true }, sf{ Face::UI, 13, 400, false, true };
+        std::wstring p = sheet::num(S.price), rg = S.regular > S.price ? sheet::num(S.regular) : L"";
+        float pw2 = textW(p, pf), rw = rg.empty() ? 0 : textW(rg, sf) + 2;
+        float px = cx - (20 + 6 + pw2 + rw) / 2;
+        ID2D1Bitmap* vb = measuring_ ? nullptr : img_.get("https://radarnite.com/vbucks.png", (UINT)lroundf(20 * scale_), (UINT)lroundf(20 * scale_), Images::Contain, nullptr);
+        if (vb) rt_->DrawBitmap(vb, rc(px, yy + 5, 20, 20), 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        else dot(px + 10, yy + 15, 18, 0x5DA9F0);
+        text(p, pf, px + 26, yy, pw2 + 2, 30, N::ink);
+        if (!rg.empty()) { float sx = px + 26 + pw2 + 2; text(rg, sf, sx, yy, rw, 30, C::dim); hline(sx, sx + rw - 2, yy + 15, C::dim); }
+        yy += 30;
     }
-    dot(ix + 4, yy + 9, 8, sc);
-    text(st, Font{ Face::UI, 13, 500, false }, ix + 16, yy, iw - 16, 18.85f, C::ink2);
-    // buttons (bottom): Select, Import, fortnite.gg
-    float by = y + h - 1 - 28 - 37;
-    float bx2 = ix;
+    // ---- this build's actions where the site has Wishlist / Mark owned (.qk.inline: two columns, 34 high)
+    yy += 16;
     if (importable(it)) {
-        bool on = pPv_ < (int)pSel_.size() && pSel_[pPv_];
+        float half = (iw - 8) / 2;
         Font f{ Face::UI, 13, 600, false };
-        float iwb = 16 + textW(L"Import", f) + 16;
-        D2D1_RECT_F ir = rc(bx2, by, iwb, 37);
-        bool ih = hover_ == ID_P_PV_IMPORT;
-        bool dis = pj_ != nullptr;
+        D2D1_RECT_F ir = rc(ix, yy, half, 34);
+        bool dis = pj_ != nullptr, ih = hover_ == ID_P_PV_IMPORT && !dis;
         float a0 = alpha_; if (dis) alpha_ *= .4f;
-        box(ir, 9, ih && !dis ? 0xE4E4E7 : C::white, 1, ih && !dis ? 0xE4E4E7 : C::white);
-        text(L"Import", f, ir.left, by, iwb, 37, 0x101114, 1);
+        box(ir, 8, ih ? 0xE4E4E7 : C::white, 1, ih ? 0xE4E4E7 : C::white);
+        text(L"Import", f, ir.left, yy, half, 34, 0x101114, 1);
         alpha_ = a0;
-        hit(ID_P_PV_IMPORT, ir, F_FOCUS | F_HAND | (dis ? F_DISABLED : 0), 9);
-        bx2 += iwb + 8;
-        bx2 += chip(ID_P_PV_SELECT, bx2, by, 37, on ? L"Selected" : L"Select", (int)Icon::PChk, L"", on, false) + 8;
+        hit(ID_P_PV_IMPORT, ir, F_FOCUS | F_HAND | (dis ? F_DISABLED : 0), 8);
+        bool on = pPv_ < (int)pSel_.size() && pSel_[pPv_];
+        D2D1_RECT_F sr = rc(ix + half + 8, yy, half, 34);
+        bool sh = hover_ == ID_P_PV_SELECT;
+        box(sr, 8, on ? N::ink : sh ? N::hov : N::surf, 1, on ? N::ink : N::line);
+        float lw = textW(on ? L"Selected" : L"Select", f);
+        icon(Icon::PChk, sr.left + (half - 13 - 6 - lw) / 2, yy + 10.5f, 13, on ? N::on : N::ink);
+        text(on ? L"Selected" : L"Select", f, sr.left + (half - 13 - 6 - lw) / 2 + 19, yy, lw + 2, 34, on ? N::on : N::ink);
+        hit(ID_P_PV_SELECT, sr, F_FOCUS | F_HAND, 8);
+        yy += 34 + 10;
+    }
+    {   // its state in this build
+        std::wstring ver = b ? b->version : L"";
+        std::wstring st; uint32_t sc;
+        if (it.path.empty()) { st = L"Not importable yet: the game is still being read"; sc = C::dim; }
+        else switch (it.status) {
+        case PortStatus::New: st = L"Not imported into " + ver; sc = C::dim; break;
+        case PortStatus::Imported: st = L"Imported into " + ver; sc = C::ok; break;
+        case PortStatus::Build: st = L"Already in " + ver + L" (its own item)"; sc = C::muted; break;
+        default: st = L"Not converted last time: importing tries again"; sc = C::bad; break;
+        }
+        Font sf{ Face::UI, 13, 500, false };
+        float sw = std::min(iw - 16, textW(st, sf) + 2);
+        float sx = cx - (16 + sw) / 2;
+        dot(sx + 4, yy + 9.5f, 8, sc);
+        text(st, sf, sx + 16, yy, sw, 19, C::ink2);
+        yy += 19;
+    }
+    if (S.inShop) {   // .fnshop
+        yy += 10;
+        D2D1_RECT_F fr = rc(ix, yy, iw, 34);
+        bool fh = hover_ == ID_P_PV_SHOP;
+        box(fr, 8, N::surf, fh ? 1.f : 0.f, N::line);
+        text(L"View in Fortnite Shop ↗", Font{ Face::UI, 13, 500, false }, ix, yy, iw, 34, N::ink, 1);
+        hit(ID_P_PV_SHOP, fr, F_FOCUS | F_HAND, 8);
+        yy += 34;
+    }
+    // ---- sections (.ss: a line above, 14 below it, the header in small capitals)
+    Font hf{ Face::UI, 11, 600, false };
+    auto section = [&](const wchar_t* title, const std::wstring& side) {
+        yy += 16;
+        hline(ix, ix + iw, yy, N::line);
+        yy += 14;
+        std::wstring t = title;
+        for (auto& c : t) c = (wchar_t)towupper(c);
+        float w1 = textW(t, hf, .66f);
+        text(t, hf, ix, yy, w1 + 2, 14, N::mut, 0, .66f);
+        if (!side.empty()) text(side, Font{ Face::UI, 11, 400, false }, ix + w1 + 8, yy, iw - w1 - 8, 14, N::dim);
+        yy += 14 + 10;
+        return w1;
+    };
+    Font dtf{ Face::UI, 11, 400, false }, ddf{ Face::UI, 14, 600, false, true }, smf{ Face::UI, 12, 500, false, true };
+    if (S.history) {
+        section(L"Shop history", L"");
+        // .hgrid: two columns, 8 apart; an odd count makes the last one span both (the return card always does)
+        float half = (iw - 8) / 2;
+        size_t n = S.cells.size();
+        auto cellH = [&](const sheet::Cell& c) { return 8 + 15.f + 2 + 19.5f + (c.sub.empty() ? 0 : 3 + 14.4f) + 8 + 2; };
+        for (size_t i = 0; i < n; i += 2) {
+            bool pair = i + 1 < n;
+            float hh = cellH(S.cells[i]);
+            if (pair) hh = std::max(hh, cellH(S.cells[i + 1]));
+            for (size_t k = i; k < (pair ? i + 2 : i + 1); k++) {
+                const sheet::Cell& c = S.cells[k];
+                float cx0 = ix + (k > i ? half + 8 : 0), cw = pair ? half : iw;
+                box(rc(cx0, yy, cw, hh), 8, N::surf, 1, N::line);
+                text(c.label, dtf, cx0 + 11, yy + 9, cw - 22, 15, N::mut);
+                text(c.value, ddf, cx0 + 11, yy + 9 + 15 + 2, cw - 22, 19.5f, N::ink);
+                if (!c.sub.empty()) text(c.sub, smf, cx0 + 11, yy + 9 + 15 + 2 + 19.5f + 3, cw - 22, 14.4f, N::mut);
+            }
+            yy += hh + 8;
+        }
+        if (S.ret) {   // the Estimated return card (.rcx), with its calendar
+            float top = yy, py = yy + 13;
+            float rx = ix + 13, rw = iw - 26;
+            Font lf{ Face::UI, 11.5f, 500, false }, xf2{ Face::UI, 12, 400, false };
+            int mi = std::min(S.hi, std::max(S.lo, pPvMonth_ ? pPvMonth_ : S.m));
+            {   // its height first: the box goes under the content
+                float hh = 13 + 20 + 23;
+                if (!S.retSub.empty()) hh += 3 + rich(S.retSub, smf, rx, 0, rw, 16.2f, N::mut, N::mut, 0, false);
+                if (pPvRInfo_ && !S.retInfo.empty()) hh += 8 + 16 + rich(S.retInfo, xf2, rx + 10, 0, rw - 20, 17.4f, N::mut, N::mut, 0, false);
+                if (S.cal) hh += 14 + 32 + 22.5f + (sheet::weekday(sheet::monthStart(mi)) + sheet::monthDays(mi) + 6) / 7 * 32.f;
+                hh += 10;
+                box(rc(ix, top, iw, hh), 8, N::surf, 1, N::line);
+            }
+            float lw = textW(L"Estimated return", lf);
+            text(L"Estimated return", lf, rx, py, lw + 2, 16, N::mut);
+            if (!S.retInfo.empty()) {
+                D2D1_RECT_F ib = rc(rx + lw + 5 - 8, py - 8, 32, 32);
+                bool ih = hover_ == ID_P_PV_RINFO || pPvRInfo_;
+                if (pPvRInfo_) fill(rc(rx + lw + 5 - 4, py - 4, 24, 24), N::hov, 1, 12);
+                icon(Icon::Info, rx + lw + 5 + .5f, py + .5f, 15, ih ? N::ink : N::dim);
+                hit(ID_P_PV_RINFO, ib, F_FOCUS | F_HAND, 16);
+            }
+            py += 16 + 4;
+            Font df{ Face::UI, 20, 650, false, true }, dnf{ Face::UI, 12, 500, false, true };
+            float dw = textW(S.retDate, df);
+            text(S.retDate, df, rx, py, std::min(rw, dw + 2), 23, N::ink);
+            if (!S.retDays.empty()) text(S.retDays, dnf, rx + dw + 5, py + 4, std::max(0.f, rw - dw - 5), 19, N::mut);
+            py += 23;
+            if (!S.retSub.empty()) { py += 3; py += rich(S.retSub, smf, rx, py, rw, 16.2f, N::mut, N::mut); }
+            if (pPvRInfo_ && !S.retInfo.empty()) {
+                py += 8;
+                float th = rich(S.retInfo, xf2, rx + 10, py + 8, rw - 20, 17.4f, N::mut, N::mut, 0, false);
+                fill(rc(rx, py, rw, th + 16), N::panel, 1, 7);
+                rich(S.retInfo, xf2, rx + 10, py + 8, rw - 20, 17.4f, N::mut, N::mut);
+                py += th + 16;
+            }
+            if (S.cal) {
+                py += 14;
+                // header: < March 2027 >
+                bool canP = mi > S.lo, canN = mi < S.hi;
+                D2D1_RECT_F pr = rc(rx - 4, py - 4, 36, 36), nr = rc(rx + rw - 32, py - 4, 36, 36);
+                icon(Icon::ChevL, rx + 6, py + 6, 16, hover_ == ID_P_PV_CPREV && canP ? N::ink : N::mut, canP ? 1.f : .3f);
+                icon(Icon::ChevR, rx + rw - 22, py + 6, 16, hover_ == ID_P_PV_CNEXT && canN ? N::ink : N::mut, canN ? 1.f : .3f);
+                hit(ID_P_PV_CPREV, pr, canP ? F_FOCUS | F_HAND : F_DISABLED, 7);
+                hit(ID_P_PV_CNEXT, nr, canN ? F_FOCUS | F_HAND : F_DISABLED, 7);
+                text(sheet::month(mi), Font{ Face::UI, 13, 600, false }, rx + 28, py, rw - 56, 28, N::ink, 1);
+                py += 28 + 4;
+                float colW = rw / 7;
+                const wchar_t* wk[] = { L"Mo", L"Tu", L"We", L"Th", L"Fr", L"Sa", L"Su" };
+                for (int d = 0; d < 7; d++) text(wk[d], Font{ Face::UI, 10.5f, 500, false }, rx + d * colW, py, colW, 22.5f, N::dim, 1);
+                py += 22.5f;
+                int first = sheet::monthStart(mi), dim = sheet::monthDays(mi), lead = sheet::weekday(first);
+                int rows = (lead + dim + 6) / 7;
+                Font nf2{ Face::UI, 12, 500, false, true }, kf{ Face::UI, 12, 700, false, true };
+                for (int d = 1; d <= dim; d++) {
+                    int slot = lead + d - 1, col = slot % 7, row = slot / 7, day = first + d - 1;
+                    float gx = rx + col * colW, gy = py + row * 32, gcx = gx + colW / 2, gcy = gy + 16;
+                    bool past = day < S.today, isT = day == S.today, inW = day >= S.a && day <= S.b, isK = S.peak && day == S.peak;
+                    if (inW && !measuring_) {   // the window: a faint continuous band (6 % ink on the card, opaque: no seams), rounded at its ends and at the row's ends
+                        bool s0 = day == S.a || col == 0, e0 = day == S.b || col == 6;
+                        uint32_t bandC = mix(N::surf, N::ink, .06f);
+                        D2D1_RECT_F band = { gx + (s0 ? 2.f : 0.f), gy + 4, gx + colW - (e0 ? 2.f : 0.f), gy + 28 };
+                        if (s0 || e0) {
+                            fill(band, bandC, 1, 12);
+                            if (!s0) fill({ band.left, band.top, band.left + 12, band.bottom }, bandC);
+                            if (!e0) fill({ band.right - 12, band.top, band.right, band.bottom }, bandC);
+                        } else fill({ band.left - .5f, band.top, band.right + .5f, band.bottom }, bandC);
+                    }
+                    if (isK) dot(gcx, gcy, 26, N::ink);
+                    else if (isT && !measuring_) rt_->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(gcx, gcy), 12.5f, 12.5f), br(N::l3b), 1);
+                    uint32_t col2 = isK ? N::bg : (inW || isT) ? N::ink : past ? N::dim : N::mut;
+                    text(std::to_wstring(d), isK ? kf : nf2, gx, gy + 3, colW, 26, col2, 1, 0, past && !isK && !inW && !isT ? .55f : 1.f);
+                }
+                py += rows * 32;
+            }
+            py += 10;
+            yy = py;
+        }
+    }
+    if (S.chance) {
+        float w1 = section(L"Chance of returning", L"");
+        D2D1_RECT_F ib = rc(ix + w1 + 6 - 4, yy - 24 - 4, 22, 22);
+        icon(Icon::Info, ix + w1 + 6, yy - 24 - 1, 14, hover_ == ID_P_PV_CINFO ? N::ink : N::dim);
+        hit(ID_P_PV_CINFO, ib, F_HAND, 11);
+        float cw = (iw - 12) / 3;
+        const wchar_t* dl[] = { L"7 days", L"30 days", L"60 days" };
+        for (int k = 0; k < 3; k++) {
+            D2D1_RECT_F cr = rc(ix + k * (cw + 6), yy, cw, 44);
+            box(cr, 8, N::bg, 1, C::line2);
+            text(S.chances[k], Font{ Face::UI, 15, 600, false, true }, cr.left + 10, yy + 6, cw - 20, 19, C::ok);
+            text(dl[k], Font{ Face::UI, 11, 400, false }, cr.left + 10, yy + 6 + 19, cw - 20, 14, N::dim);
+        }
+        yy += 44;
+    }
+    if (!S.stays.empty()) {
+        int n = (int)S.stays.size();
+        section(L"Appearance history", sheet::num(n) + (n == 1 ? L" stay" : L" stays"));
+        Font t1{ Face::UI, 13, 400, false }, td{ Face::UI, 12.5f, 400, false, true };
+        int shown = pPvAll_ ? n : std::min(n, 3);
+        for (int k = 0; k < shown; k++) {
+            const sheet::Stay& s = S.stays[k];
+            float top = yy;
+            // the dot, then the line down to the next stay
+            if (s.cur) dot(ix + 4.5f, yy + 8.5f, 9, N::ink);
+            else if (!measuring_) rt_->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(ix + 4.5f, yy + 8.5f), 3.75f, 3.75f), br(N::mut), 1.5f);
+            float tx = ix + 19, tw2 = iw - 19;
+            yy += rich(L"**" + s.date + L"** — " + s.label, t1, tx, yy, tw2, 17.5f, N::mut, N::ink);
+            yy += 4;
+            for (auto& d : s.days) {
+                text(L"-", td, tx, yy, 8, 18.1f, N::dim);
+                text(d.first, td, tx + 9, yy, 109, 18.1f, s.cur ? N::ink : N::mut);
+                text(d.second, td, tx + 132, yy, tw2 - 132, 18.1f, N::dim);
+                yy += 18.1f + 1;
+            }
+            if (s.more) { text(L"+" + sheet::num(s.more) + L" more", Font{ Face::UI, 12.5f, 400, true }, tx, yy, tw2, 18.1f, N::dim); yy += 19.1f; }
+            yy += 2;
+            if (k < shown - 1) { vline(ix + 4, top + 14, yy + 12, N::line); yy += 12; }
+        }
+        if (n > 3) {
+            yy += 10;
+            std::wstring l = pPvAll_ ? L"Show less ↑" : L"View full history ↓";
+            Font lf{ Face::UI, 13, 500, false };
+            float lw = textW(l, lf) + 2;
+            text(l, lf, ix, yy, lw, 18, hover_ == ID_P_PV_MORE ? N::ink : N::mut);
+            hit(ID_P_PV_MORE, rc(ix, yy - 6, lw, 30), F_FOCUS | F_HAND, 4);
+            yy += 18;
+        }
     }
     if (!pPvData_.page.empty()) {
-        Font lf{ Face::UI, 13, 500, false };
+        section(L"Links", L"");
+        Font lf{ Face::UI, 12.5f, 500, false };
         std::wstring l = L"fortnite.gg ↗";
-        float lw = textW(l, lf) + 4;
-        float lx = x + w - 1 - 28 - lw;
-        text(l, lf, lx + 2, by, lw, 37, hover_ == ID_P_PV_LINK ? C::text : C::muted);
-        hit(ID_P_PV_LINK, rc(lx, by + 6, lw, 25), F_FOCUS | F_HAND, 4);
+        float lw = textW(l, lf) + 22;
+        D2D1_RECT_F lr = rc(ix, yy, lw, 30);
+        box(lr, 7, hover_ == ID_P_PV_LINK ? N::hov : N::surf, 1, N::line);
+        text(l, lf, ix, yy, lw, 30, N::ink, 1);
+        hit(ID_P_PV_LINK, lr, F_FOCUS | F_HAND, 7);
+        yy += 30;
     }
-    layer_ = 0;
+    return yy - y0;
+}
+
+// The site's player (.vpc) under the clip: the seek bar, then play/pause, the time, the mute button and the volume.
+// The volume slider sits in the bar (horizontal): the site's pops up over the video, where the clip's window would
+// hide it.
+void App::drawPlayer(D2D1_RECT_F r) {
+    pPvBar_ = r;
+    fill(r, 0x08090B, 1);
+    if (!measuring_) rt_->FillRectangle({ r.left, r.bottom - 15, r.left + 15, r.bottom }, br(0x08090B));
+    bool live = hwnd_ != nullptr && pFakePos_ < 0;
+    double pos = live ? video_.position() : std::max(0.0, pFakePos_), dur = live ? video_.duration() : pFakeDur_;
+    bool paused = live ? video_.paused() : pFakePaused_;
+    float x0 = r.left + 10, x1 = r.right - 10;
+    // seek: 3 px track, the played part white, a 12 px thumb
+    float sy = r.top + 6 + 8;
+    float p = dur > 0 ? (float)std::min(1.0, pos / dur) : 0;
+    float px = x0 + (x1 - x0) * p;
+    fill({ x0, sy - 1.5f, x1, sy + 1.5f }, C::white, .28f, 1.5f);
+    fill({ x0, sy - 1.5f, px, sy + 1.5f }, 0xF5F6F7, 1, 1.5f);
+    dot(px, sy, 12, 0xF5F6F7);
+    hit(ID_P_PV_SEEK, rc(x0 - 6, sy - 8, x1 - x0 + 12, 16), F_FOCUS | F_HAND, 4);
+    float ry = r.top + 6 + 16 + 2;
+    // play / pause
+    bool ph = hover_ == ID_P_PV_PLAY;
+    if (ph) fill(rc(x0, ry, 34, 34), C::white, .1f, 8);
+    icon(paused ? Icon::VPlay : Icon::VPause, x0 + 9, ry + 9, 16, 0xF5F6F7, .9f);
+    hit(ID_P_PV_PLAY, rc(x0, ry, 34, 34), F_FOCUS | F_HAND, 8);
+    auto mmss = [](double t) { int s = (int)std::max(0.0, floor(t)); return std::to_wstring(s / 60) + L":" + (s % 60 < 10 ? L"0" : L"") + std::to_wstring(s % 60); };
+    text(mmss(pos) + L" / " + mmss(dur), Font{ Face::UI, 11, 500, false, true }, x0 + 34 + 4, ry, 120, 34, 0xD4D4D8);
+    // volume: slider (80) then mute at the right
+    float vw = 80, mx = x1 - 34, vx = mx - 8 - vw;
+    bool mh = hover_ == ID_P_PV_MUTE;
+    if (mh) fill(rc(mx, ry, 34, 34), C::white, .1f, 8);
+    bool mutedNow = pMuted_ || pVol_ <= 0;
+    icon(mutedNow ? Icon::VMute : Icon::VVol, mx + 9, ry + 9, 16, 0xF5F6F7, .9f);
+    hit(ID_P_PV_MUTE, rc(mx, ry, 34, 34), F_FOCUS | F_HAND, 8);
+    float v = mutedNow ? 0 : pVol_, vy = ry + 17;
+    fill({ vx, vy - 1.5f, vx + vw, vy + 1.5f }, C::white, .28f, 1.5f);
+    fill({ vx, vy - 1.5f, vx + vw * v, vy + 1.5f }, 0xF5F6F7, 1, 1.5f);
+    dot(vx + vw * v, vy, 12, 0xF5F6F7);
+    hit(ID_P_PV_VOL, rc(vx - 6, ry + 5, vw + 12, 24), F_FOCUS | F_HAND, 4);
+}
+
+void App::pvTogglePause() {
+    if (hwnd_ && pFakePos_ < 0) video_.setPaused(!video_.paused());
+    else pFakePaused_ = !pFakePaused_;
+    if (pPvBar_.right > pPvBar_.left) dirty(pPvBar_); else invalidate();
+}
+
+void App::pvVolume(float v, bool muted, bool save) {
+    pVol_ = std::max(0.f, std::min(1.f, v));
+    pMuted_ = muted || pVol_ <= 0;
+    if (save) {
+        if (pVol_ > 0) core_->setUiPref(L"previewVolume", fmt(L"%.2f", pVol_));
+        core_->setUiPref(L"previewSound", pMuted_ ? L"0" : L"1");
+    }
+    video_.setVolume(pVol_, pMuted_);
+    if (pPvBar_.right > pPvBar_.left) dirty(pPvBar_); else invalidate();
+}
+
+bool App::portPress(int id, float x, float y) {
+    if (id != ID_P_PV_SEEK && id != ID_P_PV_VOL) return false;
+    drag_ = id;
+    if (id == ID_P_PV_SEEK) {   // like the site: paused while dragging, playing again after if it played
+        pSeekResume_ = hwnd_ && !video_.paused();
+        if (pSeekResume_) video_.setPaused(true);
+    }
+    focus_ = id;
+    if (hwnd_) SetCapture(hwnd_);
+    portDrag(x, y);
+    return true;
+}
+
+void App::portDrag(float x, float) {
+    D2D1_RECT_F r = rectOf(drag_);
+    float t = std::max(0.f, std::min(1.f, (x - r.left - 6) / std::max(1.f, r.right - r.left - 12)));
+    if (drag_ == ID_P_PV_SEEK) {
+        double dur = hwnd_ && pFakePos_ < 0 ? video_.duration() : pFakeDur_;
+        if (dur > 0) { if (hwnd_ && pFakePos_ < 0) video_.seek(t * dur); else pFakePos_ = t * dur; }
+        dirty(pPvBar_);
+    } else if (drag_ == ID_P_PV_VOL) pvVolume(t, t <= 0, false);   // saved when the drag ends
+}
+
+void App::portDragEnd() {
+    if (drag_ == ID_P_PV_SEEK && pSeekResume_) video_.setPaused(false);
+    if (drag_ == ID_P_PV_VOL) pvVolume(pVol_, pMuted_);
+    pSeekResume_ = false;
 }
 
 // ================================================================================================ input
@@ -1398,6 +1730,18 @@ std::wstring App::portTip(int id) const {
     case ID_P_NEW: return L"Only what is not imported yet";
     case ID_P_PV_CLOSE: return L"Close (Esc)";
     case ID_P_PV_LINK: return std::wstring(pPvData_.page.begin(), pPvData_.page.end());
+    case ID_P_PV_SHOP: return L"https://www.fortnite.com/item-shop";
+    case ID_P_PV_PLAY: return (hwnd_ && pFakePos_ < 0 ? video_.paused() : pFakePaused_) ? L"Play (k)" : L"Pause (k)";
+    case ID_P_PV_MUTE: return pMuted_ || pVol_ <= 0 ? L"Unmute (m)" : L"Mute (m)";
+    case ID_P_PV_VOL: return L"Preview volume";
+    case ID_P_PV_SEEK: return L"Seek";
+    case ID_P_PV_RINFO: return L"About this estimate";
+    case ID_P_PV_CPREV: return L"Previous month";
+    case ID_P_PV_CNEXT: return L"Next month";
+    case ID_P_PV_CINFO: return L"How this is estimated: The percentage is an estimated chance that this item returns to the Item Shop within the "
+                               L"next 30 days. It is not a confirmed return date. \"Xd ago\" is the time since it was last seen in the Item Shop. "
+                               L"The estimate comes from 18 months of real shop history (how often similar items came back after this long away, "
+                               L"blended with this item's own rhythm) and is checked against what actually happened.";
     }
     if (id >= ID_P_QB0 && id < ID_P_QB0 + P_SLOTS) return L"Select";
     if (id >= ID_P_CARD0 && id < ID_P_CARD0 + P_SLOTS && pCat_) {
@@ -1421,7 +1765,9 @@ void App::portPreviewOpen(int item) {
     if (!pCat_ || item < 0 || item >= (int)pCat_->items.size()) return;
     pPv_ = item;
     pPvData_ = PortPreview();
+    pSheet_ = sheet::Sheet();
     pPvWait_ = true;
+    pPvScroll_ = 0; pPvAll_ = false; pPvRInfo_ = false; pPvMonth_ = 0;
     pPop_ = 0;
     core_->portPreview(pCat_->items[item].id);
     updateSpinTimer();
@@ -1515,6 +1861,16 @@ void App::portActivate(int id) {
         break;
     case ID_P_LOG: pLogOpen_ = !pLogOpen_; invalidate(); break;
     case ID_P_PV_CLOSE: pPv_ = -1; focus_ = 0; invalidate(); break;
+    case ID_P_PV_MEDIA: if (!pPvBar_.right) break; [[fallthrough]];   // a click on the clip: play / pause
+    case ID_P_PV_PLAY: pvTogglePause(); break;
+    case ID_P_PV_MUTE: pvVolume(pVol_ > 0 ? pVol_ : 1, !(pMuted_ || pVol_ <= 0)); break;
+    case ID_P_PV_SHOP: if (hwnd_) ShellExecuteW(hwnd_, L"open", L"https://www.fortnite.com/item-shop", nullptr, nullptr, SW_SHOWNORMAL); break;
+    case ID_P_PV_RINFO: pPvRInfo_ = !pPvRInfo_; invalidate(); break;
+    case ID_P_PV_CPREV: case ID_P_PV_CNEXT:
+        pPvMonth_ = std::min(pSheet_.hi, std::max(pSheet_.lo, (pPvMonth_ ? pPvMonth_ : pSheet_.m) + (id == ID_P_PV_CNEXT ? 1 : -1)));
+        invalidate();
+        break;
+    case ID_P_PV_MORE: pPvAll_ = !pPvAll_; invalidate(); break;
     case ID_P_PV_SELECT: toggle(pPv_); break;
     case ID_P_PV_IMPORT: portConfirm({ pPv_ }, false); break;
     case ID_P_PV_LINK:
@@ -1541,6 +1897,22 @@ bool App::portKey(UINT vk, bool ctrl, bool shift) {
         else portShow(false);
         invalidate();
         return true;
+    }
+    // the preview's player: Space / K play-pause (Space presses a focused control instead), M mute, arrows on a slider
+    if (pPv_ >= 0 && !pDlg_ && !pPop_ && pPvBar_.right > pPvBar_.left) {
+        bool onControl = focusVisible_ && focus_ && focus_ != ID_P_PV_SEEK && focus_ != ID_P_PV_VOL && focus_ != ID_P_PV_PLAY && focus_ != ID_P_PV_MUTE;
+        if ((vk == VK_SPACE && !onControl) || vk == 'K') { pvTogglePause(); return true; }
+        if (vk == 'M') { activate(ID_P_PV_MUTE); return true; }
+        if (focus_ == ID_P_PV_VOL && (vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN || vk == VK_HOME || vk == VK_END)) {
+            float v = pMuted_ ? 0 : pVol_;
+            v = vk == VK_HOME ? 0 : vk == VK_END ? 1 : v + (vk == VK_RIGHT || vk == VK_UP ? .05f : -.05f);
+            pvVolume(v, v <= 0);
+            return true;
+        }
+        if (focus_ == ID_P_PV_SEEK && (vk == VK_LEFT || vk == VK_RIGHT) && hwnd_ && pFakePos_ < 0) {
+            video_.seek(std::max(0.0, video_.position() + (vk == VK_RIGHT ? 1 : -1)));
+            return true;
+        }
     }
     if (focus_ == ID_P_GRID && !pDlg_ && pPv_ < 0 && !pPop_ && !pList_.empty()) {
         float gw = pGrid_.right - pGrid_.left;
@@ -1583,10 +1955,17 @@ void App::portScene(int what) {
     drain();
     if (what == 2) pPop_ = 2;
     if (what == 3) { std::vector<int> v; for (int i : pList_.empty() ? (portRebuild(), pList_) : pList_) if (importable(pCat_->items[i])) v.push_back(i); portConfirm(v, true); }
-    if (what == 4 || what == 5 || what == 7) {
+    if (what == 4 || what == 5 || what >= 7) {
         if (pDirty_) portRebuild();
         if (what == 4 && !pList_.empty()) { portPreviewOpen(pList_[1 < pList_.size() ? 1 : 0]); drain(); }
         if (what == 7 && !pList_.empty()) { portPreviewOpen(pList_[0]); drain(); }
+        if (what >= 8 && what <= 10) {   // the item sheet: a history of six stays (8, 9) / in the shop with the player (10)
+            const wchar_t* want = what == 10 ? L"EID_LoneStar" : L"Character_CargoLying";
+            for (int i : pList_) if (!_wcsicmp(pCat_->items[i].id.c_str(), want)) { portPreviewOpen(i); break; }
+            drain();
+            if (what == 9) { pPvAll_ = true; pPvRInfo_ = true; pPvScroll_ = 20000; }   // clamped by the first frame (1e9 would eat the float's precision)
+            if (what == 10) { pFakePos_ = 5.2; pFakeDur_ = 30; pFakePaused_ = true; pVol_ = .6f; pMuted_ = false; pVolRead_ = true; hover_ = ID_P_PV_VOL; }
+        }
         if (what == 5 && pCat_) {
             pSel_.assign(pCat_->items.size(), 0);
             int n = 0;

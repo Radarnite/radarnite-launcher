@@ -17,6 +17,7 @@
 #include "../core.h"
 #include "../net.h"
 #include "../port.h"
+#include "../sheet.h"
 #include "../update.h"
 #include "../util.h"
 #include <objbase.h>
@@ -222,6 +223,38 @@ int portTables(const std::wstring& file) {
     expect(!c.found, L"an id that is not in the build's catalog is not kept");
     PortPreview d = pv.get(L"glider_odd");
     expect(d.found && d.video.empty() && d.page.empty() && d.introduced.empty(), L"URLs of another shape are dropped, not guessed");
+    // radarnite.com's item sheet from catalog.min.json + history.json (2026-10-24): the strings the site showed that day
+    std::string minCat = R"({"date":"2026-10-24","v":2,"items":[
+      {"i":"Character_AccentWall","n":"Davy Jones","t":"outfit","s":null,"r":"epic","shop":false,"gv":700,"sz":"C5 S3","st":"Pirates of the Caribbean","ds":"Infamous captain of the Flying Dutchman.","occ":40,"nsh":6,"away":25,"last":"2026-09-29","ret":5,"med":156,"p7":0.004,"p30":0.04,"p60":0.055,"first":"2024-07-17","f":1,"gg":12747,"vv":1},
+      {"i":"EID_AbstractMirror","n":"!","t":"emote","s":"Gaming Legends Series","r":"gaminglegends","shop":false,"sz":"C5 S1","st":"Sneaking","ds":"Found you!","gg":11226,"vv":1},
+      {"i":"EID_LoneStar","n":"Texas Primadonna","t":"emote","s":"Icon Series","r":"icon","shop":true,"lp":{"p":500,"r":500,"d":"2026-10-24"},"sz":"C7 S4","ds":"It ain't your first rodeo.","occ":1,"nsh":1,"away":0,"last":"2026-10-24","p7":0.003,"p30":0.031,"p60":0.099,"first":"2026-10-24","gg":24945,"vv":1},
+      {"i":"Glider_NoClip","t":"glider","r":"rare","gg":77}]})";
+    std::string hist = R"({"character_accentwall":[[["2026-09-26","2026-09-29"],["2026-01-26","2026-01-29"],["2025-08-20","2025-08-23"],["2025-04-28","2025-05-01"],["2025-01-29","2025-02-01"],["2024-07-17","2024-08-06"]],["2024-07-17"]],
+      "eid_lonestar":[[["2026-10-24","2026-10-24"]],["2026-10-24"]],"character_notkept":[[["2020-01-01","2020-01-02"]],[]]})";
+    port::Previews sp;
+    bool okMin = sp.parse(minCat, { L"character_accentwall", L"eid_abstractmirror", L"eid_lonestar", L"glider_noclip" }) && sp.parseHistory(hist);
+    PortPreview dj = sp.get(L"Character_AccentWall");
+    expect(okMin && dj.found && dj.videoHd == "https://fnggcdn.com/items/12747/video.mp4" && dj.video == "https://fnggcdn.com/items/12747/video-sd.mp4" &&
+           dj.page == "https://fortnite.gg/cosmetics?id=12747" && dj.set == L"Pirates of the Caribbean" && dj.stays.size() == 6 && !dj.inShop,
+           L"catalog.min.json: URLs rebuilt from gg/vv, set and stays joined from history.json");
+    PortPreview nc = sp.get(L"glider_noclip");
+    expect(nc.found && nc.video.empty() && nc.page == "https://fortnite.gg/cosmetics?id=77", L"catalog.min.json without vv: page only");
+    auto cell = [](const sheet::Sheet& s, const wchar_t* label) { for (auto& c : s.cells) if (c.label == label) return c.value + L" / " + c.sub; return std::wstring(L"-"); };
+    sheet::Sheet sa = sheet::build(dj, PortType::Outfit, false, "epic");
+    std::wstring got = cell(sa, L"First released") + L" | " + cell(sa, L"Last seen") + L" | " + cell(sa, L"Usually returns every") + L" | " + sa.retDate + L" " + sa.retDays +
+                       L" | " + sa.retSub + L" | " + sa.chances[0] + L" " + sa.chances[1] + L" " + sa.chances[2] + L" | " + sheet::num(sa.price);
+    std::wstring want = L"829 days ago / Jul 17, 2024 | 25 days ago / Sep 29, 2026 | 159 days / based on 5 returns | Mar 3, 2027 (in 130 days) | "
+                        L"Likely window Jan 17 – Mar 23, 2027 | <1% ~4% ~6% | 1,500";
+    expect(got == want, L"Davy Jones' sheet: " + got);
+    expect(sa.source && sa.stays.size() == 6 && sa.stays[0].label == L"Last appearance" && sa.stays[0].date == L"Sep 26, 2026" && sa.stays[0].days.size() == 4 &&
+           sa.stays[0].days[0].second == L"28 days ago" && sa.stays[5].label == L"First appearance" && sa.stays[5].days.size() == 14 && sa.stays[5].more == 7 &&
+           sa.cal && sheet::month(sa.m) == L"March 2027" && sa.peak == sheet::dayOf("2027-03-03", 10), L"Davy Jones' appearance history and calendar");
+    sheet::Sheet l = sheet::build(sp.get(L"eid_lonestar"), PortType::Emote, true, "icon");
+    expect(l.inShop && !l.chance && l.price == 500 && cell(l, L"First released") == L"Today / Oct 24, 2026" && cell(l, L"Last seen") == L"Today / " &&
+           l.retDate == L"Not enough history" && l.stays.size() == 1 && l.stays[0].cur && l.stays[0].label == L"Current shop stay (first appearance)",
+           L"Texas Primadonna (in the shop, first stay): " + l.retDate);
+    sheet::Sheet m = sheet::build(sp.get(L"EID_AbstractMirror"), PortType::Emote, true, "gaminglegends");
+    expect(!m.history && !m.source && m.stays.empty() && m.price == 500, L"an item never sold: no history, the usual price of a series emote");
     if (!file.empty()) {
         std::string text;
         if (!readFile(file, &text)) { out(L"FAIL cannot read " + file); return 1; }

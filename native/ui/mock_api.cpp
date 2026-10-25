@@ -1,6 +1,7 @@
 // Mock core: the scenarios of tests/ui-scenarios.mjs, plus an interactive mode where launch/stop and the menu
 // commands are simulated with timers (callbacks on thread-pool threads, like the real core would).
 #include "api.h"
+#include "../core/sheet.h"
 #include <windows.h>
 #include <functional>
 #include <map>
@@ -125,6 +126,20 @@ const MockScenario kScenarios[] = {
     { L"41-port-import-failed", 1280, 800, 1.0f, false, 0, 0, 1 },
     // the test channel: the launcher reopened by a silent update to a test build
     { L"42-test-build-updated", 1200, 800, 1.0f, false },
+    // radarnite.com's item sheet in the preview: the whole shop history, its end (full history, the estimate's text),
+    // the player under the clip
+    { L"43-port-sheet-history", 1280, 800, 1.0f, false, 0, 0, 8 },
+    { L"44-port-sheet-history-end", 1280, 800, 1.0f, false, 0, 0, 9 },
+    { L"45-port-sheet-player", 1280, 800, 1.0f, false, 0, 0, 10 },
+    { L"46-port-sheet-1920-125", 1536, 864, 1.25f, false, 0, 0, 8 },
+    // the poster main screen at the mockup's size (2560x1380 at 125 %), with the settings sheet (menu 9), and the sheet
+    // at 1280x800 and at the minimum size (its content scrolls)
+    { L"47-poster-2048x1104-125", 2048, 1104, 1.25f, false },
+    { L"48-poster-settings-2048x1104-125", 2048, 1104, 1.25f, false, 9 },
+    { L"49-poster-settings-1280x800", 1280, 800, 1.0f, false, 9 },
+    { L"50-poster-settings-760x520", 760, 520, 1.0f, false, 9 },
+    { L"51-poster-settings-activity-760x520", 760, 520, 1.0f, true, 9 },
+    { L"52-poster-activity-760x520", 760, 520, 1.0f, true },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -262,7 +277,7 @@ public:
         else if (id.rfind(L"23-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.selected = L"17.50"; }
         else if (id.rfind(L"21-", 0) == 0) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.botsAI = true; st.selected = L"17.50"; }
         else if (id.rfind(L"22-", 0) == 0) { st.builds = withServer(many()); st.selected = L"12.41"; post = logs(5); }
-        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0) {
+        else if (id.rfind(L"24-", 0) == 0 || id.rfind(L"25-", 0) == 0 || id.rfind(L"26-", 0) == 0 || (_wtoi(id.c_str()) >= 43 && _wtoi(id.c_str()) <= 48)) {
             st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86";
             LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
             l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
@@ -335,6 +350,21 @@ public:
                 snprintf(u, sizeof u, "https://fnggcdn.com/items/%d/video.mp4", k.gg); p.videoHd = u;
                 snprintf(u, sizeof u, "https://fortnite.gg/cosmetics?id=%d", k.gg); p.page = u;
             }
+        // radarnite.com's shop data, on a fixed day so the renders never change: Texas Primadonna as the site had it on
+        // 2026-10-24 (in the shop, first stay), Lord of the Ludes with Davy Jones' history of that day (six stays, a
+        // return prediction), the rest never sold
+        auto D = [](const char* s) { return rn::sheet::dayOf(s, 10); };
+        p.today = D("2026-10-24");
+        if (!_wcsicmp(id.c_str(), L"EID_LoneStar")) {
+            p.inShop = true; p.first = p.last = p.today; p.occ = 1; p.price = p.regular = 500; p.p7 = 3; p.p30 = 31; p.p60 = 99;
+            p.stays.push_back({ p.today, p.today });
+        } else if (!_wcsicmp(id.c_str(), L"Character_CargoLying")) {
+            p.set = L"Obsession";
+            p.first = D("2024-07-17"); p.last = D("2026-09-29"); p.occ = 40; p.p7 = 4; p.p30 = 40; p.p60 = 55;
+            const char* st[][2] = { { "2026-09-26", "2026-09-29" }, { "2026-01-26", "2026-01-29" }, { "2025-08-20", "2025-08-23" },
+                                    { "2025-04-28", "2025-05-01" }, { "2025-01-29", "2025-02-01" }, { "2024-07-17", "2024-08-06" } };
+            for (auto& x : st) p.stays.push_back({ D(x[0]), D(x[1]) });
+        }
         sink_->onPortPreview(p);
     }
     std::wstring imageCacheDir() override {

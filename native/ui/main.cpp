@@ -548,6 +548,10 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         portPrivVideo = privateBytes();
         portClipProc = g_app->clipBytes();
         captureWindow(ph, dir + L"\\00-live-port-preview-video.png");
+        // the player's messages: Space pauses the clip and its own status says so
+        g_app->key(VK_SPACE, false, false);
+        for (double until = msSinceStart() + 3000; msSinceStart() < until && !(g_app->clipStatus() && g_app->clipPaused()); ) pump(msSinceStart() + 50);
+        bool clipPaused = g_app->clipStatus() && g_app->clipPaused();
         g_app->key(VK_ESCAPE, false, false);
         if (forced) paint(ph); else UpdateWindow(ph);
         bool videoGone = !g_app->videoShown() && !FindWindowExW(ph, nullptr, L"RnClip", nullptr);
@@ -559,8 +563,9 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         char buf[300];
         snprintf(buf, sizeof buf, "cosmetics panel: images within their budget while scrolling (%.1f MB at most, %zu held when opened)", portImgMax / 1048576.0, portImgCount);
         addCheck(buf, portImgMax <= (12u << 20) + (2u << 20));
-        snprintf(buf, sizeof buf, "the preview plays the item's clip, muted and looped (first frame after %.0f ms), and closing it removes it", portVideoMs);
+        snprintf(buf, sizeof buf, "the preview plays the item's clip, looped (silent in tests), first frame after %.0f ms, and closing it removes it", portVideoMs);
         addCheck(buf, (forced || portVideoMs >= 0) && videoGone);
+        addCheck("Space pauses the clip: its process answers paused", forced || portVideoMs < 0 || clipPaused);
         snprintf(buf, sizeof buf, "cosmetics panel: the image workers exit once nothing loads (%d running)", workers);
         addCheck(buf, workers == 0);
         DestroyWindow(ph);
@@ -578,7 +583,8 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         App* app = new App(g_gfx, c);
         app->start(); app->drain();
         if (sc[i].activityOpen) app->openActivity(true);
-        if (sc[i].menu) app->openMenu(sc[i].menu);
+        if (sc[i].menu == 9) app->openSheet(true);   // 9: the match settings sheet
+        else if (sc[i].menu) app->openMenu(sc[i].menu);
         if (sc[i].port) app->portScene(sc[i].port);
         UINT pw = (UINT)lroundf(sc[i].width * sc[i].scale), ph = (UINT)lroundf(sc[i].height * sc[i].scale);
         IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
@@ -695,6 +701,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--selftest-single-instance" && i + 1 < argc) { probe = true; probeSuffix = argv[++i]; }   // selftest only
     }
     LocalFree(argv);
+    // the selftest and the mock scenarios never make a sound: their clip processes inherit this (video.h)
+    if (selftestMode || !scenario.empty()) SetEnvironmentVariableW(L"RN_CLIP_SILENT", L"1");
     // selftest probe: a second launch on the selftest's names; 10 = it signalled the open window and stepped aside
     if (probe) { int code = single::claim(probeSuffix) ? 0 : 10; single::release(); CoUninitialize(); return code; }
     // the window: one per session (2.2.1 behaviour), unless --new-instance; --play and --selftest-ui never take the mutex

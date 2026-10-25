@@ -14,6 +14,7 @@ struct SeasonArt {
     const wchar_t* name;    // "Nexus War" ("" when it has none)
     uint32_t c[4];          // radial gradient: center, 30 %, 55 %, edge
     const wchar_t* skin;    // cosmetic id of the skin (nullptr: no art)
+    const wchar_t* hero;    // the skin's name ("Thor"; nullptr when it has none)
 };
 // The season of a build version (chapter 1 season 1 = 1, ..., 1:1 with the major after 2.x); the neutral entry when
 // the version is unknown.
@@ -23,7 +24,7 @@ struct ArtImage {
     std::wstring skin;
     bool thumb = false;     // tab thumbnail (left part faded out), else the full art
     UINT w = 0, h = 0, srcH = 0;   // decoded size; srcH = the file's own height
-    int padL = 0, padT = 0, padR = 0, padB = 0;   // full art: the baked drop shadow around the skin's own box (px)
+    int padL = 0, padT = 0, padR = 0, padB = 0;   // margins around the skin's own box (px; 0 since the poster drops the baked shadow)
     std::vector<uint8_t> px;       // 32bpp premultiplied BGRA, w*4 per row
 };
 
