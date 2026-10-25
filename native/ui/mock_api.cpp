@@ -141,6 +141,8 @@ const MockScenario kScenarios[] = {
     { L"50-poster-settings-760x520", 760, 520, 1.0f, false },
     { L"51-poster-settings-activity-760x520", 760, 520, 1.0f, true },
     { L"52-poster-activity-760x520", 760, 520, 1.0f, true },
+    // the same after a click on Activity's X: the panel closed
+    { L"53-poster-activity-closed-760x520", 760, 520, 1.0f, true, 0, 0, 0, true },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -283,7 +285,7 @@ public:
             LogLine l; l.ts = L"22:09:58"; l.text = L"Backend ready on 127.0.0.1:3551 (local account \"GoldenTiger86\")."; post.push_back(l);
             l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
         }
-        else if (_wtoi(id.c_str()) >= 48 && _wtoi(id.c_str()) <= 52) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.bots = 35; st.selected = L"17.50"; post = logs(40); }   // the match settings
+        else if (_wtoi(id.c_str()) >= 48 && _wtoi(id.c_str()) <= 53) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.bots = 35; st.selected = L"17.50"; post = logs(40); }   // the match settings
         else if (id.rfind(L"42-", 0) == 0) { st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86"; }
         else if (portScenario()) { st.builds = { b1750(), b1430() }; st.selected = L"14.30"; }
         lock(); state_ = st; unlock();

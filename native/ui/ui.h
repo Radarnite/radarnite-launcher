@@ -55,6 +55,7 @@ public:
     void editKey(int id, UINT vk, bool ctrl, bool shift);   // keys the EDIT subclass hands over
     HBRUSH editBrush(HWND edit, HDC dc);       // WM_CTLCOLOREDIT: the field's colors (the EDITs are opaque)
     void openActivity(bool open);
+    bool activityOpen() const { return actOpen_; }
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
     // Transitions on/off (Windows "Show animations"; off without a window, so offscreen renders are the rest state)
     void setMotion(bool on);
@@ -63,6 +64,7 @@ public:
     bool artPending() const { return art_.pending(); }   // season art still downloading or decoding (selftest)
     int animTicks = 0;                          // animation timer ticks (selftest)
     D2D1_RECT_F actButtonRect() const;          // selftest: where the Activity button is (hover check)
+    D2D1_RECT_F actCloseRect() const;           // selftest: where Activity's close (X) button is
     // Selftest in the live window: frame hit-testing (WM_NCHITTEST), no system frame, Escape in the search EDIT.
     std::vector<std::pair<std::wstring, bool>> liveCheck();
 

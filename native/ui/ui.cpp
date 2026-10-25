@@ -11,7 +11,7 @@ namespace {
 enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
     ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3,
-    ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_LINES, ID_ACT, ID_PLAY,
+    ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_ACT_X, ID_LINES, ID_ACT, ID_PLAY,
     ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
@@ -250,6 +250,7 @@ void App::setMotion(bool on) {
 }
 
 D2D1_RECT_F App::actButtonRect() const { return rectOf(ID_ACT); }
+D2D1_RECT_F App::actCloseRect() const { return rectOf(ID_ACT_X); }
 
 float App::fx(uint32_t key, float target, D2D1_RECT_F r, float ms, Curve c) {
     if (measuring_) return target;
@@ -511,7 +512,7 @@ void App::stepBuild(int d) {
 void App::openActivity(bool open) {
     actOpen_ = open;
     if (open) { unseen_ = 0; unseenLevel_ = 0; logFollow_ = true; }
-    else if (focus_ == ID_SEARCH || focus_ == ID_LINES || (focus_ >= ID_F0 && focus_ <= ID_CLEAR)) setFocus(ID_ACT, focusVisible_);
+    else if (focus_ == ID_SEARCH || focus_ == ID_LINES || (focus_ >= ID_F0 && focus_ <= ID_ACT_X)) setFocus(ID_ACT, focusVisible_);
     invalidate();
 }
 
@@ -1758,11 +1759,11 @@ void App::drawActivity(float x, float y, float w, float h) {
         hit(id, rc(fx, hy + 3, bwid[i], 24), F_FOCUS | F_HAND, 6);
         fx += bwid[i] + 2;
     }
-    // right side: search, copy, folder, clear
+    // right side: search, copy, folder, clear, close
     float rx = x + w - 24 - 28;
-    const Icon ri[3] = { Icon::Trash, Icon::Folder, Icon::Copy };
-    const int rid[3] = { ID_CLEAR, ID_OPENLOGS, ID_COPY };
-    for (int i = 0; i < 3; i++) { button(rid[i], rx, hy + 1, nullptr, ri[i], true, true, true); rx -= 28 + 8; }
+    const Icon ri[4] = { Icon::X, Icon::Trash, Icon::Folder, Icon::Copy };
+    const int rid[4] = { ID_ACT_X, ID_CLEAR, ID_OPENLOGS, ID_COPY };
+    for (int i = 0; i < 4; i++) { button(rid[i], rx, hy + 1, nullptr, ri[i], true, true, true); rx -= 28 + 8; }
     float sw = W_ <= 720 ? 120.f : 180.f, sx = rx + 28 - sw;
     if (sx > fx + 8) {
         EditBox& e = edits_[2];
@@ -1980,6 +1981,7 @@ std::wstring App::tooltip(int id) const {
     case ID_COPY: return L"Copy activity";
     case ID_OPENLOGS: return L"Open the build's log folder";
     case ID_CLEAR: return L"Clear";
+    case ID_ACT_X: return L"Close";
     case ID_META: return b ? b->dir : L"";
     case ID_CELL0: return b ? b->lobbyWhy : L"";
     case ID_CELL0 + 1: return b ? (b->matchServer ? b->matchWhy : L"launcher\\gameserver\\radarnite-server.dll is missing") : L"";
@@ -2144,6 +2146,7 @@ void App::activate(int id) {
     case ID_OPENLOGS: core_->command(Command::OpenLogs, b); break;
     case ID_CLEAR: logs_.clear(); rows_.clear(); rowsDirty_ = true; invalidate(); break;
     case ID_ACT: openActivity(!actOpen_); break;
+    case ID_ACT_X: openActivity(false); break;
     case ID_PREV: case ID_NEXT: stepBuild(id == ID_NEXT ? 1 : -1); break;
     case ID_PLAY:
         if (se_.state == SessionState::Launching || se_.state == SessionState::Running) core_->command(Command::Stop, b);
@@ -2250,7 +2253,7 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above; not
     // from the match settings' controls)
     bool inSettings = f == ID_RANGE || f == ID_BOTS || f == ID_NAME || (f >= ID_TG0 && f <= ID_TG3);
-    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !inSettings && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_CLEAR)) {
+    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !inSettings && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_ACT_X)) {
         stepBuild(vk == VK_RIGHT ? 1 : -1);
         return true;
     }
@@ -2395,7 +2398,11 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     bool reached = focus_ == ID_F1;
     key(VK_RETURN, false, false); frame();
     check(L"Tab reaches the Activity filters and Enter picks one", reached && filter_ == 1);
-    filter_ = 0; rowsDirty_ = true; openActivity(false); frame();
+    filter_ = 0; rowsDirty_ = true; frame();
+    { D2D1_RECT_F xr = rectOf(ID_ACT_X), sr = rectOf(ID_SEARCH);
+      check(L"the Activity close button sits at the far right, clear of the Filter box", xr.right > xr.left && xr.left >= sr.right && xr.right <= W - 23); }
+    setFocus(ID_ACT_X, true); click(ID_ACT_X); frame();
+    check(L"the X closes Activity and gives the focus to the Activity button", !actOpen_ && focus_ == ID_ACT);
     setFocus(ID_ADD, true); key(VK_RETURN, false, false); frame();
     key(VK_DOWN, false, false); key(VK_DOWN, false, false); frame();   // over the separator: "Rescan builds"
     bool onRescan = focus_ == ID_MENU0 + 3;
@@ -2408,7 +2415,7 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
           ncHit(300, 20) == HTCAPTION && ncHit(W - 23, 20) == HTCLIENT && ncHit(W - 23 - 46 * 2, 20) == HTCLIENT && ncHit(300, 60) == HTCLIENT);
     // tooltips: the page's title attributes
     bool tips = true;
-    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_ACT, ID_PREV, ID_NEXT, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0, ID_TG0 };
+    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_ACT, ID_PREV, ID_NEXT, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_ACT_X, ID_META, ID_BUILD0, ID_TG0 };
     for (int id : tipIds) tips = tips && !tooltip(id).empty();
     const Build* sb = sel();
     check(L"icon buttons, build items and status cells have the page's tooltips",
