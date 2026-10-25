@@ -598,6 +598,12 @@ int selftest(HINSTANCE inst, std::wstring dir) {
             for (int pass = 0; pass < 3; pass++) {
                 rt->BeginDraw(); app->paint((float)sc[i].width, (float)sc[i].height); rt->EndDraw();
                 if (pass == 0) for (int t = 0; t < sc[i].tabs; t++) app->key(VK_TAB, false, false);   // keyboard focus scenarios
+                if (pass == 0 && sc[i].clickActClose) {
+                    D2D1_RECT_F xr = app->actCloseRect();
+                    float cx = (xr.left + xr.right) / 2, cy = (xr.top + xr.bottom) / 2;
+                    app->mouseDown(cx, cy); app->mouseUp(cx, cy); app->mouseLeave();
+                    if (app->activityOpen()) app->issues.push_back(L"the click on Activity's X left the panel open");
+                }
             }
             // the panel's images: drawn again until the visible ones are decoded (downloaded the first time), 15 s at most
             for (double until = msSinceStart() + 15000; sc[i].port && msSinceStart() < until; ) {

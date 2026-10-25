@@ -197,6 +197,7 @@ struct MockScenario {
     int menu = 0;               // menu open in the selftest render (0 none, 1 add, 2 build)
     int tabs = 0;               // Tab presses before the selftest render (keyboard focus ring)
     int port = 0;               // cosmetics panel state (App::portScene), 0 = closed
+    bool clickActClose = false; // selftest: click Activity's X after the first render (it closes the panel)
 };
 // The scenario table (same order as ui-scenarios.mjs). count receives the number of entries.
 const MockScenario* mockScenarios(int* count);
