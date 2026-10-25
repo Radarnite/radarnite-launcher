@@ -130,12 +130,21 @@ struct PortJob {
     std::vector<PortJobItem> items;                         // the last 40 that left "pending"
     std::vector<std::pair<std::wstring, std::wstring>> recent;   // ("HH:mm:ss", text), the last 14
 };
-// What radarnite.com's catalog.json says about one item (the preview on click). Empty fields = unknown.
+// One stay in the Item Shop: its first and last day (days since 1970-01-01, UTC).
+struct PortStay { int32_t from = 0, to = 0; };
+// What radarnite.com says about one item (catalog.min.json + history.json): its item sheet. Empty fields = unknown.
 struct PortPreview {
     std::wstring id;            // as asked
     bool found = false;
-    std::wstring description, introduced;   // introduced: "C5 S1"
+    std::wstring description, introduced, set;   // introduced: "C5 S1"; set: the catalog's ("Pirates of the Caribbean")
     std::string video, videoHd, page;       // mp4 URLs, fortnite.gg page
+    // Shop history (days since 1970-01-01, 0 = unknown). today = the catalog's date: every "ago" counts from it
+    int today = 0, first = 0, last = 0;
+    bool inShop = false;        // in today's shop ("shop", or away 0)
+    int occ = 0;                // days it was in the shop
+    int price = 0, regular = 0; // last shop price (lp: p, r), 0 = never sold
+    int p7 = -1, p30 = -1, p60 = -1;   // chance of returning within 7 / 30 / 60 days, per mille (-1 = none)
+    std::vector<PortStay> stays;       // newest first
 };
 
 // Implemented by the UI. Any thread.

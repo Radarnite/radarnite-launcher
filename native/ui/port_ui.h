@@ -10,6 +10,9 @@ enum : int {
     ID_P_CLEARSEL, ID_P_IMPORTSEL, ID_P_IMPORTALL, ID_P_STOP, ID_P_LOG, ID_P_GRID, ID_P_SB, ID_P_SCRIM, ID_P_POP,
     ID_P_CLEARFILTERS, ID_P_DONE, ID_P_DLG, ID_P_DLG_CANCEL, ID_P_DLG_IMPORT, ID_P_PV, ID_P_PV_CLOSE, ID_P_PV_SELECT,
     ID_P_PV_IMPORT, ID_P_PV_LINK, ID_P_PV_MEDIA, ID_P_RETRY, ID_P_CELL, ID_P_JOBX, ID_P_JOBGO,
+    // the item sheet (its scrolled column) and the player under the clip
+    ID_P_PV_INFO, ID_P_PV_SB, ID_P_PV_SHOP, ID_P_PV_RINFO, ID_P_PV_CINFO, ID_P_PV_CPREV, ID_P_PV_CNEXT, ID_P_PV_MORE,
+    ID_P_PV_PLAY, ID_P_PV_SEEK, ID_P_PV_MUTE, ID_P_PV_VOL,
     ID_P_CHIP0 = 5200,    // popup chips: categories 5200.., status 5220.., types 5240.., rarities 5260.., sort 5300..
     ID_P_CARD0 = 6000,    // visible card slots (never item indices: animation keys and focus stay small)
     ID_P_QB0 = 6600,      // their select buttons

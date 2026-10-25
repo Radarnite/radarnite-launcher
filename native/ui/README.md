@@ -12,8 +12,11 @@ and `--selftest-ui`.
 - Cosmetics panel (`port_ui.cpp`, opened by the Cosmetics button on builds that can import, 14.30): filters, search,
   sort, a virtualized grid (only visible cards drawn; `images.cpp`: images downloaded once to `launcher\port\img`,
   decoded at card size on up to 4 workers, 12 MB of bitmaps at most), Import / Import all with the estimate, the
-  live import status, and the item preview with its clip (`video.cpp`: Media Foundation in a `--clip` process of its own,
-  in a job that dies with the launcher, killed when the preview closes; muted and looped)
+  live import status, and the item preview: radarnite.com's item sheet (`core/sheet.cpp`: shop history, return
+  prediction with its calendar, chance of returning, appearance history, from the site's catalog.min.json and
+  history.json, a day in cache) and the clip with the site's player under it (play/pause, seek, volume, mute; Space or
+  K, M; `video.cpp`: Media Foundation in a `--clip` process of its own, in a job that dies with the launcher, killed
+  when the preview closes, driven by window messages; silent under `RN_CLIP_SILENT=1`)
 - Activity panel: resizable, filters, search, copy/clear, virtualized list of up to 3,000 lines
 - Launch bar with stages, spinner and Launch/Stop; menus, toasts and the page's tooltips
 - Native EDIT fields, icons as Direct2D geometries from the page's SVG, keyboard navigation with a visible focus ring

@@ -79,21 +79,32 @@ private:
 bool importItems(const BuildInfo& b, const std::vector<std::wstring>& paths, const std::shared_ptr<Job>& job, const LogFn& log,
                  const std::function<void()>& progress);
 
-// radarnite.com/catalog.json (cached a day in work()), kept only for the given ids: the preview of an item.
+// radarnite.com's item data, cached a day in work(): catalog.min.json (catalog.json on an older server) and
+// history.json (the stays), parsed once and kept only for the given ids, in a compact form: the item sheet.
 class Previews {
 public:
-    // Downloads (when older than a day) and parses it, keeping the ids of `keep` (lower-case). false = no data (error).
+    // Downloads (when older than a day) and parses them, keeping the ids of `keep` (lower-case). false = no data.
     bool load(const std::vector<std::wstring>& keepLower, const LogFn& log);
-    // Parse a catalog.json text (tests): keeps the ids of keepLower.
+    // Parse a catalog.json / catalog.min.json text, then a history.json text (tests): keeps the ids of keepLower.
     bool parse(std::string& text, const std::vector<std::wstring>& keepLower);
+    bool parseHistory(std::string& text);
     PortPreview get(const std::wstring& id);
     bool loaded();
     size_t size();
 
 private:
-    struct P { std::string idLower, desc, intro; uint32_t fngg = 0; uint8_t flags = 0; };   // flags: 1 video, 2 hd, 4 page
+    struct P {
+        std::string idLower, desc, intro, set;
+        uint32_t fngg = 0;
+        uint8_t flags = 0;                          // 1 video, 2 hd, 4 page, 8 in the shop
+        uint16_t first = 0, last = 0, occ = 0, price = 0, regular = 0;   // days since 1970-01-01
+        int16_t p7 = -1, p30 = -1, p60 = -1;        // per mille
+        uint32_t stay0 = 0, stays = 0;              // its stays in stays_
+    };
     std::mutex m_;
     std::vector<P> items_;                          // sorted by idLower
+    std::vector<std::pair<uint16_t, uint16_t>> stays_;
+    int today_ = 0;
     bool loaded_ = false;
 };
 

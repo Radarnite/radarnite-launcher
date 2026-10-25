@@ -49,7 +49,13 @@ static const IconSrc kIcons[(int)Icon::Count] = {
     { 16, R"(<path d="M8 2v3M8 11v3M2 8h3M11 8h3M4.2 4.2l1.6 1.6M10.2 10.2l1.6 1.6M11.8 4.2l-1.6 1.6M5.8 10.2l-1.6 1.6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
     { 16, R"(<path d="M5 3v10M2.8 10.8L5 13l2.2-2.2M11 13V3M8.8 5.2L11 3l2.2 2.2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
     { 16, R"(<circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
-    { 16, R"(<path d="M3.5 8.4l3 3 6-6.6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M3.5 8.4l3 3 6-6.6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },    { 16, R"(<path d="M5 3.5v9l7-4.5z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M5.5 3.5v9M10.5 3.5v9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>)" },
+    { 16, R"(<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 6l3 4M14 6l-3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>)" },
+    { 16, R"(<circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M8 7.3v3.6M8 5.1v.01" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>)" },
 };
 
 static bool attr(const char* el, const char* end, const char* name, std::string* out) {

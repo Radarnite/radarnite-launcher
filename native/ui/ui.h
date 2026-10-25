@@ -9,6 +9,7 @@
 #include "gfx.h"
 #include "images.h"
 #include "video.h"
+#include "../core/sheet.h"
 #include <deque>
 #include <memory>
 #include <unordered_map>
@@ -55,6 +56,7 @@ public:
     HBRUSH editBrush(HWND edit, HDC dc);       // WM_CTLCOLOREDIT: the field's colors (the EDITs are opaque)
     void openActivity(bool open);
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
+    void openSheet(bool open);                  // the match settings sheet (selftest: render a scenario with it open)
     // Transitions on/off (Windows "Show animations"; off without a window, so offscreen renders are the rest state)
     void setMotion(bool on);
     bool motion() const { return anim_.motion; }
@@ -89,7 +91,7 @@ private:
                      bool lazy = false, want = false;   // lazy: the EDIT only shows while it has the focus (drawn text otherwise)
                      uint32_t bg = C::bg2; };
     struct Thumb { std::wstring skin; ArtImage img; UINT req = 0; ID2D1Bitmap* bmp = nullptr; ID2D1BitmapBrush* brush = nullptr; };
-    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; bool bare; };
+    struct BgKey { float w, top, bottom, scale; const SeasonArt* sa; uint32_t artGen; const void* rt; bool bare; std::wstring ghost; };
 
     void invalidate();
     void dirty(D2D1_RECT_F r);             // repaint only r (client DIPs)
@@ -133,6 +135,7 @@ private:
     void skeleton(int i, D2D1_RECT_F r);
     void shadow(D2D1_RECT_F r, float radius, float blur, float oy, float alpha, uint32_t color = 0x000000);
     void glass(D2D1_RECT_F r, float radius, float fillA = .62f, float borderA = .12f);
+    void frost(D2D1_RECT_F r, float radius);    // the dock's blurred glass
     float pill(float x, float y, const std::wstring& s, int dot, bool measure = false);   // .badge; dot -1 none, 0-2 level, 3 spinner
     float gbutton(int id, float x, float y, float h, const wchar_t* label, Icon ic, bool iconOnly, bool measure = false);
     float textW(const std::wstring& s, const Font& f, float tracking = 0);
@@ -146,11 +149,15 @@ private:
     // parts
     void drawTitle(float W);
     void drawStage(float top, float bottom);                   // season gradient, rays, skin and fades (cached bitmap)
-    void drawTop(float y, float W);                             // build tabs, +, Cosmetics, Build
-    void drawHero(float x, float right, float top, float bottom);
+    void drawTop(float y, float W);                             // build switcher, +, Cosmetics, Activity, Build
+    void drawPoster(float x, float right, float top, float bottom);   // the season's title (bottom left)
+    float drawDock(float x, float w, float top, float bottom);  // summary or sheet, status line, Launch; returns its top
+    float okline(float x, float y, float w);                    // the status line; returns the height
+    float summary(float x, float y, float w, bool withChips);   // returns the height
+    float drawSheet(float x, float w, float top, float bottom); // returns its top
+    float sheetBody(float x, float y, float w);                 // returns the bottom
     void drawLaunch(D2D1_RECT_F pr, uint32_t glow);
-    void drawPanel(float x, float y, float w, float h);
-    float panelBody(float x, float y, float w);                 // returns the height
+    void stepBuild(int d);                                      // previous / next build (Q / E, ‹ ›, arrows)
     void drawActivity(float x, float y, float w, float h);
     // season art
     void ensureArt(const wchar_t* skin, UINT px);
@@ -230,6 +237,8 @@ private:
     std::vector<Thumb> thumbs_; // the tabs' small skins
     ID2D1BitmapRenderTarget* bgRT_ = nullptr;
     ID2D1Bitmap* bg_ = nullptr;
+    ID2D1Bitmap* blur_ = nullptr;           // the stage at 1/16, the frost's backdrop
+    ID2D1BitmapBrush* blurBr_ = nullptr;
     BgKey bgKey_{};
     ID2D1LinearGradientBrush* modeBr_[2] = {};
     ID2D1LinearGradientBrush* rangeBr_ = nullptr;
@@ -237,6 +246,9 @@ private:
     D2D1_RECT_F tabClip_{};
     int tabEnsure_ = -1;        // build index to scroll into view on the next frame
     D2D1_RECT_F playRect_{};
+    float playRadius_ = 16;
+    bool sheetOpen_ = false;
+    D2D1_RECT_F sheetRect_{};
     bool playShown_ = false, playDisabled_ = false;
     float toastRight_ = 0, toastBottom_ = 0;
     HWND tip_ = nullptr;        // one comctl32 tooltip, its tool = the hovered control
@@ -252,13 +264,18 @@ public:
     bool importing() const { return pj_ != nullptr; }
     bool portOpen() const { return pOpen_; }
     // Selftest: open the panel on the selected build and put it in a state: 1 open, 2 filters popup, 3 Import all
-    // dialog, 4 preview of the second card, 5 three cards selected and one hovered, 6 scrolled to the end
+    // dialog, 4 preview of the second card, 5 three cards selected and one hovered, 6 scrolled to the end, 7 preview
+    // of the first card, 8 the item sheet with its whole shop history, 9 the same scrolled to its appearance history
+    // (full history open), 10 the player's controls (paused at 0:05 of 0:30, volume 60 %, hovered)
     void portScene(int what);
     Images& images() { return img_; }
     void imagesArrived();                       // WM_APP_IMG
-    void videoEvent(WPARAM w, LPARAM l) { video_.onEvent(w, l); invalidate(); }   // WM_APP_VIDEO
+    // WM_APP_VIDEO: the first frame repaints the window, a status only the player's bar
+    void videoEvent(WPARAM w, LPARAM l) { video_.onEvent(w, l); if (w == 2 && pPvBar_.right > pPvBar_.left) dirty(pPvBar_); else if (w != 2) invalidate(); }
     bool videoShown() const { return video_.shown(); }
     size_t clipBytes() const { return video_.processBytes(); }   // the clip process (selftest)
+    bool clipPaused() const { return video_.paused(); }          // selftest: the clip's own answer (status) after a pause
+    bool clipStatus() const { return video_.status(); }
     // Selftest: clicks and keys on the panel (needs a render target and the mock's catalog)
     std::vector<std::pair<std::wstring, bool>> portCheck(float width, float height);
 
@@ -289,6 +306,13 @@ private:
     void portConfirm(const std::vector<int>& items, bool all);
     void portPreviewOpen(int item);
     void portCursor(int idx, bool keyboard);
+    float drawSheet(float x, float y, float w);  // the item sheet's column (radarnite.com's .info), returns its height
+    void drawPlayer(D2D1_RECT_F r);              // the player's controls under the clip
+    bool portPress(int id, float x, float y);    // mouse down on a slider of the player: starts its drag
+    void portDrag(float x, float y);             // drag_ = the seek bar or the volume slider
+    void portDragEnd();
+    void pvTogglePause();
+    void pvVolume(float v, bool muted, bool save = true);   // save: the site's previewVolume / previewSound
     std::wstring portTip(int id) const;
     RarBrush* rarBrush(const std::string& rarity);
     void releasePortBrushes();
@@ -317,6 +341,17 @@ private:
     std::vector<int> pPending_;                  // the dialog's items
     int pPv_ = -1;                               // catalog index in the preview
     PortPreview pPvData_;
+    sheet::Sheet pSheet_;                        // the item sheet computed from pPvData_
+    float pPvScroll_ = 0, pPvTotal_ = 0, pPvView_ = 0;   // its column
+    D2D1_RECT_F pPvInfo_{}, pPvBar_{};
+    int pPvMonth_ = 0;                           // the calendar's month (y * 12 + m)
+    bool pPvAll_ = false, pPvRInfo_ = false;     // full appearance history, the estimate's explanation
+    // the player: volume and mute saved like the site's previewVolume / previewSound; paused by the user; the seek
+    // drag resumes playing if it was playing
+    float pVol_ = 1;
+    bool pMuted_ = false, pVolRead_ = false, pSeekResume_ = false;
+    double pFakePos_ = -1, pFakeDur_ = 0;        // offscreen scenarios: the player's state (no clip process there)
+    bool pFakePaused_ = false;
     float pScroll_ = 0, pTotal_ = 0, pView_ = 0;
     int pCursor_ = 0;                            // keyboard position in pList_
     std::vector<int> pSlot_;                     // visible card slot -> pList_ index
