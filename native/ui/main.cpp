@@ -583,8 +583,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
         App* app = new App(g_gfx, c);
         app->start(); app->drain();
         if (sc[i].activityOpen) app->openActivity(true);
-        if (sc[i].menu == 9) app->openSheet(true);   // 9: the match settings sheet
-        else if (sc[i].menu) app->openMenu(sc[i].menu);
+        if (sc[i].menu) app->openMenu(sc[i].menu);
         if (sc[i].port) app->portScene(sc[i].port);
         UINT pw = (UINT)lroundf(sc[i].width * sc[i].scale), ph = (UINT)lroundf(sc[i].height * sc[i].scale);
         IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
