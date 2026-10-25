@@ -5,7 +5,7 @@
 # Checks: a clean build passes; a builder path or identity planted in an exe (UTF-8 and UTF-16LE) fails the gate;
 # user data in the payload is refused; the gate on the extracted installer catches what LZMA hides from a raw scan;
 # the .sha256 is byte-identical in format to a published 2.x asset; a launcher without the ProductVersion --version is
-# refused. (A release with the real 2.x payload is what every CI build makes.)
+# refused; a payload carrying its own (old) sigfit is refused and the installer holds paktools/ byte for byte. (A release with the real 2.x payload is what every CI build makes.)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REL="$ROOT/tools/release.sh"
@@ -47,17 +47,16 @@ cc -DNAME='"RadarniteLauncher"' '-DWPLANT=L"C:\\Users\\Planted\\src\\launcher.pd
 cc -DNAME='"fn-cosmetics-gen"' -o in/tool.exe
 [ -f in/RadarniteLauncher.exe ] && [ -f in/launcher-planted16.exe ] && ok "zig built the placeholder exes" || { ko "zig build"; exit 1; }
 
-rm -rf payload; mkdir -p payload/node payload/redirect payload/gameserver payload/patches payload/tools/cosmetics-gen payload/tools/fn-modkit-sigfit
+rm -rf payload; mkdir -p payload/node payload/redirect payload/gameserver payload/patches payload/tools/cosmetics-gen
 printf 'placeholder dll\n' > payload/redirect/fnredirect.dll
 printf 'placeholder dll\n' > payload/gameserver/radarnite-server.dll
 printf 'placeholder dll\n' > payload/patches/fnpakpatch.dll
-printf '# placeholder\n' > payload/tools/sigfit-installed.ps1
 cp in/tool.exe payload/tools/cosmetics-gen/fn-cosmetics-gen.exe
 cp in/tool.exe payload/node/node.exe
 printf 'no extension\n' > payload/tools/cosmetics-gen/LICENSE
 printf 'pdb\n' > payload/tools/cosmetics-gen/fn-cosmetics-gen.pdb
 # a third-party dll as found in NuGet packages: its author's PDB path, UTF-8 and UTF-16LE -> scrubbed, then clean
-perl -e 'binmode STDOUT; print "MZ..RSDS C:\\Users\\someone\\.nuget\\lib.pdb\0..", join("", map { "$_\0" } split //, "C:\\Users\\someone\\src"), "\0\0"' > payload/tools/fn-modkit-sigfit/ThirdParty.dll
+perl -e 'binmode STDOUT; print "MZ..RSDS C:\\Users\\someone\\.nuget\\lib.pdb\0..", join("", map { "$_\0" } split //, "C:\\Users\\someone\\src"), "\0\0"' > payload/tools/cosmetics-gen/ThirdParty.dll
 printf 'notices\n' > payload/THIRD-PARTY-NOTICES.txt
 printf 'readme\n' > payload/README-offline.md
 
@@ -81,6 +80,9 @@ if [ -f "$EXE" ]; then
   [ -f x1/tools/cosmetics-gen/LICENSE ] && [ -f x1/node/node.exe ] && [ -f x1/backend/server.mjs ] && [ -f x1/radarnite-play.exe ] && [ ! -e x1/tools/cosmetics-gen/fn-cosmetics-gen.pdb ] \
     && ok "installer holds the payload (incl. extension-less files), no pdb" || ko "installer content"
   [ -f "x1/\$PLUGINSDIR/own-processes.ps1" ] || ls x1 x1/\$PLUGINSDIR 2>/dev/null | head -5
+  pt=0
+  while read -r h f; do [ "$(sha "x1/tools/$f")" = "$h" ] || { pt=1; echo "  tools/$f differs from paktools/"; }; done < <(grep -v '^#' "$ROOT/paktools/pak-tools.manifest")
+  [ "$pt" = 0 ] && ok "installer holds the pak tools of paktools/ byte for byte" || ko "installer pak tools"
 fi
 
 # ---- 2/3. planted builder path / identity in the 3.0 exes: the gate must fail ----
@@ -103,8 +105,14 @@ if PAYLOAD=payload-bad build --version 3.0.0 --launcher in/RadarniteLauncher.exe
   ko "config.json in the payload was accepted"
 else grep -q 'must not contain: config.json' t4.log && ok "config.json in the payload refused" || ko "t4 wrong reason"; fi
 
+# ---- 4b. an old sigfit in the payload is refused (the pak tools ship only from paktools/) ----
+rm -rf payload-old && cp -R payload payload-old && mkdir -p payload-old/tools && printf '# old sigfit\n' > payload-old/tools/sigfit-installed.ps1
+if PAYLOAD=payload-old build --version 3.0.0 --launcher in/RadarniteLauncher.exe > t4b.log 2>&1; then
+  ko "a payload with its own sigfit-installed.ps1 was accepted"
+else grep -q 'must not carry its own pak tools.*tools/sigfit-installed.ps1' t4b.log && ok "a payload's own sigfit refused" || { ko "t4b wrong reason"; tail -3 t4b.log; }; fi
+
 # ---- 5. LZMA hides a leak from a raw scan; the extracted scan catches it ----
-rm -rf stage5 && mkdir -p stage5/app && cp -R payload/. stage5/app/ && rm -f stage5/app/tools/cosmetics-gen/*.pdb stage5/app/tools/fn-modkit-sigfit/ThirdParty.dll
+rm -rf stage5 && mkdir -p stage5/app && cp -R payload/. stage5/app/ && rm -f stage5/app/tools/cosmetics-gen/*.pdb stage5/app/tools/cosmetics-gen/ThirdParty.dll
 cp in/launcher-planted.exe stage5/app/RadarniteLauncher.exe; cp in/launcher-planted16.exe stage5/app/tools/planted16.exe
 cp "$ROOT/launcher/radarnite.ico" stage5/app/; cp "$ROOT/launcher/radarnite.ico" stage5/
 "$MAKENSIS" -V1 -DVERSION=3.0.0 -DSRC="$W/stage5" -DOUT="$W/planted-setup.exe" "$ROOT/radarnite.nsi" > t5.log 2>&1

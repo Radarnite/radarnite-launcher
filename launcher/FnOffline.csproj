@@ -11,7 +11,7 @@
     <AssemblyTitle>Radarnite Launcher</AssemblyTitle>
     <Description>Radarnite Launcher: old Fortnite builds offline, 127.0.0.1 only</Description>
     <Company>Radarnite</Company>
-    <!-- Single source of truth for the version: the auto-updater reads it from the assembly, and tools\build-release.ps1
+    <!-- Single source of truth for the version: the auto-updater reads it from the assembly, and the 2.x release script (removed)
          passes it to makensis as -DVERSION. Bump this (and nothing else) for each release. -->
     <Version>2.2.1</Version>
     <ApplicationIcon>radarnite.ico</ApplicationIcon>

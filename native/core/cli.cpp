@@ -3,6 +3,7 @@
 #include "buildinfo.h"
 #include "config.h"
 #include "firewall.h"
+#include "paktools.h"
 #include "paths.h"
 #include "proc.h"
 #include "session.h"
@@ -115,6 +116,26 @@ int cosmetics(const wchar_t* arg) {
     return builddata::generateCosmetics(b, [](const std::wstring& s) { out(s); }, &why) ? 0 : 1;
 }
 
+// --sync-pak-tools (installer, after every install): the launcher's own pak tools must match the ones it was built
+// with, and a dev tree's copy (<builds folder>\launcher\tools, called by scripts outside the launcher) is replaced by
+// them. 0 = both current; 1 = something still differs (said on stderr, and in update.log for silent installs).
+int syncPakTools() {
+    auto fail = [](const std::wstring& why) {
+        err(why);
+        appendFile(join(paths::launcherDir(), L"update.log"), narrow(nowIso() + L" pak tools: " + why + L"\r\n"));
+        return 1;
+    };
+    std::wstring own = paktools::verify(paktools::dir());
+    if (!own.empty()) return fail(L"Error: the launcher's pak tools in " + paktools::dir() + L" are not " + paktools::version() + L": " + own);
+    bool ok = true;
+    std::wstring last;
+    paktools::syncDevTree([&](const std::wstring& t) { out(t); if (starts(t, L"Error:")) { ok = false; last = t; } });
+    if (!ok) return fail(last);
+    std::wstring dev = paktools::devTreeDir();
+    out(L"Pak tools " + std::wstring(paktools::version()) + L": " + paktools::dir() + (dev.empty() ? L"" : L" and " + dev) + L" verified.");
+    return 0;
+}
+
 } // namespace
 
 int run(int argc, wchar_t** argv, bool* handled) {
@@ -131,11 +152,15 @@ int run(int argc, wchar_t** argv, bool* handled) {
     if (cmd == L"--check") return check(arg);
     if (cmd == L"--selftest-inject") { out(L"game launch not implemented in this core"); return 1; }
     if (cmd == L"--cosmetics") return cosmetics(arg);
+    if (cmd == L"--sync-pak-tools") return syncPakTools();
     *handled = false;
     return 0;
 }
 
 int playConsole(const wchar_t* name) {
+    // rn-core-cli.exe is only ever started by scripts and tests: never next to an anti-cheat or another game
+    std::wstring busy = paktools::gameGuard();
+    if (!busy.empty()) { out(L"Not starting this automated launch: " + busy + L"."); return 6; }
     BuildInfo b;
     if (!find(name, &b)) { out(L"Build " + std::wstring(name ? name : L"") + L" not found in " + paths::root() + L"."); return 2; }
     LauncherConfig c = LauncherConfig::load();

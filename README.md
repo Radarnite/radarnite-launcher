@@ -21,8 +21,10 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - `redirect/` — the DLL that redirects the game's traffic to the local backend.
 - `gameserver-reboot/` — the local match server.
 - `cosmetics-gen/`, `pakpatch/` — cosmetics and pak tooling.
+- `paktools/` — the one copy of the pak signature fitter (sigfit) and the game guard the launcher ships
+  (`tools/vendor-pak-tools.sh`).
 - `radarnite.nsi` — the NSIS installer script.
-- `tools/build-release.ps1` — builds `RadarniteLauncherSetup-<version>.exe` and its `.sha256`.
+- `tools/release.sh` — builds `RadarniteLauncherSetup-<version>.exe` and its `.sha256`.
 
 ## Releasing
 

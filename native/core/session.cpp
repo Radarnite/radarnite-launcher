@@ -1,6 +1,7 @@
 #include "session.h"
 #include "launch.h"
 #include "net.h"
+#include "paktools.h"
 #include "paths.h"
 #include <knownfolders.h>
 #include <deque>
@@ -157,14 +158,21 @@ bool PlaySession::start() {
 
 // Our own cosmetic paks (offline\custom-cosmetics.json) must match a signature file of the build, or 14.30 shows
 // "Corrupted data was found in game files" and quits: every launch of a classic-pak build checks them first and fits
-// any that do not match (tools\sigfit-installed.ps1); a second or two when nothing changed.
+// any that do not match (tools\sigfit-installed.ps1 with the tool next to it, paktools.h); a second or two when nothing
+// changed. A sigfit that is not the one this launcher was built with is never run.
 void PlaySession::fitOwnPaks(const std::wstring& off) {
-    std::wstring script = join(paths::launcherDir(), L"tools\\sigfit-installed.ps1");
     if (b_.usesIoStore() || !fileExists(join(off, L"custom-cosmetics.json"))) return;
-    if (!fileExists(script)) { log_(L"Warning: own paks NOT checked: " + script + L" is missing (the game may stop with \"Corrupted data\")."); return; }
+    std::wstring bad = paktools::verify(paktools::dir());
+    if (!bad.empty()) {
+        log_(L"Error: own paks NOT checked: the launcher's sigfit is not the expected one (" + bad + L"). Reinstall the launcher; the game may stop with \"Corrupted data\".");
+        return;
+    }
+    paktools::syncDevTree(log_);
+    std::wstring script = paktools::sigfitScript();
     proc::Start s;
     s.exe = L"powershell.exe";
-    s.args = L"-NoProfile -ExecutionPolicy Bypass -File \"" + script + L"\" -Build \"" + b_.dir + L"\"";
+    // -Tool: always the launcher's own tool, never a fallback copy elsewhere on the PC
+    s.args = L"-NoProfile -ExecutionPolicy Bypass -File \"" + script + L"\" -Build \"" + b_.dir + L"\" -Tool \"" + paktools::sigfitTool() + L"\"";
     s.job = job_ ? job_ : proc::toolsJob();
     std::vector<std::wstring> lines;
     std::wstring firstErr, err;

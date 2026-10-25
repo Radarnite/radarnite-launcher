@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # fetch-payload.sh - copy the prebuilt part of the program folder from the PC's dev tree, for tools/release.sh
-# --payload. Same selection as the 2.x tools/build-release.ps1: node\, redirect\, patches\ and tools\ whole, from
-# gameserver\ only radarnite-server.dll, THIRD-PARTY-NOTICES.txt and README-offline.md; no .pdb. Nothing else of the
+# --payload: node\, redirect\, patches\ and tools\ whole, from gameserver\ only radarnite-server.dll,
+# THIRD-PARTY-NOTICES.txt and README-offline.md; no .pdb. Never the dev tree's pak tools (tools\fn-modkit-sigfit,
+# sigfit-installed.ps1, game-guard.ps1, pak-tools.manifest): they ship only from paktools/. Nothing else of the
 # dev tree (config.json, backend\, ui\, src\) is read; backend\server.mjs ships from this checkout. release.sh scrubs and gates it.
 #   tools/fetch-payload.sh <dest-dir | mac:<dir relative to ~>> [dev tree, default S:\FortniteBuilds\launcher]
 # A mac: destination streams PC -> this box -> Mac without touching this box's disk. PC_HOST / MAC_HOST override
@@ -14,7 +15,7 @@ PC="${PC_HOST:-windows}"; MAC="${MAC_HOST:-mac}"
 if command -v flock >/dev/null; then exec 9>/tmp/rn-launcher-pc.lock; flock 9; fi
 
 pc_tar() {
-  ssh -o BatchMode=yes "$PC" "tar -c -f - -C \"$SRC\" --exclude=*.pdb node redirect patches tools gameserver/radarnite-server.dll THIRD-PARTY-NOTICES.txt README-offline.md"
+  ssh -o BatchMode=yes "$PC" "tar -c -f - -C \"$SRC\" --exclude=*.pdb --exclude=tools/fn-modkit-sigfit --exclude=tools/sigfit-installed.ps1 --exclude=tools/game-guard.ps1 --exclude=tools/pak-tools.manifest node redirect patches tools gameserver/radarnite-server.dll THIRD-PARTY-NOTICES.txt README-offline.md"
 }
 
 copy() {

@@ -43,14 +43,25 @@ branch runs nothing (one trigger per job).
   release built with `just release`, which takes it from the PC's dev tree.
 - Optional repository secret `RN_PRIVACY_BAN`: more strings for the privacy gate to ban, one per line.
 
-## How 2.x releases were cut (by hand; every PC then self-updates)
+2.x releases were cut by hand on Windows; those build scripts are gone, `tools/release.sh` is the only packager.
 
-1. Bump `<Version>` in `launcher/FnOffline.csproj` (the single source of truth; the updater reads it from the assembly).
-2. On Windows, run `tools/build-release.ps1` (reads that version, publishes the launcher self-contained + deterministic
-   with no PDB, assembles the installer, writes the `.sha256`). It fails if any staged file still carries the builder
-   name/home path or any `C:\Users\`.
-3. Publish a GitHub release tagged `v<version>` here with `RadarniteLauncherSetup-<version>.exe` and its `.sha256`.
-   Installed launchers pick it up on next start.
+## Pak tools (sigfit and the game guard)
+
+- One copy, in `paktools/`: fn-modkit sigfit (`fn-modkit-sigfit/`, `sigfit-installed.ps1`) and `game-guard.ps1`, built
+  from fn-viewer's `tools/fn-modkit` and pinned by `paktools/pak-tools.manifest` (fn-viewer commit and a sha256 per
+  file). `tools/vendor-pak-tools.sh update <fn-viewer checkout>` rebuilds and replaces it, and writes
+  `native/core/paktools_manifest.h`.
+- `tools/release.sh` refuses a payload that carries its own copy, installs `paktools/` as `tools\` and checks every
+  staged file against the manifest.
+- The launcher checks `tools\` against the hashes it was built with before running a sigfit, and passes it its own
+  tool (`-Tool`), so no other copy on the PC is ever picked.
+- The installer runs `RadarniteLauncher.exe --sync-pak-tools`: when `<builds folder>\launcher\tools\sigfit-installed.ps1`
+  exists (the dev tree that importers outside the launcher call), that copy is replaced by the launcher's (the old one
+  moved to `<builds folder>\launcher\backup-pak-tools-<time>`) and checked again. A mismatch goes to `update.log` and a
+  message box (not in silent updates). The launcher does the same check at start and before each sigfit.
+- Automated launches (`--play` started hidden, `--automated`, `RADARNITE_AUTOMATED=1`, or `rn-core-cli.exe --play`) run
+  `game-guard.ps1` first and do not start while an anti-cheat (EasyAntiCheat, BattlEye, Vanguard) or another game
+  runs (exit code 6). The owner's Play button and desktop shortcut are never held back.
 
 ## Privacy of the installer
 
@@ -67,7 +78,8 @@ Verified on the installed tree: 0 occurrences of the developer name and 0 of `C:
 Moved out (backups, in-use leftovers, stray reports): `backup-*`, `RadarniteLauncher.*.old-in-use-*`,
 `INFORME-iostore-firma.md`, `UPDATE-PROMPT.md`. `src`, `tools`, `backend`, `gameserver`, `redirect`, `patches`,
 `node`, `ui`, `runtimes`, `webview2-radarnite`, `config.json` were left untouched (still the dev tree the other
-agents and the pipeline use; the hard-coded `tools\sigfit-installed.ps1` / `tools\fn-modkit-sigfit` paths still work).
+agents and the pipeline use; the hard-coded `tools\sigfit-installed.ps1` / `tools\fn-modkit-sigfit` paths still work,
+and every launcher install now refreshes them, see "Pak tools").
 
 ## Not verified
 
