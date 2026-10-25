@@ -1,0 +1,36 @@
+[package]
+name = "radarnite-backend"
+version = "3.0.0"
+edition = "2021"
+publish = false
+description = "Radarnite Launcher offline backend: a 1:1 port of backend/server.mjs"
+
+[[bin]]
+name = "radarnite-backend"
+path = "src/main.rs"
+
+[features]
+# stderr timings of the startup phases, for measurements only
+startup-trace = []
+
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros", "io-util"] }
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = "0.1"
+httparse = "1"
+bytes = "1"
+serde = { version = "1", default-features = false, features = ["std"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+getrandom = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+# unwind (not abort): a panicking route answers 500 through catch_unwind, like server.mjs's per-route try/catch
+panic = "unwind"
