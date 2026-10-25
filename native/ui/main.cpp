@@ -3,6 +3,8 @@
 //   RadarniteLauncher.exe                         the launcher window (real core)
 //   RadarniteLauncher.exe --check|--scan|...      the 2.x console verbs (native/core/cli.h): no window, no mutex
 //   RadarniteLauncher.exe --play <build>          launch that build; the window closes when the game closes
+//                                                 (--automated, or started hidden: a script's launch, refused with exit
+//                                                 code 6 while an anti-cheat or another game runs; core.h)
 //   RadarniteLauncher.exe --scenario <id>         interactive, mock core, one scenario of tests/ui-scenarios.mjs
 //   RadarniteLauncher.exe --selftest-ui [dir]     mock core, no visible window: first frame, RAM and CPU at rest, then
 //                                                 every scenario rendered to <dir>\<id>.png (WIC) + <dir>\selftest.json;
@@ -685,7 +687,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         if (handled) { LocalFree(argv); CoUninitialize(); return rc; }
     }
     std::wstring scenario, selftestDir, probeSuffix, autoPlay;
-    bool selftestMode = false, newInstance = false, probe = false, quietStart = false;
+    bool selftestMode = false, newInstance = false, probe = false, quietStart = false, automated = false;
     int exitAfter = 0;
     for (int i = 1; i < argc; i++) {
         std::wstring a = argv[i];
@@ -696,6 +698,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--exit-after" && i + 1 < argc) exitAfter = _wtoi(argv[++i]);
         else if (a == L"--snapshot" && i + 1 < argc) g_snapshot = argv[++i];
         else if (a == L"--new-instance") newInstance = true;
+        else if (a == L"--automated") automated = true;   // a script's or an agent's --play: game guard first (core.h)
         else if (a == L"--updated" && i + 1 < argc) quietStart = std::wstring(argv[++i]) == L"bg";   // relaunched by a silent update
         else if (a == L"--selftest-single-instance" && i + 1 < argc) { probe = true; probeSuffix = argv[++i]; }   // selftest only
     }
@@ -715,7 +718,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         rc = selftest(inst, selftestDir);
     } else {
         // the real core; the mock only for a --scenario (it, and --selftest-ui, show made-up builds)
-        Core* core = !scenario.empty() ? createMockCore(scenario.c_str()) : rn::createCore(autoPlay.empty() ? nullptr : autoPlay.c_str());
+        Core* core = !scenario.empty() ? createMockCore(scenario.c_str()) : rn::createCore(autoPlay.empty() ? nullptr : autoPlay.c_str(),
+                                                                                          automated || rn::core::AutomatedStart());
         g_app = new App(g_gfx, core);
         HWND h = createWindow(inst, false, 1180, 740);
         single::listen(h, L"");
@@ -728,6 +732,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         MSG m;
         while (GetMessageW(&m, nullptr, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
         delete core;   // stops the core's session (or the mock's timers) before the window state goes away
+        if (scenario.empty() && rn::core::ExitCode()) rc = rn::core::ExitCode();
         delete g_app; g_app = nullptr;
         discardTarget();
         single::release();

@@ -1,0 +1,2 @@
+# the vendored pak tools are pinned by sha256 (paktools/pak-tools.manifest): never convert their line endings
+/paktools/** -text

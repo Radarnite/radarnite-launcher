@@ -14,6 +14,8 @@
 *.obj
 *.exp
 *.ilk
+# ... except the pak tools, vendored prebuilt with their manifest (tools/vendor-pak-tools.sh): the one copy that ships
+!/paktools/**
 
 # Release artifacts
 RadarniteLauncherSetup-*.exe

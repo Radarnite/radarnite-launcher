@@ -6,6 +6,7 @@
 #       --payload <dir> [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>] [--ban <text>]...
 #       [--no-version-check]
 #   tools/release.sh privacy-scan <file|dir>...   the privacy gate alone (exit 1 on any hit)
+#   tools/release.sh scrub <dir>                  the payload's same-length path scrub alone, in place (vendor-pak-tools.sh)
 #   tools/release.sh sha256-line <file>           the .sha256 asset content for <file> (no trailing newline)
 #   tools/release.sh product-version <exe>        the ProductVersion of an exe's version resource ("" = none)
 #
@@ -19,9 +20,11 @@
 #
 # The backend is Node: node\node.exe from the payload runs backend\server.mjs, copied from this checkout.
 # --payload is the rest of the program folder exactly as installed: node\node.exe, redirect\fnredirect.dll,
-# gameserver\radarnite-server.dll, patches\fnpakpatch.dll, tools\ (cosmetics-gen, fn-modkit-sigfit,
-# sigfit-installed.ps1), THIRD-PARTY-NOTICES.txt, README-offline.md (tools/fetch-payload.sh copies it from the PC).
-# Those prebuilt binaries get the same-length path scrub of the 2.x build (tools/build-release.ps1). The 3.0 exes
+# gameserver\radarnite-server.dll, patches\fnpakpatch.dll, tools\cosmetics-gen, THIRD-PARTY-NOTICES.txt,
+# README-offline.md (tools/fetch-payload.sh copies it from the PC). The pak tools (tools\fn-modkit-sigfit,
+# sigfit-installed.ps1, game-guard.ps1, pak-tools.manifest) come only from paktools/ (tools/vendor-pak-tools.sh): a
+# payload that carries its own copy is refused, and the staged ones must match paktools/pak-tools.manifest.
+# Those prebuilt binaries get the same-length path scrub of the 2.x build. The 3.0 exes
 # are never scrubbed: they must come out of their builds clean (-s / strip, --remap-path-prefix), or the gate fails.
 #
 # Privacy gate (case-insensitive, UTF-8 and UTF-16LE): any "/Users/", "\Users\" (C:\Users\ or another drive),
@@ -187,11 +190,23 @@ cmd_build() {
       -o -iname 'custom-cosmetics.json' -o -iname '*.pak' -o -iname '*.utoc' -o -iname '*.ucas' -o -iname '*.sig' -o -iname '.fp-epic' \
       -o -iname '*deviceauth*' -o -iname 'config.json' \))
   [ -z "$bad" ] || die "the payload must not contain:$bad"
+  # the pak tools: never an older copy from a payload, only paktools/ (one copy, pinned by its manifest)
+  for p in tools/fn-modkit-sigfit tools/sigfit-installed.ps1 tools/game-guard.ps1 tools/pak-tools.manifest; do
+    [ -e "$app/$p" ] && bad="$bad $p"
+  done
+  [ -z "$bad" ] || die "the payload must not carry its own pak tools (they ship from paktools/):$bad"
+  "$ROOT/tools/vendor-pak-tools.sh" check || die "paktools/ does not match its manifest"
+  mkdir -p "$app/tools"; cp -R "$ROOT/paktools/." "$app/tools/"
   local npdb; npdb=$(find "$app" -type f -iname '*.pdb' | wc -l | tr -d ' ')
   find "$app" -type f -iname '*.pdb' -delete
   echo "  removed $npdb pdb"
   echo "== scrub prebuilt payload"
   scrub_payload "$app"
+  local h f
+  while read -r h f; do
+    [ "$(sha256 "$app/tools/$f")" = "$h" ] || die "staged tools/$f is not the one in paktools/pak-tools.manifest (re-vendor with tools/vendor-pak-tools.sh)"
+  done < <(grep -v '^#' "$ROOT/paktools/pak-tools.manifest")
+  echo "  pak tools $(sed -n 's/^# version //p' "$ROOT/paktools/pak-tools.manifest") staged as in the manifest"
   cp "$launcher" "$app/RadarniteLauncher.exe"
   [ -s "$app/node/node.exe" ] || die "the payload has no node/node.exe (the backend runs on it)"
   mkdir -p "$app/backend"; cp "$ROOT/backend/server.mjs" "$app/backend/"
@@ -234,6 +249,7 @@ cmd_build() {
 collect_bans
 case "${1:-}" in
   build) shift; cmd_build "$@" ;;
+  scrub) [ -d "${2:-}" ] || die "usage: release.sh scrub <dir>"; scrub_payload "$2" ;;
   privacy-scan) shift; [ $# -gt 0 ] || die "usage: release.sh privacy-scan <file|dir>..."; privacy_scan "$@" ;;
   sha256-line) [ -f "${2:-}" ] || die "usage: release.sh sha256-line <file>"; sha256_line "$2" ;;
   product-version) [ -f "${2:-}" ] || die "usage: release.sh product-version <exe>"; product_version "$2"; echo ;;

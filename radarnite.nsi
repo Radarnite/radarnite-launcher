@@ -246,6 +246,16 @@ Section "Radarnite Launcher" SecMain
     MessageBox MB_ICONEXCLAMATION "Could not set the builds folder to $BuildsDir. Pick it later in the launcher (bottom left)." /SD IDOK
   ${EndIf}
 
+  ; The pak tools (sigfit, game guard) just installed must be the ones this launcher was built with, and a dev tree's
+  ; copy (<builds folder>\launcher\tools, used by scripts outside the launcher) is replaced by them, so no older sigfit
+  ; survives an update. A mismatch is written to update.log (silent updates) and shown here; the launcher says it
+  ; again before running a sigfit.
+  ExecWait '"$INSTDIR\${EXE}" --sync-pak-tools' $0
+  ${If} $0 != 0
+    DetailPrint "Pak tools do not match this launcher (see update.log)"
+    MessageBox MB_ICONEXCLAMATION "The pak tools (sigfit) in $INSTDIR\tools or $BuildsDir\launcher\tools do not match this launcher. Details in $INSTDIR\update.log. Install the launcher again; until then own skins may stop the game with $\"Corrupted data$\"." /SD IDOK
+  ${EndIf}
+
   CreateDirectory "$SMPROGRAMS"
   CreateShortCut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
 

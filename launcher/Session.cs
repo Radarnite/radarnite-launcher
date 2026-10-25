@@ -89,7 +89,8 @@ public sealed class Session
         if (Preflight(_b, matchOk) is { } why) { Fail("Not starting: " + why); return false; }
         var off = Paths.Offline(_b.Dir);
         if (!File.Exists(Path.Combine(off, "cosmetics.json"))) _log("Warning: this build has no cosmetics list yet (press Generate cosmetics): only the defaults will show.");
-        await FitOwnPaks(off);
+        // Own paks are fitted to the build's signatures only by the 3.0 core (native/core/paktools.h, with the pinned
+        // tools); this 2.x path is not shipped any more and keeps no copy of that step, so it can never run an old sigfit.
 
         // 1. backend (127.0.0.1 only)
         Stage?.Invoke("backend", "run");
@@ -356,30 +357,6 @@ public sealed class Session
     {
         if (!PakPatchBuilds.Contains(_b.Version) || !File.Exists(Paths.PakPatchDll)) return;
         _log(Native.Inject(p.Id, Paths.PakPatchDll) ? $"{who}: pak patch loaded (see offline\\sandbox-*\\pakpatch.log)." : $"Warning: {who}: could not load fnpakpatch.dll.");
-    }
-
-    // Our own cosmetic paks (offline\custom-cosmetics.json) must match a signature file of the build, or 14.30 shows
-    // "Corrupted data was found in game files" and quits. Importers that copy a .sig (older fn-port / import-skin runs)
-    // undo that, so every launch of a classic-pak build checks them first and fits any that do not match
-    // (tools\sigfit-installed.ps1 -> fn-modkit sigfit, FortnitePorting reports/pak-sigfit.md); a second or two when nothing changed.
-    async Task FitOwnPaks(string off)
-    {
-        var script = Path.Combine(Paths.LauncherDir, "tools", "sigfit-installed.ps1");
-        if (_b.UsesIoStore || !File.Exists(Path.Combine(off, "custom-cosmetics.json"))) return;
-        if (!File.Exists(script)) { _log($"Warning: own paks NOT checked: {script} is missing (the game may stop with \"Corrupted data\")."); return; }
-        var psi = new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Build \"{_b.Dir}\"")
-            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        try
-        {
-            using var p = Process.Start(psi)!;
-            var err = p.StandardError.ReadToEndAsync();
-            var lines = (await p.StandardOutput.ReadToEndAsync()).Split('\n').Select(l => l.Trim()).Where(l => l != "").ToList();
-            await p.WaitForExitAsync();
-            foreach (var l in lines.Where(l => l.StartsWith("fitted ") || l.StartsWith("FAILED "))) _log("Own paks: " + l);
-            if (lines.LastOrDefault() is { } sum) _log((p.ExitCode == 0 ? "Own paks: " : "Warning: own paks: ") + sum);
-            if (p.ExitCode != 0 && (await err).Trim() is { Length: > 0 } e) _log("Warning: own paks: " + e.Split('\n')[0].Trim());
-        }
-        catch (Exception e) { _log("Warning: could not check the own paks' signatures: " + e.Message); }
     }
 
     async Task<bool> CheckRedirect(string log)

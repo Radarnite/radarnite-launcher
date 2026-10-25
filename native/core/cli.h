@@ -9,6 +9,7 @@
 //   --update-check              is a newer public release available? exit 10 when it is (installs nothing)
 //   --cosmetics <build>         download keys/mappings and generate cosmetics.json
 //   --stop                      stop every process running from inside the builds folder
+//   --sync-pak-tools            (installer) check the pak tools and refresh a dev tree's copy (paktools.h); exit 1 if not
 //   --selftest-inject           the game launch is not in this core: prints why, exit 1
 #pragma once
 
@@ -19,7 +20,7 @@ namespace cli {
 // caller opens the window. Otherwise returns the process exit code.
 int run(int argc, wchar_t** argv, bool* handled);
 // --play <build> without a window (rn-core-cli.exe): the session's Activity lines on stdout. 0 = the game ran,
-// 1 = the launch failed, 2 = no such build.
+// 1 = the launch failed, 2 = no such build, 6 = refused by the game guard (an anti-cheat or another game runs).
 int playConsole(const wchar_t* build);
 
 } // namespace cli

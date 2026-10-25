@@ -5,6 +5,7 @@
 #include "buildinfo.h"
 #include "config.h"
 #include "firewall.h"
+#include "paktools.h"
 #include "paths.h"
 #include "port.h"
 #include "proc.h"
@@ -24,6 +25,7 @@ namespace rn {
 namespace {
 
 std::wstring orOk(const std::wstring& s) { return s.empty() ? L"OK" : s; }
+std::atomic<int> g_exitCode{ 0 };
 
 // ---------------------------------------------------------------------------------------------- shell dialogs
 template <typename T> void release(T*& p) { if (p) { p->Release(); p = nullptr; } }
@@ -108,6 +110,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     UiSink* sink = nullptr;
     std::mutex m;                      // the fields below
     std::wstring selected, autoPlay;
+    bool automated = false;            // autoPlay came from a script or an agent (core::AutomatedStart)
     std::wstring state = L"idle", sessionVersion, failure;
     std::map<std::wstring, std::wstring> stages;
     std::wstring phase, detail;
@@ -623,8 +626,8 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
 
 class CoreImpl : public Core {
 public:
-    explicit CoreImpl(const wchar_t* autoPlay) : c_(std::make_shared<Ctx>()) {
-        if (autoPlay && *autoPlay) { c_->autoPlay = autoPlay; c_->selected = autoPlay; }
+    CoreImpl(const wchar_t* autoPlay, bool automated) : c_(std::make_shared<Ctx>()) {
+        if (autoPlay && *autoPlay) { c_->autoPlay = autoPlay; c_->selected = autoPlay; c_->automated = automated; }
     }
 
     ~CoreImpl() override {
@@ -645,6 +648,18 @@ public:
         std::wstring play = c_->autoPlay;
         if (!play.empty()) {
             c_->async([play](std::shared_ptr<Ctx> c) {
+                // a script's or an agent's launch: never next to an anti-cheat or a game the owner has open, checked
+                // before anything else (game-guard.ps1, paktools.h); the owner's own Play is never held back
+                if (c->automated) {
+                    std::wstring busy = paktools::gameGuard();
+                    if (!busy.empty()) {
+                        c->log(L"Not starting this automated launch: " + busy + L".", Level::Bad);
+                        g_exitCode = 6;
+                        if (HWND h = proc::mainWindow()) PostMessageW(h, WM_CLOSE, 0, 0);
+                        return;
+                    }
+                    c->log(L"Game guard: no anti-cheat or other game running.");
+                }
                 // Program.Find: the folder name (any case) or the exact version
                 for (auto& b : BuildInfo::all()) {
                     if (ieq(b.name(), play) || b.version == play) { c->launch(b); return; }
@@ -655,6 +670,7 @@ public:
             });
         } else {
             c_->async([](std::shared_ptr<Ctx> c) {
+                paktools::syncDevTree([c](const std::wstring& t) { c->log(t); });   // a dev tree's sigfit stays current
                 c->reportTestInstall();
                 c->runUpdate(false);   // offline-first, silent without network
                 c->startTestPoll();
@@ -696,6 +712,16 @@ private:
 
 } // namespace
 
-Core* createCore(const wchar_t* autoPlay) { return new CoreImpl(autoPlay); }
+Core* createCore(const wchar_t* autoPlay, bool automated) { return new CoreImpl(autoPlay, automated); }
+
+namespace core {
+bool AutomatedStart() {
+    if (getEnv(L"RADARNITE_AUTOMATED") == L"1") return true;
+    STARTUPINFOW si = { sizeof si };
+    GetStartupInfoW(&si);
+    return (si.dwFlags & STARTF_USESHOWWINDOW) && si.wShowWindow == SW_HIDE;
+}
+int ExitCode() { return g_exitCode; }
+} // namespace core
 
 } // namespace rn

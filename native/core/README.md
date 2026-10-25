@@ -19,7 +19,10 @@ Same command line, stdout, exit codes, files (`config.json`, `offline\build.json
   start and every 2 minutes, and a newer test build is installed silently (`/S /RELAUNCH=fg|bg`), never during a game;
   `just publish-test <tag>` publishes one as `3.0.0-test.<N>.<tag>`
 - `builddata`: AES keys and mappings download, `fn-cosmetics-gen`, add a build from a zip (Windows `tar.exe`) or a folder
-- `cli`: `--check --scan --set-builds-folder --firewall --firewall-remove --update-check --test-channel --cosmetics --stop --selftest-inject`
+- `cli`: `--check --scan --set-builds-folder --firewall --firewall-remove --update-check --test-channel --cosmetics --stop --selftest-inject --sync-pak-tools`
+- `paktools`: the pak tools in `tools\` (sigfit, game guard) checked against `paktools_manifest.h` (generated from
+  `paktools/pak-tools.manifest` by `tools/vendor-pak-tools.sh`), the dev tree's copy kept identical, and the game guard
+  run before automated launches
 - `core`: `rn::createCore()` implements `api.h`; `rn::core::ForwardToRunningInstance()` signals an open window
 
 ## Build
