@@ -34,7 +34,7 @@ branch runs nothing (one trigger per job).
   `VERSION` is 3.0.0 while the last tag is v2.2.1; raise it for the next minor or major.
 - `main` -> release `vX.Y.Z`, the latest one: every installed launcher updates. "Run workflow" on another branch only
   builds the installer; nothing but `main` is ever published (no prereleases).
-- A head commit whose message contains `[skip release]` is built but not published.
+- A head commit whose subject (first line) contains `[skip release]` is built but not published.
 - Assets: `RadarniteLauncherSetup-<version>.exe`, its `.sha256` (2.x format) and `RadarniteLauncher-<version>.zip` (the
   program folder: no uninstaller, registry keys, shortcuts or 2.x cleanup). Notes: the commits since the last tag.
 - The backend is `backend/server.mjs` from the checkout, run by Node. The payload (Node, tools, gameserver, redirect,
