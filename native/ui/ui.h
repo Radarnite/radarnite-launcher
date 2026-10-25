@@ -56,7 +56,6 @@ public:
     HBRUSH editBrush(HWND edit, HDC dc);       // WM_CTLCOLOREDIT: the field's colors (the EDITs are opaque)
     void openActivity(bool open);
     void openMenu(int m) { if (menu_ != m) { menu_ = m; invalidate(); } }   // selftest: render a scenario with a menu open; 0 closes
-    void openSheet(bool open);                  // the match settings sheet (selftest: render a scenario with it open)
     // Transitions on/off (Windows "Show animations"; off without a window, so offscreen renders are the rest state)
     void setMotion(bool on);
     bool motion() const { return anim_.motion; }
@@ -151,11 +150,10 @@ private:
     void drawStage(float top, float bottom);                   // season gradient, rays, skin and fades (cached bitmap)
     void drawTop(float y, float W);                             // build switcher, +, Cosmetics, Activity, Build
     void drawPoster(float x, float right, float top, float bottom);   // the season's title (bottom left)
-    float drawDock(float x, float w, float top, float bottom);  // summary or sheet, status line, Launch; returns its top
+    float drawDock(float x, float w, float top, float bottom);  // match settings, status line, Launch; returns its top
     float okline(float x, float y, float w);                    // the status line; returns the height
-    float summary(float x, float y, float w, bool withChips);   // returns the height
-    float drawSheet(float x, float w, float top, float bottom); // returns its top
-    float sheetBody(float x, float y, float w);                 // returns the bottom
+    float drawSettings(float x, float w, float top, float bottom);   // the match settings panel; returns its top
+    float settingsBody(float x, float y, float w);                    // returns the bottom
     void drawLaunch(D2D1_RECT_F pr, uint32_t glow);
     void stepBuild(int d);                                      // previous / next build (Q / E, ‹ ›, arrows)
     void drawActivity(float x, float y, float w, float h);
@@ -240,15 +238,13 @@ private:
     ID2D1Bitmap* blur_ = nullptr;           // the stage at 1/16, the frost's backdrop
     ID2D1BitmapBrush* blurBr_ = nullptr;
     BgKey bgKey_{};
-    ID2D1LinearGradientBrush* modeBr_[2] = {};
     ID2D1LinearGradientBrush* rangeBr_ = nullptr;
     float tabScroll_ = 0, tabMax_ = 0;
     D2D1_RECT_F tabClip_{};
     int tabEnsure_ = -1;        // build index to scroll into view on the next frame
+    bool settingsCompact_ = false;   // the match settings without their subtitle (a short window)
     D2D1_RECT_F playRect_{};
     float playRadius_ = 16;
-    bool sheetOpen_ = false;
-    D2D1_RECT_F sheetRect_{};
     bool playShown_ = false, playDisabled_ = false;
     float toastRight_ = 0, toastBottom_ = 0;
     HWND tip_ = nullptr;        // one comctl32 tooltip, its tool = the hovered control

@@ -12,13 +12,13 @@ enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
     ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3,
     ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_LINES, ID_ACT, ID_PLAY,
-    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_MODE0, ID_MODE1, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT, ID_SHEET, ID_SHEETX, ID_MENU0 = 200, ID_BUILD0 = 1000,
+    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
 const UINT_PTR T_SPIN = 1, T_TOAST = 2, T_ANIM = 3;
 // animation keys: kind | control id
 const uint32_t K_HOVER = 1u << 16, K_COLOR = 2u << 16, K_PRESS = 3u << 16, K_SWITCH = 4u << 16, K_TOAST = 5u << 16,
-               K_SHEEN = 6u << 16, K_GREET = 7u << 16, K_SHIMMER = 8u << 16, K_SHEET = 9u << 16;
+               K_SHEEN = 6u << 16, K_GREET = 7u << 16, K_SHIMMER = 8u << 16;
 const float TB = 40;
 // lobby screen colors (the mockup's): glass fill, the opaque fields under the EDITs, the ready green, dark text
 const uint32_t GLASS = 0x090D1C, FIELD = 0x0B0E19, GREEN = 0x3DFF6E, INK = 0x101114;
@@ -276,7 +276,7 @@ void App::greet() {
 
 void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
     releaseArt();
-    release(modeBr_[0]); release(modeBr_[1]); release(rangeBr_);
+    release(rangeBr_);
     release(shimmer_); release(sheen_); release(logoBrush_); release(logo_); release(brush2_); release(brush_);
     releasePortBrushes(); img_.setTarget(rt);
     rt_ = rt;
@@ -293,13 +293,10 @@ void App::setTarget(ID2D1RenderTarget* rt, float dpi) {
     release(gs);
     if (SUCCEEDED(rt_->CreateGradientStopCollection(sk, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gs))) rt_->CreateLinearGradientBrush({}, gs, &shimmer_);
     release(gs);
-    // .sheet .m cards: linear-gradient(160deg, rgba(88,211,107,.45), rgba(31,138,58,.35)) and (160deg, #b26bff, #6a2bd0);
-    // the bots slider: #8c6bff -> #b79bff
-    const uint32_t grads[3][2] = { { 0x58D36B, 0x1F8A3A }, { 0xB26BFF, 0x6A2BD0 }, { 0x8C6BFF, 0xB79BFF } };
-    const float galpha[3][2] = { { .45f, .35f }, { 1, 1 }, { 1, 1 } };
-    for (int i = 0; i < 3; i++) {
-        const D2D1_GRADIENT_STOP st[] = { { 0, rgb(grads[i][0], galpha[i][0]) }, { 1, rgb(grads[i][1], galpha[i][1]) } };
-        if (SUCCEEDED(rt_->CreateGradientStopCollection(st, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs))) rt_->CreateLinearGradientBrush({}, gs, i < 2 ? &modeBr_[i] : &rangeBr_);
+    // the bots slider: linear-gradient(90deg, #8c6bff, #b79bff)
+    {
+        const D2D1_GRADIENT_STOP st[] = { { 0, rgb(0x8C6BFF) }, { 1, rgb(0xB79BFF) } };
+        if (SUCCEEDED(rt_->CreateGradientStopCollection(st, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gs))) rt_->CreateLinearGradientBrush({}, gs, &rangeBr_);
         release(gs);
     }
     if (g_.logo && g_.wic) {
@@ -503,17 +500,6 @@ void App::select(const std::wstring& name, bool click) {
     invalidate();
 }
 
-// The match settings sheet: fades in over the summary; closing it takes the focus out of it (the callers put it back
-// on the Match settings button)
-void App::openSheet(bool open) {
-    if (sheetOpen_ == open) return;
-    sheetOpen_ = open;
-    contentScroll_ = 0;
-    if (open) { anim_.to(K_SHEET, 0, 1, T2, Curve::Ui); animate(); }
-    else anim_.stop(K_SHEET);
-    invalidate();
-}
-
 void App::stepBuild(int d) {
     if (busy() || st_.builds.empty()) return;
     int i = 0;
@@ -580,7 +566,7 @@ void App::editKey(int id, UINT vk, bool ctrl, bool shift) {
     if (vk == VK_ESCAPE) {   // search: clear it; name/bots: back to the saved value
         if (id == ID_P_SEARCH) { if (pQ_.empty()) key(VK_ESCAPE, false, false); else SetWindowTextW(edits_[3].hwnd, L""); }
         else if (id == ID_SEARCH) SetWindowTextW(edits_[2].hwnd, L"");
-        else {   // name / bots: back to the saved value; already there: Escape closes the sheet
+        else {   // name / bots: back to the saved value; already there: Escape goes on to the window
             wchar_t buf[64] = L"";
             EditBox& e = edits_[id == ID_NAME ? 0 : 1];
             std::wstring saved = id == ID_NAME ? st_.config.displayName : std::to_wstring(st_.config.bots);
@@ -877,7 +863,7 @@ void App::paint(float W, float H) {
     contentClip_ = {};
     float dockTop = actTop - 24;
     playShown_ = false;
-    if (pOpen_) { sheetRect_ = {}; drawPort(0, TB + 76, W, actTop - TB - 76); }   // the cosmetics panel under the switcher
+    if (pOpen_) { drawPort(0, TB + 76, W, actTop - TB - 76); }   // the cosmetics panel under the switcher
     else {
         float dw = std::max(300.f, std::min(540.f, W * .264f));
         float dx = W - mx - dw;
@@ -1404,11 +1390,10 @@ void App::drawPoster(float x, float right, float top, float bottom) {
 }
 
 // ------------------------------------------------------------------------------------------------ dock (bottom right)
-// .dock: the match summary (or the settings sheet in its place), the status line and Launch, from the bottom up.
+// .dock: the match settings (always there, part of the screen), the status line and Launch, from the bottom up.
 // Returns its top (the toasts go above it).
 float App::drawDock(float x, float w, float top, float bottom) {
     playShown_ = false;
-    sheetRect_ = {};
     float lh = std::max(68.f, std::min(112.f, (H_ - TB) * .1053f));
     D2D1_RECT_F pr = rc(x, bottom - lh, w, lh);
     if (!loaded_) {
@@ -1420,28 +1405,13 @@ float App::drawDock(float x, float w, float top, float bottom) {
     const Build* b = sel();
     if (!b) return bottom;
     const SeasonArt& sa = seasonArt(b->major, b->minor);
-    // the summary as it fits: with its chips, without them, or only a Match settings button on the status line
     measuring_ = true;
-    float oh = okline(x + 4, 0, w - 4), full = summary(x, 0, w, true), compact = summary(x, 0, w, false);
-    int mode = sheetOpen_ ? 0 : pr.top - 12 - oh - 14 - full >= top ? 2 : pr.top - 12 - oh - 14 - compact >= top ? 1 : 3;
-    const float cog = 28;
-    if (mode == 3) oh = std::max(cog, okline(x + 4, 0, w - 4 - cog - 10));
+    float oh = okline(x + 4, 0, w - 4);
     measuring_ = false;
     float okTop = pr.top - 12 - oh;
-    okline(x + 4, okTop, w - 4 - (mode == 3 ? cog + 10 : 0));
-    float dockTop = okTop;
-    if (sheetOpen_) dockTop = drawSheet(x, w, top, okTop + 1);   // .sheet{bottom:190px}: on the status line's top
-    else if (mode == 3) {
-        D2D1_RECT_F cr = rc(x + w - cog, okTop + (oh - cog) / 2, cog, cog);
-        float hv = fx(K_HOVER | ID_SHEET, hover_ == ID_SHEET ? 1.f : 0.f, cr);
-        fill(cr, C::white, .12f + .08f * hv, 8);
-        icon(Icon::Cog, cr.left + 6, cr.top + 6, 16, C::white);
-        hit(ID_SHEET, cr, F_FOCUS | F_HAND | (b->lobby == Support::No ? F_DISABLED : 0), 8);
-    } else {
-        float ch = mode == 2 ? full : compact;
-        summary(x, okTop - 14 - ch, w, mode == 2);
-        dockTop = okTop - 14 - ch;
-    }
+    // the settings first: the focus order goes top to bottom (settings, the status line's links, Launch)
+    float dockTop = drawSettings(x, w, top, okTop - 14);
+    okline(x + 4, okTop, w - 4);
     drawLaunch(pr, sa.c[0]);
     return dockTop;
 }
@@ -1535,75 +1505,18 @@ float App::okline(float x, float y, float w) {
     return cy - y + lh;
 }
 
-// .sum: what Launch starts (title, the switches as chips) and the Match settings button. Returns the height.
-float App::summary(float x, float y, float w, bool withChips) {
-    const Build* b = sel();
-    const Config& c = st_.config;
-    bool dis = b->lobby == Support::No, hasMatch = matchOk(b);
-    const float px = 18, iw = w - 2 * px - 2;
-    struct Chip { Icon ic; std::wstring s; uint32_t c; };
-    std::vector<Chip> chips;
-    if (hasMatch) {
-        chips.push_back({ Icon::Bots, c.bots == 1 ? std::wstring(L"1 bot") : fmt(L"%d bots", c.bots), C::white });
-        if (c.infiniteMaterials) chips.push_back({ Icon::Count, L"Infinite materials", C::white });
-        if (c.infiniteAmmo) chips.push_back({ Icon::Count, L"Infinite ammo", C::white });
-        chips.push_back({ Icon::Count, c.lateGame ? L"Late game" : L"Late game off", C::white });
-        if (c.botsAI) chips.push_back({ Icon::Warn, L"Bot AI on", C::warnText });
-    } else chips.push_back({ Icon::Count, L"Lobby, locker and styles", C::white });
-    if (!c.displayName.empty()) chips.push_back({ Icon::Lobby, c.displayName, C::white });
-    Font cf{ Face::UI, 12, 600, false };
-    std::vector<D2D1_RECT_F> cr;
-    float cx = 0, cy = 0;
-    for (auto& ch : chips) {
-        float cw = std::min(iw, 10 + (ch.ic != Icon::Count ? 16 + 6 : 0) + textW(ch.s, cf) + 10);
-        if (cx > 0 && cx + cw > iw) { cx = 0; cy += 28 + 6; }
-        cr.push_back(rc(cx, cy, cw, 28));
-        cx += cw + 6;
-    }
-    if (!withChips) chips.clear();
-    float h = 1 + 16 + 34 + (chips.empty() ? 0 : 12 + cy + 28) + 16 + 1;
-    if (measuring_) return h;
-    D2D1_RECT_F r = rc(x, y, w, h);
-    if (dis) { alpha_ = .5f; noHit_ = true; }
-    frost(r, 18);
-    float ty = y + 17, lx = x + 1 + px;
-    Font bf{ Face::UI, 13, 600, false };
-    float bw = 12 + 16 + 8 + textW(L"Match settings", bf) + 12;
-    D2D1_RECT_F brr = rc(x + w - 1 - px - bw, ty, bw, 34);
-    float hv = fx(K_HOVER | ID_SHEET, hover_ == ID_SHEET ? 1.f : 0.f, brr);
-    fill(brr, C::white, .12f + .08f * hv, 10);
-    icon(Icon::Cog, brr.left + 12, ty + 9, 16, C::white);
-    text(L"Match settings", bf, brr.left + 36, ty, bw - 48 + 1, 34, C::white);
-    hit(ID_SHEET, brr, F_FOCUS | F_HAND, 10);
-    // .md: what the match is (modes are picked in the game: Practice or Battle Royale)
-    std::wstring t = hasMatch ? L"LOCAL MATCH" : L"LOBBY ONLY";
-    float tw30 = textW(t, Font{ Face::Display, 30, 900, true }), avail = brr.left - 12 - lx;
-    float ts = std::max(14.f, std::min(30.f, tw30 > 0 ? (avail - 8) / tw30 * 30 : 30.f));
-    text(t, Font{ Face::Display, ts, 900, true }, lx, ty, avail + 4, 34, C::white);
-    float chy = ty + 34 + 12;
-    for (size_t i = 0; i < chips.size(); i++) {
-        D2D1_RECT_F q = cr[i];
-        q = { lx + q.left, chy + q.top, lx + q.right, chy + q.bottom };
-        fill(q, C::white, .1f, 14);
-        float tx = q.left + 10;
-        if (chips[i].ic != Icon::Count) { icon(chips[i].ic, tx, q.top + 6, 16, chips[i].c); tx += 16 + 6; }
-        text(chips[i].s, cf, tx, q.top, q.right - 10 - tx, 28, chips[i].c);
-    }
-    alpha_ = 1; noHit_ = false;
-    return h;
-}
-
-// .sheet: the match settings in place of the summary, above the status line (Esc or a click outside closes it); its
-// content scrolls when the window is short. Returns its top.
-float App::drawSheet(float x, float w, float top, float bottom) {
+// .settings: the match settings, always on the main screen above the status line (never closes); its content scrolls
+// when the window is short, never over the top row. Returns its top.
+float App::drawSettings(float x, float w, float top, float bottom) {
     measuring_ = true;
-    float ch = sheetBody(x + 23, 20, w - 46) + 20;   // padding 20 22 (+ the 1px border)
+    settingsCompact_ = false;
+    float ch = settingsBody(x + 23, 18, w - 46) + 8;   // padding 18 22 8 (+ the 1px border); the last row has its own air
+    if (ch + 2 > bottom - top) { settingsCompact_ = true; ch = settingsBody(x + 23, 18, w - 46) + 8; }   // short: no subtitle
     measuring_ = false;
-    float h = std::max(0.f, std::min(ch + 2, bottom - top));   // never over the top row: the content scrolls
+    float h = std::max(0.f, std::min(ch + 2, bottom - top));
+    if (h < 40) return bottom;   // no room at all (Activity over a tiny window): the status line and Launch only
     D2D1_RECT_F r = rc(x, bottom - h, w, h);
-    sheetRect_ = r;
-    float a = tw(K_SHEET, 1, grow(r, 2));   // fades in when it opens (180 ms)
-    alpha_ = a;
+    alpha_ = 1;
     frost(r, 20);
     float viewTop = r.top + 1, viewBottom = r.bottom - 1, viewH = std::max(0.f, viewBottom - viewTop);
     contentView_ = viewH;
@@ -1617,66 +1530,34 @@ float App::drawSheet(float x, float w, float top, float bottom) {
     base_ = D2D1::Matrix3x2F::Translation(0, oy_);
     rt_->SetTransform(base_);
     inContent_ = true;
-    sheetBody(x + 23, 20, w - 46);
+    settingsBody(x + 23, 18, w - 46);
     inContent_ = false;
     base_ = D2D1::Matrix3x2F::Identity(); oy_ = 0;
     rt_->SetTransform(base_);
     rt_->PopAxisAlignedClip();
     clip_ = { -1e9f, -1e9f, 1e9f, 1e9f };
     if (sb) drawScrollbar(ID_SB_CONTENT, x + w - 12, viewTop + 10, viewH - 20, contentScroll_, contentH_, viewH);
-    alpha_ = 1;
     return r.top;
 }
 
-float App::sheetBody(float x, float y0, float w) {
+float App::settingsBody(float x, float y0, float w) {
     float y = y0;
     const Build* b = sel();
     const Config& c = st_.config;
     bool dis = b->lobby == Support::No, hasMatch = matchOk(b);
-    Font lf{ Face::UI, 10.5f, 600, false }, mf{ Face::UI, 12, 400, false }, rf{ Face::UI, 13.5f, 400, false };
-    // header: MATCH SETTINGS · 14.30, and "Esc to close" (a button too)
-    const float hh = 17.4f;
-    float ew = textW(L"Esc to close", mf);
-    text(L"MATCH SETTINGS · " + verLabel(*b), lf, x, y, w - ew - 12, hh, C::white, 0, .84f, .62f);
-    D2D1_RECT_F er = rc(x + w - ew, y, ew, hh);
-    float ev = fx(K_HOVER | ID_SHEETX, hover_ == ID_SHEETX ? 1.f : 0.f, er);
-    text(L"Esc to close", mf, er.left, y, ew + 1, hh, C::white, 0, 0, .62f + .38f * ev);
-    hit(ID_SHEETX, grow(er, 3), F_FOCUS | F_HAND, 6);
-    y += hh + 10;
+    Font lf{ Face::UI, 10.5f, 600, false }, df{ Face::UI, 11.5f, 400, false }, rf{ Face::UI, 13.5f, 400, false };
+    // header: MATCH SETTINGS · 14.30 (or SETTINGS on a lobby-only build) and one muted line on what they apply to
+    const float hh = 17.4f, sh = 16.7f;
+    text((hasMatch ? L"MATCH SETTINGS · " : L"SETTINGS · ") + verLabel(*b), lf, x, y, w, hh, C::white, 0, .84f, .62f);
+    y += hh + 2;
+    const wchar_t* sub = !hasMatch ? L"No local match on this build: lobby, locker and styles"
+                       : L"Battle Royale · Creative/Playground always has infinite materials and ammo";
+    if (hasMatch && textW(sub, df) > w) sub = L"For Battle Royale matches";
+    if (!hasMatch && textW(sub, df) > w) sub = L"No local match: lobby, locker and styles";
+    if (!settingsCompact_ || !hasMatch) { text(sub, df, x, y, w, sh, C::white, 0, 0, .55f); y += sh; }
+    y += 8;
     float a0 = alpha_;
     if (dis) { alpha_ = .5f * a0; noHit_ = true; }
-
-    // .modes: Practice and Battle Royale (both picked in the game), or lobby only
-    Font df{ Face::UI, 11.5f, 400, false };
-    if (hasMatch) {
-        float mw = (w - 8) / 2;
-        const wchar_t* mt[2] = { L"PRACTICE", L"BATTLE ROYALE" };
-        const wchar_t* md[2] = { L"Creative · Playground", L"Solo to Squads" };
-        float t20 = std::max(textW(mt[0], Font{ Face::Display, 20, 900, true }), textW(mt[1], Font{ Face::Display, 20, 900, true }));
-        float ts = std::max(12.f, std::min(20.f, t20 > 0 ? (mw - 28 - 4) / t20 * 20 : 20.f));
-        for (int i = 0; i < 2; i++) {
-            D2D1_RECT_F r = rc(x + i * (mw + 8), y, mw, 74);
-            // linear-gradient(160deg, ...): the line through the center along (sin 160, -cos 160)
-            if (modeBr_[i] && !measuring_) {
-                const float dx = 0.3420201f, dy = 0.9396926f;
-                float len = mw * dx + 74 * dy, gx = (r.left + r.right) / 2, gy = (r.top + r.bottom) / 2;
-                modeBr_[i]->SetStartPoint(D2D1::Point2F(gx - dx * len / 2, gy - dy * len / 2));
-                modeBr_[i]->SetEndPoint(D2D1::Point2F(gx + dx * len / 2, gy + dy * len / 2));
-                modeBr_[i]->SetOpacity(alpha_);
-                rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 12, 12), modeBr_[i]);
-            }
-            text(mt[i], Font{ Face::Display, ts, 900, true }, r.left + 14, r.bottom - 12 - 16.7f - 24.2f, mw - 28 + ts, 24.2f, C::white);
-            text(md[i], df, r.left + 14, r.bottom - 12 - 16.7f, mw - 28, 16.7f, C::white, 0, 0, .85f);
-            hit(ID_MODE0 + i, r, 0, 0);   // tooltip only
-        }
-    } else {
-        D2D1_RECT_F r = rc(x, y, w, 74);
-        fill(r, C::white, .06f, 12);
-        text(L"LOBBY ONLY", Font{ Face::Display, 20, 900, true }, r.left + 14, r.bottom - 12 - 16.7f - 24.2f, w - 28, 24.2f, C::white);
-        text(L"No local match on this build: lobby, locker and styles", df, r.left + 14, r.bottom - 12 - 16.7f, w - 28, 16.7f, C::white, 0, 0, .75f);
-        hit(ID_MODE0, r, 0, 0);
-    }
-    y += 74 + 14;
 
     auto row = [&](const wchar_t* label, float rightW) { fill(rc(x, y, w, 1), C::white, .1f); text(label, rf, x, y, w - rightW - 12, 44, C::white); };
     if (hasMatch) {
@@ -2086,8 +1967,6 @@ std::wstring App::tooltip(int id) const {
     case ID_CLOSE: return L"Close";
     case ID_ADD: return L"Add build";
     case ID_COSMETICS: return L"Cosmetics of this build";
-    case ID_MODE0: return matchOk(b) ? L"Pick Creative / Playground in the game: alone, infinite materials and ammo, 0 ping." : L"This build has no local match: lobby, locker and styles only.";
-    case ID_MODE1: return fmt(L"Pick Solo, Duos, Trios or Squads: bus, storm and loot, with %d bots.", st_.config.bots);
     case ID_TG0: return L"Experimental: crashes the match on 17.50";
     case ID_TG1: return L"Small storm, shields";
     case ID_TG2: return L"Battle Royale (practice always has them)";
@@ -2096,8 +1975,6 @@ std::wstring App::tooltip(int id) const {
     case ID_ACT: return L"Activity (Ctrl+L)";
     case ID_PREV: return L"Previous build (Q)";
     case ID_NEXT: return L"Next build (E)";
-    case ID_SHEET: return L"Bots, switches and player name";
-    case ID_SHEETX: return L"Close (Esc)";
     case ID_GRIP: return L"Drag to resize";
     case ID_COPY: return L"Copy activity";
     case ID_OPENLOGS: return L"Open the build's log folder";
@@ -2146,7 +2023,6 @@ void App::mouseDown(float x, float y) {
     int id = h ? h->id : 0;
     int toggle = menuOwner(menu_);
     if (menu_ && id != ID_POPUP && !(id >= ID_MENU0 && id < ID_MENU0 + 20) && id != toggle) { menu_ = 0; invalidate(); }
-    else if (sheetOpen_ && !inside(sheetRect_, x, y) && id != ID_SHEET && id != ID_TOAST && !(id >= ID_MENU0 && id < ID_BUILD0) && id != ID_POPUP) openSheet(false);
     if (!h || (h->flags & F_DISABLED) || id == ID_POPUP || id == ID_TOAST) {
         if (hwnd_ && GetFocus() != hwnd_) SetFocus(hwnd_);
         invalidate();
@@ -2268,13 +2144,6 @@ void App::activate(int id) {
     case ID_CLEAR: logs_.clear(); rows_.clear(); rowsDirty_ = true; invalidate(); break;
     case ID_ACT: openActivity(!actOpen_); break;
     case ID_PREV: case ID_NEXT: stepBuild(id == ID_NEXT ? 1 : -1); break;
-    case ID_SHEET: {
-        bool kb = focusVisible_;
-        openSheet(!sheetOpen_);
-        if (sheetOpen_ && kb) focus_ = matchOk(sel()) && sel()->lobby != Support::No ? (int)ID_RANGE : (int)ID_SHEETX;   // keyboard: into the sheet
-        break;
-    }
-    case ID_SHEETX: openSheet(false); setFocus(ID_SHEET, focusVisible_); break;
     case ID_PLAY:
         if (se_.state == SessionState::Launching || se_.state == SessionState::Running) core_->command(Command::Stop, b);
         else if (!b.empty()) core_->command(Command::Launch, b);
@@ -2335,7 +2204,6 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     if (pOpen_ && !menu_ && portKey(vk, ctrl, shift)) return true;
     if (vk == VK_ESCAPE) {
         if (menu_) { int t = menuOwner(menu_); menu_ = 0; setFocus(t, focusVisible_); return true; }
-        if (sheetOpen_) { openSheet(false); setFocus(ID_SHEET, focusVisible_); return true; }
         return false;
     }
     if (ctrl && vk == VK_RETURN) { const Hit* p = hitById(ID_PLAY); if (p && !(p->flags & F_DISABLED)) activate(ID_PLAY); return true; }
@@ -2378,8 +2246,10 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
         }
         if (d) { logScroll_ = std::max(0.f, std::min(logMax_, logScroll_ + d)); logFollow_ = logScroll_ >= logMax_ - 8; invalidate(); return true; }
     }
-    // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above)
-    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !sheetOpen_ && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_CLEAR)) {
+    // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above; not
+    // from the match settings' controls)
+    bool inSettings = f == ID_RANGE || f == ID_BOTS || f == ID_NAME || (f >= ID_TG0 && f <= ID_TG3);
+    if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !inSettings && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_CLEAR)) {
         stepBuild(vk == VK_RIGHT ? 1 : -1);
         return true;
     }
@@ -2407,8 +2277,7 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     auto check = [&](const wchar_t* name, bool ok) { out.push_back({ name, ok }); };
     frame(); frame();
 
-    click(ID_SHEET);
-    check(L"Match settings opens the sheet", sheetOpen_ && hitById(ID_TG1) && !hitById(ID_SHEET));
+    check(L"the match settings are on the main screen without a click", hitById(ID_RANGE) && hitById(ID_TG1) && hitById(ID_NAME));
     bool late = st_.config.lateGame;
     click(ID_TG1);
     check(L"click switch toggles lateGame", st_.config.lateGame == !late);
@@ -2425,10 +2294,25 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
     key(VK_RIGHT, false, false); key(VK_PRIOR, false, false); frame();
     check(L"slider Right + PageUp = 11 bots", st_.config.bots == 11);
     key(VK_ESCAPE, false, false); frame();
-    check(L"Escape closes the sheet and focuses Match settings", !sheetOpen_ && focus_ == ID_SHEET && hitById(ID_SHEET));
-    click(ID_SHEET);
     { float ox = 5, oy = TB + 200; mouseDown(ox, oy); mouseUp(ox, oy); frame(); }
-    check(L"a click outside the sheet closes it", !sheetOpen_);
+    check(L"Escape and a click outside leave the match settings in place", hitById(ID_RANGE) && hitById(ID_TG1));
+
+    // a small window with Activity open: the settings stay between the top row and the status line, scroll inside
+    // themselves, and a control tabbed to scrolls into view
+    {
+        float sw = 760, shh = 520;
+        openActivity(true);
+        auto small = [&] { rt_->BeginDraw(); paint(sw, shh); rt_->EndDraw(); };
+        small();
+        const Hit* pl = hitById(ID_PLAY);
+        bool between = pl && contentClip_.top >= TB + 76 && contentClip_.bottom <= pl->r.top - 12;
+        bool scrolls = contentH_ > contentView_ + 1;
+        setFocus(ID_NAME, true); small();
+        const Hit* nm = hitById(ID_NAME);
+        bool shown = nm && nm->r.top >= nm->clip.top - .5f && nm->r.bottom <= nm->clip.bottom + .5f;
+        check(L"small window: the settings fit between the top row and Launch, scroll, and Tab scrolls to the name", between && scrolls && shown);
+        openActivity(false); contentScroll_ = 0; setFocus(0, false); frame();
+    }
 
     // focus order: Tab from nothing reaches every control once and wraps
     focus_ = 0; frame();
@@ -2503,7 +2387,6 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
 
     // keyboard on the other widgets
     bool mats = st_.config.infiniteMaterials;
-    click(ID_SHEET);
     setFocus(ID_TG2, true); key(VK_SPACE, false, false); frame();
     check(L"Space toggles the focused switch", st_.config.infiniteMaterials == !mats);
     openActivity(true); frame();
@@ -2524,13 +2407,12 @@ std::vector<std::pair<std::wstring, bool>> App::selfCheck(float W, float H) {
           ncHit(300, 20) == HTCAPTION && ncHit(W - 23, 20) == HTCLIENT && ncHit(W - 23 - 46 * 2, 20) == HTCLIENT && ncHit(300, 60) == HTCLIENT);
     // tooltips: the page's title attributes
     bool tips = true;
-    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_ACT, ID_PREV, ID_NEXT, ID_SHEET, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0, ID_MODE0, ID_TG0 };
+    const int tipIds[] = { ID_MIN, ID_MAX, ID_CLOSE, ID_ADD, ID_COSMETICS, ID_BUILDMENU, ID_ACT, ID_PREV, ID_NEXT, ID_GRIP, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_META, ID_BUILD0, ID_TG0 };
     for (int id : tipIds) tips = tips && !tooltip(id).empty();
     const Build* sb = sel();
     check(L"icon buttons, build items and status cells have the page's tooltips",
           tips && sb && tooltip(ID_CELL0) == sb->lobbyWhy && tooltip(ID_CELL0 + 1) == (sb->matchServer ? sb->matchWhy : L"launcher\\gameserver\\radarnite-server.dll is missing"));
 
-    openSheet(false); frame();
     size_t ci = 0; for (size_t i = 0; i < st_.builds.size(); i++) if (st_.builds[i].name == selected_) ci = i;
     click(ID_BUILD0 + (int)ci);
     key(VK_RETURN, false, false); drain(); frame();
