@@ -90,14 +90,6 @@ static void console_key(const char *key)
     console_keys_log("now");
 }
 
-/* the virtual key of an engine key name (F1-F12, Tilde, a letter or digit); 0 = none */
-static UINT key_vk(const char *k)
-{
-    if ((k[0] == 'F' || k[0] == 'f') && k[1] >= '1' && k[1] <= '9') { int n = atoi(k + 1); if (n >= 1 && n <= 12) return VK_F1 + n - 1; }
-    if (!_stricmp(k, "Tilde")) return VK_OEM_3;
-    if (k[0] && !k[1] && ((k[0] >= 'A' && k[0] <= 'Z') || (k[0] >= '0' && k[0] <= '9'))) return (UINT)k[0];
-    return 0;
-}
 static HWND g_game_hwnd;
 static void post_key(UINT vk)
 {

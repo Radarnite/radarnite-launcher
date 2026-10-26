@@ -3,6 +3,7 @@
 #include "paths.h"
 #include "util.h"
 #include <stdio.h>
+#include <wctype.h>
 
 namespace rn {
 namespace mods {
@@ -54,6 +55,7 @@ Mods load() {
         on(root, "console", &m.console);
         if (str(root, "console", &s) && !s.empty() && s.size() < 24) m.consoleKey = s;
         on(root, "menu", &m.menu);
+        if (str(root, "menu", &s) && !s.empty() && s.size() < 24) m.menuKey = s;
         on(root, "fov", &m.fov);
         if (num(root, "fov", &d)) m.fovValue = clampi((int)d, 60, 120);
         on(root, "fpsCap", &m.fps);
@@ -84,7 +86,7 @@ bool save(const Mods& m) {
     t += std::string("  \"bodySliders\": {\"on\": ") + b(m.body) + "},\r\n";
     t += std::string("  \"ragdoll\": {\"on\": ") + b(m.ragdoll) + "},\r\n";
     t += std::string("  \"console\": {\"on\": ") + b(m.console) + ", \"value\": " + json::strict(m.consoleKey) + "},\r\n";
-    t += std::string("  \"menu\": {\"on\": ") + b(m.menu) + "},\r\n";
+    t += std::string("  \"menu\": {\"on\": ") + b(m.menu) + ", \"value\": " + json::strict(m.menuKey) + "},\r\n";
     snprintf(num, sizeof num, "%d", clampi(m.fovValue, 60, 120));
     t += std::string("  \"fov\": {\"on\": ") + b(m.fov) + ", \"value\": " + num + "},\r\n";
     snprintf(num, sizeof num, "%d", clampi(m.fpsValue, 0, 1000));
@@ -106,6 +108,23 @@ bool save(const Mods& m) {
     if (!writeFile(tmp, t)) return false;
     if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) { DeleteFileW(tmp.c_str()); return false; }
     return true;
+}
+
+bool keyHeld(const std::wstring& key) {
+    // the key names of pakpatch/fnkeys.c key_vk that the Mods tab offers
+    UINT vk = 0;
+    if (key.size() >= 2 && key.size() <= 3 && key[0] == L'F' && iswdigit(key[1]) && (key.size() == 2 || iswdigit(key[2]))) {
+        int n = _wtoi(key.c_str() + 1);
+        if (n >= 1 && n <= 24) vk = VK_F1 + n - 1;
+    }
+    static const struct { const wchar_t* n; UINT vk; } K[] = {
+        { L"Insert", VK_INSERT }, { L"Delete", VK_DELETE }, { L"Home", VK_HOME }, { L"End", VK_END }, { L"PageUp", VK_PRIOR },
+        { L"PageDown", VK_NEXT }, { L"Tilde", VK_OEM_3 },
+    };
+    for (const auto& k : K) if (key == k.n) vk = k.vk;
+    if (!vk) return false;
+    if (RegisterHotKey(nullptr, 0x7F09, 0, vk)) { UnregisterHotKey(nullptr, 0x7F09); return false; }
+    return GetLastError() == ERROR_HOTKEY_ALREADY_REGISTERED;
 }
 
 } // namespace mods

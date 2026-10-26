@@ -1587,8 +1587,8 @@ float App::settingsBody(float x, float y0, float w) {
     }
     y += hh + 2;
     if (tab == 1) {
-        const wchar_t* msub = L"Saved at once; a running game takes them too \u00b7 F8 in the game";
-        if (textW(msub, df) > w) msub = L"F8 in the game opens the mods menu";
+        std::wstring msub = L"Saved at once; a running game takes them too \u00b7 " + st_.mods.menuKey + L" in the game";
+        if (textW(msub, df) > w) msub = st_.mods.menuKey + L" in the game opens the mods menu";
         if (!settingsCompact_) { text(msub, df, x, y, w, sh, C::white, 0, 0, .55f); y += sh; }
         y += 8;
         return modsBody(x, y, w);
@@ -1750,11 +1750,13 @@ float App::settingsBody(float x, float y0, float w) {
 // cheat keys turn them on).
 constexpr int MOD_BODY = 0, MOD_RAGDOLL = 1, MOD_CONSOLE = 2, MOD_MENU = 3, MOD_FOV = 4, MOD_FPS = 5, MOD_FX = 6, MOD_SLOMO = 7, MOD_FLY = 8,
               MOD_AIM = 9, MOD_CONE = 10, MOD_GOD = 11, MOD_KEYS = 12, MOD_SPAWN = 13, MOD_N = 14;
-static const wchar_t* const kModLabel[MOD_N] = { L"Body sliders", L"Ragdoll on elimination", L"Engine console", L"Mods menu (F8)",
+static const wchar_t* const kModLabel[MOD_N] = { L"Body sliders", L"Ragdoll on elimination", L"Engine console", L"Mods menu",
     L"Field of view", L"FPS cap", L"No post effects", L"Slow motion", L"Fly (in a match)", L"Aim assist", L"Aim cone",
     L"God mode", L"Teleport and bot keys (F6 F7 F9)", L"Bots spawned with F9" };
-// the engine key names the console can take (InputSettings ConsoleKeys)
+// the engine key names the console can take (InputSettings ConsoleKeys), and the keys the mods menu can take (fnmods.dll's
+// message hook: pakpatch/fnkeys.c names); the two never share one
 static const wchar_t* const kModKeys[] = { L"F10", L"Tilde", L"F2", L"Insert" };
+static const wchar_t* const kMenuKeys[] = { L"F8", L"Home", L"End", L"PageUp", L"PageDown", L"Insert", L"Delete" };
 static const int kModFps[] = { 30, 60, 120, 144, 165, 240, 0 };
 static const float kModSlomo[] = { 0.1f, 0.25f, 0.5f, 0.75f };
 static const int kModCone[] = { 5, 10, 15, 20, 30, 45, 60, 90, 180 };
@@ -1783,6 +1785,7 @@ static bool* modSwitch(Mods& m, int i) {   // nullptr = a value only
 static std::wstring modValue(const Mods& m, int i) {   // "" = a switch only
     switch (i) {
     case MOD_CONSOLE: return m.consoleKey;
+    case MOD_MENU: return m.menuKey;
     case MOD_FOV: return fmt(L"%d\u00b0", m.fovValue);
     case MOD_FPS: return m.fpsValue ? fmt(L"%d fps", m.fpsValue) : L"No cap";
     case MOD_SLOMO: return fmt(L"%g\u00d7", m.slomoValue);
@@ -1799,7 +1802,15 @@ static void modStep(Mods& m, int i, int d) {
     case MOD_CONSOLE: {
         int n = (int)(sizeof kModKeys / sizeof kModKeys[0]), k = 0;
         for (int j = 0; j < n; j++) if (m.consoleKey == kModKeys[j]) k = j;
-        m.consoleKey = kModKeys[(k + d + n) % n];
+        do k = (k + d + n) % n; while (m.menuKey == kModKeys[k]);
+        m.consoleKey = kModKeys[k];
+        break;
+    }
+    case MOD_MENU: {
+        int n = (int)(sizeof kMenuKeys / sizeof kMenuKeys[0]), k = 0;
+        for (int j = 0; j < n; j++) if (m.menuKey == kMenuKeys[j]) k = j;
+        do k = (k + d + n) % n; while (m.consoleKey == kMenuKeys[k]);
+        m.menuKey = kMenuKeys[k];
         break;
     }
     case MOD_FOV: m.fovValue = std::max(60, std::min(120, m.fovValue + 5 * d)); break;
@@ -1832,21 +1843,43 @@ static void modStep(Mods& m, int i, int d) {
     }
     }
 }
+// "F6 F9": the cheat keys among modKeysHeld_
+static std::wstring modKeysHeldText(uint32_t held) {
+    std::wstring s;
+    if (held & 4) s += L"F6";
+    if (held & 8) s += s.empty() ? L"F7" : L" F7";
+    if (held & 16) s += s.empty() ? L"F9" : L" F9";
+    return s;
+}
 bool App::modsBuild(const Build* b) const { return b && b->major == 14 && b->minor == 30; }
 
 float App::modsBody(float x, float y, float w) {
     Font rf{ Face::UI, 13.5f, 400, false }, sf{ Face::UI, 12, 500, false }, af{ Face::UI, 16, 600, false };
+    // the mod keys another program holds as hotkeys (they never reach the game): checked again every 2 s
+    DWORD now = GetTickCount();
+    if (!modKeysAt_ || now - modKeysAt_ > 2000) {
+        const Mods& m = st_.mods;
+        modKeysAt_ = now ? now : 1;
+        modKeysHeld_ = (m.menu && core_->modKeyHeld(m.menuKey) ? 1 : 0) | (m.console && core_->modKeyHeld(m.consoleKey) ? 2 : 0) |
+                       (m.cheatKeys && core_->modKeyHeld(L"F6") ? 4 : 0) | (m.cheatKeys && core_->modKeyHeld(L"F7") ? 8 : 0) |
+                       (m.cheatKeys && core_->modKeyHeld(L"F9") ? 16 : 0);
+    }
     for (int i = 0; i < MOD_N; i++) {
         Mods m = st_.mods;
         bool* swp = modSwitch(m, i);
         // a value-only row follows the switch that turns it on (the aim cone the aim assist, the bots the keys)
         bool on = swp ? *swp : i == MOD_CONE ? m.aim : m.cheatKeys;
         std::wstring v = modValue(m, i);
+        // a held key: marked on its row (its tooltip says what to do)
+        bool held = (i == MOD_MENU && (modKeysHeld_ & 1)) || (i == MOD_CONSOLE && (modKeysHeld_ & 2)) || (i == MOD_KEYS && (modKeysHeld_ & 28));
+        if (held && !v.empty()) v += L" \u00b7 in use";
         float sww = swp ? 30.f + 12 : 0.f;
         float stw = v.empty() ? 0.f : std::min(140.f, w - textW(kModLabel[i], rf) - sww - 24);
         if (stw < 70) stw = 0;
         fill(rc(x, y, w, 1), C::white, .1f);
-        text(kModLabel[i], rf, x, y, w - sww - (stw > 0 ? stw + 12 : 0), 44, C::white);
+        std::wstring label = kModLabel[i];
+        if (held && i == MOD_KEYS) label = L"Teleport and bot keys (" + modKeysHeldText(modKeysHeld_) + L" in use)";
+        text(label, rf, x, y, w - sww - (stw > 0 ? stw + 12 : 0), 44, held ? C::warnText : C::white);
         int id = ID_MS0 + i;
         float sx = x + w - 30, sy = y + (44 - 17) / 2;
         if (swp) {
@@ -1865,7 +1898,7 @@ float App::modsBody(float x, float y, float w) {
             if (hover_ == dn) fill(rc(bx + 3, by + 3, 24, 24), C::hover, 1, 6);
             if (hover_ == up) fill(rc(bx + stw - 27, by + 3, 24, 24), C::hover, 1, 6);
             text(L"\u2039", af, bx + 3, by + 1, 24, 26, hover_ == dn ? C::text : C::muted, 1);
-            text(v, sf, bx + 27, by + 3, stw - 54, 24, C::text, 1);
+            text(v, sf, bx + 27, by + 3, stw - 54, 24, held ? C::warnText : C::text, 1);
             text(L"\u203a", af, bx + stw - 27, by + 1, 24, 26, hover_ == up ? C::text : C::muted, 1);
             alpha_ = a0;
             hit(dn, rc(bx + 3, by + 3, 24, 24), F_FOCUS | F_HAND, 6);
@@ -1884,6 +1917,7 @@ void App::setSettingsTab(int tab) {
 }
 void App::setMods(const Mods& m) {
     st_.mods = m;
+    modKeysAt_ = 0;   // the keys checked again
     core_->saveMods(m);
     invalidate();
 }
@@ -2227,6 +2261,11 @@ void App::setHover(int id) {
     updateTip();
 }
 
+// the tooltip of a mod key another program holds
+static std::wstring modHeldTip(const std::wstring& keys) {
+    return keys + L" is a hotkey of another program (an AutoHotkey script, for one): Windows gives it to that program and the "
+           L"game never gets it. Close that program or pick another key";
+}
 std::wstring App::tooltip(int id) const {
     if (id >= ID_PORT && id < ID_P_END) return portTip(id);
     const Build* b = sel();
@@ -2248,8 +2287,12 @@ std::wstring App::tooltip(int id) const {
     case ID_STAB1: return L"Game mods for this build (Fortnite 14.30)";
     case ID_MS0 + MOD_BODY: return L"The body sliders of imported custom skins";
     case ID_MS0 + MOD_RAGDOLL: return L"Eliminated players fall as ragdolls";
-    case ID_MS0 + MOD_CONSOLE: case ID_MD0 + MOD_CONSOLE: case ID_MU0 + MOD_CONSOLE: return L"Unreal's console in the game: its key opens it, twice for the full console";
-    case ID_MS0 + MOD_MENU: return L"F8 in the game: change these while playing (for that game only)";
+    case ID_MS0 + MOD_CONSOLE: case ID_MD0 + MOD_CONSOLE: case ID_MU0 + MOD_CONSOLE:
+        if (modKeysHeld_ & 2) return modHeldTip(st_.mods.consoleKey);
+        return L"Unreal's console in the game: its key opens it, twice for the full console";
+    case ID_MS0 + MOD_MENU: case ID_MD0 + MOD_MENU: case ID_MU0 + MOD_MENU:
+        if (modKeysHeld_ & 1) return modHeldTip(st_.mods.menuKey);
+        return st_.mods.menuKey + L" in the game: change these while playing (for that game only)";
     case ID_MS0 + MOD_FOV: case ID_MD0 + MOD_FOV: case ID_MU0 + MOD_FOV: return L"The camera's field of view, 60 to 120 degrees";
     case ID_MS0 + MOD_FPS: case ID_MD0 + MOD_FPS: case ID_MU0 + MOD_FPS: return L"The game's frame rate limit";
     case ID_MS0 + MOD_FX: return L"Motion blur, depth of field, bloom, lens flares, color fringe and film grain off";
@@ -2258,8 +2301,10 @@ std::wstring App::tooltip(int id) const {
     case ID_MS0 + MOD_AIM: case ID_MD0 + MOD_AIM: case ID_MU0 + MOD_AIM: return L"In a match, while the right mouse button is held: the camera turns to the nearest visible enemy's head";
     case ID_MD0 + MOD_CONE: case ID_MU0 + MOD_CONE: return L"The aim assist takes enemies at most this far off the crosshair";
     case ID_MS0 + MOD_GOD: return L"In a match: you take no damage";
-    case ID_MS0 + MOD_KEYS: return L"In a match: F6 teleports to the crosshair, F7 to your map pin, F9 spawns bots around you (also in the F8 menu)";
-    case ID_MD0 + MOD_SPAWN: case ID_MU0 + MOD_SPAWN: return L"How many bots F9 and the F8 menu spawn, and on which side";
+    case ID_MS0 + MOD_KEYS:
+        if (modKeysHeld_ & 28) return modHeldTip(modKeysHeldText(modKeysHeld_));
+        return L"In a match: F6 teleports to the crosshair, F7 to your map pin, F9 spawns bots around you (also in the " + st_.mods.menuKey + L" menu)";
+    case ID_MD0 + MOD_SPAWN: case ID_MU0 + MOD_SPAWN: return L"How many bots F9 and the " + st_.mods.menuKey + L" menu spawn, and on which side";
     case ID_PROFILE: return L"Your save: level, battle pass, V-bucks, items and locker. A new name starts a new one";
     case ID_BUILDMENU: return L"Build actions";
     case ID_ACT: return L"Activity (Ctrl+L)";

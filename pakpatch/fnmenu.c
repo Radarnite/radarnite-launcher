@@ -1,5 +1,5 @@
 /*
- * fnmenu.c - the in-game menu of fnmods.dll on F8 (#included by fnmods.c): the settings of fnsettings.c, the cheats of
+ * fnmenu.c - the in-game menu of fnmods.dll on F8, or the key mods.json gives it (#included by fnmods.c): the settings of fnsettings.c, the cheats of
  * fncheats.c (their switches, and Enter runs the teleports and the bot spawn) and the console, changed while playing. Changes last for the session; mods.json stays the launcher's.
  *
  * Drawn by the engine, on the canvas of the player's HUD: UGameViewportClient::Draw calls AHUD::PostRender on every
@@ -15,8 +15,9 @@
  * fullscreen and in the engine's screenshots. While the menu is open the HUD's bShowHUD is kept on (put back as it
  * was when it closes).
  * Keys: the WM_KEYDOWN / WM_KEYUP messages of the game window, seen in fnmods.c's message hook before the game gets
- * them; F8 toggles the menu, and while it is open the arrows, Enter, Escape and Backspace are the menu's (taken from
- * the game). Nothing else is taken.
+ * them; the menu key (F8 by default) toggles the menu (a held key's repeats do not), and while it is open the arrows,
+ * Enter, Escape and Backspace are the menu's (taken from the game). Nothing else is taken. A key another program holds as
+ * a system-wide hotkey never reaches the game window (fnmods.c checks the keys and logs it).
  */
 
 /* the first five keep their places: the mods test (fntest.c) reaches them with the arrows */
@@ -140,8 +141,9 @@ static void menu_draw(void)
     m_rect(x, y, w, 3 * k, accent);
     float cy = y + pad;
     m_text(L"RADARNITE MODS", x + pad, cy + (lh - 26 * k) / 2, ts * 0.95f, accent);
-    float hw = m_width(L"F8 to close", ts * 0.8f, NULL);
-    m_text(L"F8 to close", x + w - pad - hw, cy + (lh - 22 * k) / 2, ts * 0.8f, mute);
+    wchar_t close[40]; swprintf(close, 40, L"%hs to close", g_cfg.menu_key);
+    float hw = m_width(close, ts * 0.8f, NULL);
+    m_text(close, x + w - pad - hw, cy + (lh - 22 * k) / 2, ts * 0.8f, mute);
     cy += lh;
     for (int i = 0; i < MI_N; i++) {
         if (i == g_menu_sel) m_rect(x + 8 * k, cy, w - 16 * k, lh, sel);
@@ -266,11 +268,15 @@ static void menu_set_open(int open)
     g_menu_open = open;
     logf_("menu: %s", open ? "open" : "closed");
 }
-static int menu_key(UINT msg, WPARAM vk)
+static int menu_key(UINT msg, WPARAM vk, LPARAM lp)
 {
-    if (!g_cfg.menu || MN.state <= 0 || MN.dead) return 0;
-    int down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-    if (vk == VK_F8) { if (down) menu_set_open(!g_menu_open); return 1; }
+    int down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN, mk = vk == key_vk(g_cfg.menu_key);
+    if (!g_cfg.menu || MN.state <= 0 || MN.dead) {
+        static int said;   /* once: the key came, the menu could not open */
+        if (mk && down && !said) { said = 1; logf_("menu: %s pressed, but the menu is %s", g_cfg.menu_key, !g_cfg.menu ? "off in mods.json" : MN.dead ? "off after a fault" : "not ready yet (it gets ready in the lobby)"); }
+        return 0;
+    }
+    if (mk) { if (down && !(lp & (1 << 30))) menu_set_open(!g_menu_open); return 1; }
     if (!g_menu_open) return 0;
     switch (vk) {
     case VK_UP: if (down) g_menu_sel = (g_menu_sel + MI_N - 1) % MI_N; return 1;

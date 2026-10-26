@@ -357,14 +357,14 @@ static int marker_swap(void *o)
 }
 
 /* ---- keys (message hook, game thread): 1 = the game does not get it */
-static int cheats_key(UINT msg, WPARAM vk)
+static int cheats_key(UINT msg, WPARAM vk, LPARAM lp)
 {
     if (msg == WM_RBUTTONDOWN) { g_rmb = 1; return 0; }
     if (msg == WM_RBUTTONUP) { g_rmb = 0; return 0; }
     if (!g_cfg.keys || CH.state <= 0 || SA.standalone || !SA.pc) return 0;
     int a = vk == VK_F6 ? 1 : vk == VK_F7 ? 2 : vk == VK_F9 ? 3 : 0;
     if (!a) return 0;
-    if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) g_ch_action = a;
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30))) g_ch_action = a;   /* not a held key's repeats */
     return 1;
 }
 

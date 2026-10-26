@@ -10,13 +10,17 @@
  *   console   fnconsole.c   the engine console (Shipping builds have none)
  *   settings  fnsettings.c  field of view, frame rate cap, post effects, slow motion, fly
  *   cheats    fncheats.c    aim assist, teleports (crosshair, map pin, random POI), bot spawns, god mode (match only)
- *   menu      fnmenu.c      the in-game menu on F8 for the settings and the console
+ *   menu      fnmenu.c      the in-game menu on F8 (or its key in mods.json) for the settings, the cheats and the console
+ *   (keys     fnkeys.c      the mod keys' names and the check for keys another program holds; not a module)
  *   test      fntest.c      developer test hooks (environment variables only; the launcher never sets them)
  * The host:
  *   - finds the engine once for all of them (object array, ProcessEvent, name pool) on a worker thread, then runs the
  *     modules on the game thread, from a WH_GETMESSAGE hook on the thread that owns the game window, woken about once a
  *     frame (16 ms) by a posted thread message (UE pumps messages once per frame with PeekMessage); the same hook sees
  *     the game window's key messages first (the menu's keys);
+ *   - checks the mod keys (the menu's, the console's, F6 F7 F9) when it hooks and whenever mods.json changes them: a key
+ *     another program holds as a system-wide hotkey (RegisterHotKey: an AutoHotkey script's plain "F8::", ...) is
+ *     handed to that program by Windows and never reaches the game, so each such key is logged;
  *   - runs every module's tick under its own fault guard: a fault in this DLL's code inside one module turns that module
  *     off for the session, the others and the game go on (FNMODS_TEST_FAULT=<module> makes one fault on purpose);
  *   - logs, once in the lobby and once in the first match, a table of every class, property and function each module
@@ -39,6 +43,7 @@ static void test_on_death(void *pawn, int ragdoll);
 static DWORD g_game_tid;   /* the game thread (set once its window is found) */
 
 #include "fnengine.c"
+#include "fnkeys.c"
 #include "fnconfig.c"
 #include "fnbody.c"
 #include "fnragdoll.c"
@@ -169,11 +174,13 @@ static LRESULT CALLBACK getmsg(int code, WPARAM wp, LPARAM lp)
             InterlockedExchange(&g_pending, 0);
         } else if (m->message == WM_KEYDOWN || m->message == WM_KEYUP || m->message == WM_SYSKEYDOWN || m->message == WM_SYSKEYUP) {
             int down = m->message == WM_KEYDOWN || m->message == WM_SYSKEYDOWN;
+            static int said;   /* once: keys reach the game window (a mod key that never shows is held elsewhere) */
+            if (down && !said) { said = 1; logf_("input: first key of the game window (virtual key 0x%x)", (unsigned)m->wParam); }
             if (m->wParam == VK_SPACE) g_key_up = down;
             if (m->wParam == VK_CONTROL || m->wParam == VK_LCONTROL) g_key_down = down;
-            if (menu_key(m->message, m->wParam) || cheats_key(m->message, m->wParam)) m->message = WM_NULL;
+            if (menu_key(m->message, m->wParam, m->lParam) || cheats_key(m->message, m->wParam, m->lParam)) m->message = WM_NULL;
         } else if (m->message == WM_RBUTTONDOWN || m->message == WM_RBUTTONUP) {
-            cheats_key(m->message, m->wParam);
+            cheats_key(m->message, m->wParam, m->lParam);
         }
     }
     return CallNextHookEx(NULL, code, wp, lp);
@@ -186,6 +193,32 @@ static BOOL CALLBACK enum_cb(HWND w, LPARAM lp)
     GetWindowThreadProcessId(w, &pid);
     if (pid == f->pid && GetClassNameA(w, cls, sizeof cls) && !strcmp(cls, "UnrealWindow")) { f->w = w; return FALSE; }
     return TRUE;
+}
+
+/* ---------------------------------------------------------------- the mod keys (worker thread) */
+static void keys_check(const mods_cfg *c)
+{
+    static char last[96];
+    char now[96]; snprintf(now, sizeof now, "%d %s %d %s %d", c->menu, c->menu_key, c->console, c->console_key, c->keys);
+    if (!strcmp(now, last)) return;   /* only when the keys or their switches change */
+    strcpy(last, now);
+    struct { const char *key, *what; int on; } k[] = {
+        { c->menu_key, "the mods menu", c->menu }, { c->console_key, "the console", c->console },
+        { "F6", "a cheat key", c->keys }, { "F7", "a cheat key", c->keys }, { "F9", "a cheat key", c->keys },
+    };
+    int taken = 0, n = 0;
+    for (int i = 0; i < (int)(sizeof k / sizeof k[0]); i++) {
+        UINT vk = k[i].on ? key_vk(k[i].key) : 0;
+        if (!vk) continue;
+        n++;
+        if (key_taken(vk)) {
+            taken++;
+            logf_("input: %s (%s) is a system-wide hotkey of another program (an AutoHotkey script, ...): Windows gives the key to "
+                  "that program and the game never gets it; close that program%s", k[i].key, k[i].what, i < 2 ? " or choose another key in the Mods tab" : "");
+        }
+    }
+    if (c->menu && c->console && !strcmp(c->menu_key, c->console_key)) logf_("input: the menu and the console have the same key %s: the menu takes it", c->menu_key);
+    logf_("input: %d mod keys checked, %d held by another program", n, taken);
 }
 
 /* ---------------------------------------------------------------- setup (worker thread) */
@@ -225,10 +258,14 @@ static DWORD WINAPI worker(LPVOID unused)
     if (!h) { logf_("FAIL: SetWindowsHookEx %lu", GetLastError()); return 0; }
     g_ready_tick = GetTickCount();
     logf_("game thread %lu hooked (message 0x%x); waking it every 16 ms", g_game_tid, g_msg);
+    keys_check(&g_cfg_file);
     DWORD posted = 0;
     for (unsigned k = 1; ; k++) {
         Sleep(16);   /* about once a frame: a slider drag shows on the body in the same frame the game writes it */
-        if (k % 64 == 0) cfg_poll();   /* about once a second: mods.json saved by the launcher while the game runs */
+        if (k % 64 == 0 && cfg_poll()) {   /* about once a second: mods.json saved by the launcher while the game runs */
+            mods_cfg c; EnterCriticalSection(&g_cfg_lock); c = g_cfg_file; LeaveCriticalSection(&g_cfg_lock);
+            keys_check(&c);
+        }
         if (InterlockedCompareExchange(&g_pending, 1, 0) == 0) {
             if (!PostThreadMessageA(g_game_tid, g_msg, 0, 0)) { InterlockedExchange(&g_pending, 0); if (!IsWindow(f.w)) break; }
             else posted++;

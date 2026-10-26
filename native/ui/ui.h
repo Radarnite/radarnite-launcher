@@ -251,6 +251,8 @@ private:
     int tabEnsure_ = -1;        // build index to scroll into view on the next frame
     bool settingsCompact_ = false;   // the match settings without their subtitle (a short window)
     int settingsTab_ = -1;           // 0 match settings, 1 mods (builds with fnmods.dll); -1 = not read from the prefs yet
+    uint32_t modKeysHeld_ = 0;       // the Mods tab: mod keys another program holds (1 menu, 2 console, 4 F6, 8 F7, 16 F9)
+    DWORD modKeysAt_ = 0;            // when they were checked (again every 2 s while the tab shows; 0 = now)
     D2D1_RECT_F playRect_{};
     float playRadius_ = 16;
     bool playShown_ = false, playDisabled_ = false;

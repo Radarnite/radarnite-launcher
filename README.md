@@ -13,7 +13,7 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
   item shop limited to what the build has), Legal with infinite V-bucks, or everything unlocked.
 - Ragdoll deaths on 14.30: eliminated players fall with physics instead of the digitize effect.
 - Mods for 14.30, on or off in the Mods tab: the engine console (F10), an in-game menu (F8), field of view, FPS cap,
-  no post effects, slow motion and fly.
+  no post effects, slow motion and fly. Both keys can be changed; a key another program holds as a hotkey is marked.
 - Match cheats for 14.30 (Mods tab and F8 menu): aim assist, teleport to the crosshair, the map pin or a random POI,
   spawn bots around you (enemies or teammates), god mode.
 - One-click firewall rules so a build can never reach the internet.

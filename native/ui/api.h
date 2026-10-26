@@ -54,7 +54,7 @@ struct Config {
 struct Mods {
     bool body = true, ragdoll = true;
     bool console = true; std::wstring consoleKey = L"F10";
-    bool menu = true;
+    bool menu = true; std::wstring menuKey = L"F8";
     bool fov = false; int fovValue = 90;           // 60-120 degrees
     bool fps = false; int fpsValue = 60;           // 0 = no cap
     bool noPostFx = false;
@@ -194,6 +194,9 @@ struct Core {
     virtual void saveConfig(const ConfigPatch& p) = 0;
     // The Mods tab: the whole of mods.json written (the window keeps its own copy, like the config).
     virtual void saveMods(const Mods& m) = 0;
+    // A mod key (a key name of mods.json: "F8", "Home" ...) that another program holds as a system-wide hotkey (an
+    // AutoHotkey script's plain "F8::", ...): Windows hands it to that program and the game never gets it.
+    virtual bool modKeyHeld(const std::wstring& key) = 0;
     // Per-user window preferences the 2.x page kept in localStorage ("lastBuild", "activityHeight").
     // The core decides where they live; "" = not set.
     virtual std::wstring uiPref(const wchar_t* key) = 0;
