@@ -1716,7 +1716,8 @@ public:
 		return NewName;
 	}
 
-	void Initialize(const FTransform& SpawnTransform, AActor* InSpawnLocator)
+	// ForceTeam >= 0: the bot joins that team instead of the one PickTeam gives (Radarnite: fnmods.dll's "spawnbots n team")
+	void Initialize(const FTransform& SpawnTransform, AActor* InSpawnLocator, int ForceTeam = -1)
 	{
 		auto GameState = Cast<AFortGameStateAthena>(GetWorld()->GetGameState());
 		auto GameMode = Cast<AFortGameModeAthena>(GetWorld()->GetGameMode());
@@ -1775,7 +1776,7 @@ public:
 		LOG_INFO(LogBots, "BotNewName: {}", BotNewName.ToString());
 		SetName(BotNewName);
 
-		PlayerState->GetTeamIndex() = GameMode->Athena_PickTeamHook(GameMode, 0, Controller);
+		PlayerState->GetTeamIndex() = ForceTeam >= 0 ? (uint8)ForceTeam : GameMode->Athena_PickTeamHook(GameMode, 0, Controller);
 
 		static auto SquadIdOffset = PlayerState->GetOffset("SquadId", false);
 
@@ -1818,10 +1819,10 @@ inline std::vector<PlayerBot> AllPlayerBotsToTick; // fnoffline: was 'static' (o
 
 namespace Bots
 {
-	static AController* SpawnBot(FTransform SpawnTransform, AActor* InSpawnLocator)
+	static AController* SpawnBot(FTransform SpawnTransform, AActor* InSpawnLocator, int ForceTeam = -1)
 	{
 		auto playerBot = PlayerBot();
-		playerBot.Initialize(SpawnTransform, InSpawnLocator);
+		playerBot.Initialize(SpawnTransform, InSpawnLocator, ForceTeam);
 		AllPlayerBotsToTick.push_back(playerBot);
 		return playerBot.Controller;
 	}
