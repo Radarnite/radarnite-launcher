@@ -8,6 +8,68 @@
 
 std::map<std::string, FVector> Waypoints;
 
+// Radarnite (fnmods.dll's cheats: tpto, tpground, tppoi, spawnbots): the pawn's capsule, a trace on the match world and a
+// teleport that puts the pawn's feet on a point.
+static float RnCapsule(APawn* Pawn, bool bRadius)
+{
+	static auto CapsuleOffset = Pawn->GetOffset("CapsuleComponent", false);
+	static auto HalfHeightFn = FindObject<UFunction>(L"/Script/Engine.CapsuleComponent.GetScaledCapsuleHalfHeight");
+	static auto RadiusFn = FindObject<UFunction>(L"/Script/Engine.CapsuleComponent.GetScaledCapsuleRadius");
+	auto Capsule = CapsuleOffset != -1 ? Pawn->Get<UObject*>(CapsuleOffset) : nullptr;
+	auto Fn = bRadius ? RadiusFn : HalfHeightFn;
+	if (!Capsule || !Fn)
+		return 0.f;
+	struct { float ReturnValue; } Params{};
+	Capsule->ProcessEvent(Fn, &Params);
+	return Params.ReturnValue;
+}
+
+// UKismetSystemLibrary::LineTraceSingle on the visibility channel (TraceTypeQuery1); Ignore (if any) is the world context
+// object and bIgnoreSelf leaves it out
+static bool RnTrace(const FVector& Start, const FVector& End, UObject* Ignore, FVector* OutPoint)
+{
+	static auto Fn = FindObject<UFunction>(L"/Script/Engine.KismetSystemLibrary.LineTraceSingle");
+	static auto Ksl = FindObject(L"/Script/Engine.Default__KismetSystemLibrary");
+	if (!Fn || !Ksl)
+		return false;
+	static int OCtx = Fn->GetOffsetFunc("WorldContextObject"), OStart = Fn->GetOffsetFunc("Start"), OEnd = Fn->GetOffsetFunc("End"),
+		OChannel = Fn->GetOffsetFunc("TraceChannel"), OHit = Fn->GetOffsetFunc("OutHit"), OSelf = Fn->GetOffsetFunc("bIgnoreSelf"),
+		ORet = Fn->GetOffsetFunc("ReturnValue");
+	static int OImpact = FindOffsetStruct("/Script/Engine.HitResult", "ImpactPoint");
+	std::vector<uint8> Params(Fn->GetPropertiesSize() + 16, 0);
+	auto P = Params.data();
+	*(UObject**)(P + OCtx) = Ignore ? Ignore : GetWorld();
+	*(FVector*)(P + OStart) = Start;
+	*(FVector*)(P + OEnd) = End;
+	*(uint8*)(P + OChannel) = 0;
+	*(bool*)(P + OSelf) = Ignore != nullptr;
+	Ksl->ProcessEvent(Fn, P);
+	bool bHit = *(bool*)(P + ORet);
+	if (bHit && OutPoint)
+		*OutPoint = *(FVector*)(P + OHit + OImpact);
+	return bHit;
+}
+
+// the ground under X Y: the highest surface within 1 km above and below Z, else a trace down through the whole world
+// (HALF_WORLD_MAX, UE 4.26 EngineDefines.h)
+static bool RnGround(float X, float Y, float Z, UObject* Ignore, FVector* OutPoint)
+{
+	constexpr float HalfWorldMax = 1048576.f, Range = 100000.f;
+	return RnTrace(FVector(X, Y, Z + Range), FVector(X, Y, Z - Range), Ignore, OutPoint) ||
+		RnTrace(FVector(X, Y, HalfWorldMax), FVector(X, Y, -HalfWorldMax), Ignore, OutPoint);
+}
+
+static void RnTeleportFeet(AFortPlayerController* PlayerController, APawn* Pawn, const FVector& Feet, const char* What)
+{
+	float Half = RnCapsule(Pawn, false);
+	FVector Dest(Feet.X, Feet.Y, Feet.Z + Half);
+	bool bOk = Pawn->TeleportTo(Dest, Pawn->GetActorRotation());
+	auto Now = Pawn->GetActorLocation();
+	LOG_INFO(LogDev, "[radarnite] teleport ({}): feet to {:.0f} {:.0f} {:.0f}, actor at {:.0f} {:.0f} {:.0f} (half height {:.0f}, {})", What, Feet.X, Feet.Y, Feet.Z,
+		Now.X, Now.Y, Now.Z, Half, bOk ? "done" : "refused");
+	SendMessageToConsole(PlayerController, bOk ? L"Teleported!" : L"Teleport refused (no room there)");
+}
+
 void ServerCheatHook(AFortPlayerControllerAthena* PlayerController, FString Msg)
 {
 	bool isMsgEmpty = !Msg.Data.Data || Msg.Data.Num() <= 0;
@@ -562,7 +624,14 @@ void ServerCheatHook(AFortPlayerControllerAthena* PlayerController, FString Msg)
 				return;
 			}
 
-			Pawn->SetCanBeDamaged(!Pawn->CanBeDamaged());
+			// Radarnite: "god on" / "god off" set it (fnmods.dll sends it again for every new pawn); no argument toggles
+			bool bGod = !Pawn->CanBeDamaged();
+
+			if (NumArgs >= 1)
+				bGod = Arguments[1] == "on" || Arguments[1] == "1" || Arguments[1] == "true";
+
+			Pawn->SetCanBeDamaged(!bGod);
+			LOG_INFO(LogDev, "[radarnite] god {} for {}", bGod ? "on" : "off", (void*)Pawn);
 			SendMessageToConsole(PlayerController, std::wstring(L"God set to " + std::to_wstring(!(bool)Pawn->CanBeDamaged())).c_str());
 		}
 		else if (Command == "applycid")
@@ -1103,6 +1172,234 @@ void ServerCheatHook(AFortPlayerControllerAthena* PlayerController, FString Msg)
 			LOG_INFO(LogDev, "{} for {} (client RPC {}, movement component {})", Command, (void*)Pawn, (void*)ClientFn, (void*)CMC);
 			SendMessageToConsole(PlayerController, bGhost ? L"Ghost: flying through walls" : bFly ? L"Flying" : L"Walking");
 		}
+		else if (Command == "tpto")
+		{
+			// Radarnite (fnmods.dll's teleport to the crosshair): the client traced its camera's ray, X Y Z is the hit point and
+			// NX NY NZ its normal. The feet go to the point, moved away from a wall by the capsule's radius times the normal's
+			// horizontal part (a wall's full radius, a floor's nothing); under a ceiling (a normal pointing down) the head
+			// goes to the point instead. AActor::TeleportTo moves the pawn out of anything it would still overlap.
+			if (NumArgs < 3)
+			{
+				SendMessageToConsole(PlayerController, L"Please provide X, Y and Z!");
+				return;
+			}
+
+			float V[6] = { 0, 0, 0, 0, 0, 1 };
+
+			for (size_t i = 0; i < 6 && i < NumArgs; i++)
+			{
+				try { V[i] = std::stof(Arguments[i + 1]); }
+				catch (...) {}
+			}
+
+			auto Pawn = Cast<APawn>(ReceivingController->GetPawn());
+
+			if (!Pawn)
+			{
+				SendMessageToConsole(PlayerController, L"No pawn to teleport!");
+				return;
+			}
+
+			float Radius = RnCapsule(Pawn, true);
+			FVector Feet(V[0] + V[3] * Radius, V[1] + V[4] * Radius, V[5] < 0 ? V[2] - 2 * RnCapsule(Pawn, false) : V[2]);
+
+			RnTeleportFeet(PlayerController, Pawn, Feet, "crosshair");
+		}
+		else if (Command == "tpground")
+		{
+			// Radarnite (fnmods.dll's teleport to the map pin): the feet on the ground at X Y (the highest surface there);
+			// Z is used when the trace finds nothing
+			if (NumArgs < 2)
+			{
+				SendMessageToConsole(PlayerController, L"Please provide X and Y!");
+				return;
+			}
+
+			float X{}, Y{}, Z{};
+			try { X = std::stof(Arguments[1]); } catch (...) {}
+			try { Y = std::stof(Arguments[2]); } catch (...) {}
+			if (NumArgs >= 3) { try { Z = std::stof(Arguments[3]); } catch (...) {} }
+
+			auto Pawn = Cast<APawn>(ReceivingController->GetPawn());
+
+			if (!Pawn)
+			{
+				SendMessageToConsole(PlayerController, L"No pawn to teleport!");
+				return;
+			}
+
+			FVector Ground(X, Y, Z);
+			bool bHit = RnGround(X, Y, Z, Pawn, &Ground);
+			LOG_INFO(LogDev, "[radarnite] tpground {:.0f} {:.0f} {:.0f}: ground {} at {:.0f}", X, Y, Z, bHit ? "found" : "not found", Ground.Z);
+			RnTeleportFeet(PlayerController, Pawn, bHit ? Ground : FVector(X, Y, Z), "map pin");
+		}
+		else if (Command == "tppoi")
+		{
+			// Radarnite (fnmods.dll's random POI): one of the map's POI volumes (FortPoiVolume), the feet on the ground at its
+			// centre
+			auto Pawn = Cast<APawn>(ReceivingController->GetPawn());
+
+			if (!Pawn)
+			{
+				SendMessageToConsole(PlayerController, L"No pawn to teleport!");
+				return;
+			}
+
+			static auto PoiClass = FindObject<UClass>(L"/Script/FortniteGame.FortPoiVolume");
+			std::vector<AActor*> Pois;
+
+			if (PoiClass)
+			{
+				auto Actors = UGameplayStatics::GetAllActorsOfClass(GetWorld(), PoiClass);
+
+				for (int i = 0; i < Actors.Num(); i++)
+					if (Actors.at(i))
+						Pois.push_back(Actors.at(i));
+
+				Actors.Free();
+			}
+
+			LOG_INFO(LogDev, "[radarnite] tppoi: FortPoiVolume {}, {} in the world", (void*)PoiClass, Pois.size());
+
+			if (Pois.empty())
+			{
+				SendMessageToConsole(PlayerController, L"No POIs on this map!");
+				return;
+			}
+
+			// a volume's actor sits at the origin and has no bounds of its own: the place is its PoiCollisionComp's location.
+			// The named locations (FortPoiVolume_Named_*) first, the landmarks (_UnNamed_) when there are none.
+			static auto CompLocFn = FindObject<UFunction>(L"/Script/Engine.SceneComponent.K2_GetComponentLocation");
+			auto PlaceOf = [&](AActor* A) {
+				static auto CompOffset = A->GetOffset("PoiCollisionComp", false);
+				auto Comp = CompOffset != -1 ? A->Get<UObject*>(CompOffset) : nullptr;
+				struct { FVector ReturnValue; } P{};
+				if (Comp && CompLocFn)
+					Comp->ProcessEvent(CompLocFn, &P);
+				return P.ReturnValue;
+			};
+			std::vector<std::pair<AActor*, FVector>> Named, Any;
+
+			for (auto A : Pois)
+			{
+				auto At = PlaceOf(A);
+				if (At.X == 0 && At.Y == 0 && At.Z == 0)
+					continue;
+				Any.push_back({ A, At });
+				if (A->GetName().find("_Named_") != std::string::npos)
+					Named.push_back({ A, At });
+			}
+
+			// the volumes of 14.30 have no place (their component sits at the origin, their bounds are empty): the POIs'
+			// building foundations instead (BuildingFoundation actors whose name has "POI"), each where its POI stands
+			if (Any.empty())
+			{
+				static auto FoundationClass = FindObject<UClass>(L"/Script/FortniteGame.BuildingFoundation");
+				auto Actors = FoundationClass ? UGameplayStatics::GetAllActorsOfClass(GetWorld(), FoundationClass) : TArray<AActor*>();
+				std::string Some;
+				int Total = Actors.Num();
+
+				for (int i = 0; i < Actors.Num(); i++)
+				{
+					auto A = Actors.at(i);
+					if (!A)
+						continue;
+					auto Name = A->GetName(), Upper = Name;
+					std::transform(Upper.begin(), Upper.end(), Upper.begin(), ::toupper);
+					if (Upper.find("POI") == std::string::npos)
+						continue;
+					auto At = A->GetActorLocation();
+					Any.push_back({ A, At });
+					if (Any.size() <= 12)
+						Some += " " + Name;
+				}
+
+				Actors.Free();
+				LOG_INFO(LogDev, "[radarnite] tppoi: {} building foundations, {} of POIs:{}", Total, Any.size(), Some);
+			}
+
+			auto& From = Named.empty() ? Any : Named;
+			LOG_INFO(LogDev, "[radarnite] tppoi: {} named locations, {} with a place", Named.size(), Any.size());
+
+			if (From.empty())
+			{
+				SendMessageToConsole(PlayerController, L"No POIs on this map!");
+				return;
+			}
+
+			auto [Poi, L] = From[std::rand() % From.size()];
+			FVector Ground(L.X, L.Y, L.Z);
+			bool bHit = RnGround(L.X, L.Y, L.Z, Pawn, &Ground);
+			LOG_INFO(LogDev, "[radarnite] tppoi: {} at {:.0f} {:.0f} {:.0f}, ground {}", Poi->GetFullName(), L.X, L.Y, L.Z, bHit ? "found" : "not found");
+			RnTeleportFeet(PlayerController, Pawn, Ground, "POI");
+		}
+		else if (Command == "spawnbots")
+		{
+			// Radarnite (fnmods.dll's bot spawn): <Count> bots of the match's bot code on a ring around the player, each on
+			// the ground; "team" puts them in the player's team, "enemy" (default) in the teams PickTeam gives
+			auto Pawn = Cast<APawn>(ReceivingController->GetPawn());
+
+			if (!Pawn)
+			{
+				SendMessageToConsole(PlayerController, L"No pawn to spawn bots at!");
+				return;
+			}
+
+			if (!PlayerBot::IsReadyToSpawnBot())
+			{
+				SendMessageToConsole(PlayerController, L"Bots can't be spawned yet!");
+				return;
+			}
+
+			int Count = 1;
+
+			if (NumArgs >= 1)
+			{
+				try { Count = std::stoi(Arguments[1]); }
+				catch (...) {}
+			}
+
+			Count = (std::max)(1, (std::min)(Count, 20));
+			bool bTeam = NumArgs >= 2 && Arguments[2] == "team";
+			int Team = bTeam ? (int)ReceivingPlayerState->GetTeamIndex() : -1;
+			auto Center = Pawn->GetActorLocation();
+			float Half = RnCapsule(Pawn, false);
+			float Radius = (std::max)(500.f, Count * 150.f / 6.2831853f);   // 5 m, or 1.5 m between bots
+			float Phase = (float)(std::rand() % 360) * 0.0174532925f;
+			int AmountSpawned = 0;
+
+			for (int i = 0; i < Count; i++)
+			{
+				float A = Phase + 6.2831853f * i / Count;
+				FVector At(Center.X + std::cos(A) * Radius, Center.Y + std::sin(A) * Radius, Center.Z);
+				FVector Ground;
+
+				if (RnTrace(FVector(At.X, At.Y, Center.Z + 500), FVector(At.X, At.Y, Center.Z - 5000), Pawn, &Ground))
+					At.Z = Ground.Z + Half;
+
+				FRotator Facing{};
+				Facing.Yaw = (float)(std::atan2(Center.Y - At.Y, Center.X - At.X) * 180.0 / 3.14159265358979);
+				FTransform Transform;
+				Transform.Translation = At;
+				Transform.Rotation = Facing.Quaternion();
+				Transform.Scale3D = FVector(1, 1, 1);
+
+				auto NewBot = Bots::SpawnBot(Transform, Pawn, Team);
+				auto BotPawn = NewBot ? NewBot->GetPawn() : nullptr;
+
+				if (BotPawn)
+				{
+					BotPawn->SetCanBeDamaged(true);
+					AmountSpawned++;
+					auto BotState = Cast<AFortPlayerStateAthena>(NewBot->GetPlayerState());
+					auto L = BotPawn->GetActorLocation();
+					LOG_INFO(LogDev, "[radarnite] spawnbots: bot {} team {} at {:.0f} {:.0f} {:.0f}", AmountSpawned, BotState ? (int)BotState->GetTeamIndex() : -1, L.X, L.Y, L.Z);
+				}
+			}
+
+			LOG_INFO(LogDev, "[radarnite] spawnbots: {} of {} spawned ({}, player team {})", AmountSpawned, Count, bTeam ? "team" : "enemy", (int)ReceivingPlayerState->GetTeamIndex());
+			SendMessageToConsole(PlayerController, (std::wstring(L"Spawned ") + std::to_wstring(AmountSpawned) + L" bots").c_str());
+		}
 		else if (Command == "bugitgo")
 		{
 			if (Arguments.size() <= 3)
@@ -1141,6 +1438,11 @@ void ServerCheatHook(AFortPlayerControllerAthena* PlayerController, FString Msg)
 cheat giveitem <ShortWID> <Count=1> - Gives a weapon to the executing player, if inventory is full drops a pickup on the player.
 cheat summon <BlueprintClassPathName> <Count=1> - Summons the specified blueprint class at the executing player's location. Note: There is a limit on the count.
 cheat bugitgo <X> <Y> <Z> - Teleport to a location.
+cheat tpto <X> <Y> <Z> <NX=0> <NY=0> <NZ=1> - Feet on a point (and its surface normal).
+cheat tpground <X> <Y> <Z> - Feet on the ground at X Y.
+cheat tppoi - Teleport to a random POI.
+cheat spawnbots <Count=1> <enemy|team> - Spawns bots around the player.
+cheat god <on|off> - God mode (no argument toggles).
 cheat slomo <Dilation=1> - Slow motion (time dilation of the match).
 cheat fly / ghost / walk - Fly, fly through walls, walk again.
 cheat launch <X> <Y> <Z> - Launches a player.
