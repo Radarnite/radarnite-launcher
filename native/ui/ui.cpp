@@ -1773,7 +1773,7 @@ static std::wstring modValue(const Mods& m, int i) {   // "" = a switch only
     case MOD_FOV: return fmt(L"%d\u00b0", m.fovValue);
     case MOD_FPS: return m.fpsValue ? fmt(L"%d fps", m.fpsValue) : L"No cap";
     case MOD_SLOMO: return fmt(L"%g\u00d7", m.slomoValue);
-    case MOD_FLY: return m.ghost ? L"Through walls" : L"Fly";
+    case MOD_FLY: return m.ghost ? L"Ghost" : L"Fly";
     default: return L"";
     }
 }
@@ -2217,7 +2217,7 @@ std::wstring App::tooltip(int id) const {
     case ID_MS0 + MOD_FPS: case ID_MD0 + MOD_FPS: case ID_MU0 + MOD_FPS: return L"The game's frame rate limit";
     case ID_MS0 + MOD_FX: return L"Motion blur, depth of field, bloom, lens flares, color fringe and film grain off";
     case ID_MS0 + MOD_SLOMO: case ID_MD0 + MOD_SLOMO: case ID_MU0 + MOD_SLOMO: return L"The whole game slower (in a match the match server does it)";
-    case ID_MS0 + MOD_FLY: case ID_MD0 + MOD_FLY: case ID_MU0 + MOD_FLY: return L"In a match: Space up, Ctrl down; Through walls also passes walls";
+    case ID_MS0 + MOD_FLY: case ID_MD0 + MOD_FLY: case ID_MU0 + MOD_FLY: return L"In a match: Space up, Ctrl down; Ghost also flies through walls";
     case ID_PROFILE: return L"Your save: level, battle pass, V-bucks, items and locker. A new name starts a new one";
     case ID_BUILDMENU: return L"Build actions";
     case ID_ACT: return L"Activity (Ctrl+L)";

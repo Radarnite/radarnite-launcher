@@ -119,6 +119,22 @@ static void mt_init(void)
 static void mt_chars(const char *s) { for (; *s; s++) PostMessageA(g_game_hwnd, WM_CHAR, (WPARAM)(u8)*s, 1); }
 static void mt_shot(void *pc, const char *what) { logf_("test: screenshot: %s", what); console(pc, L"shot showui"); }
 static void mt_keys(const UINT *vk, int n) { for (int i = 0; i < n; i++) post_key(vk[i]); }
+/* what the match's mods did, measured: the pawn's height (AActor::K2_GetActorLocation) and the world's time dilation
+   as the client sees it (UGameplayStatics::GetGlobalTimeDilation: the server's WorldSettings value, replicated) */
+static void mt_measure(void *pc, void *pawn, const char *what)
+{
+    static ufn loc, dil; static int o_loc = -1, o_dctx = -1, o_dret = -1, done;
+    if (!done) {
+        done = 1;
+        loc = fn_of(find_class("/Script/Engine", "Actor"), "K2_GetActorLocation"); o_loc = parm(loc, "ReturnValue");
+        dil = fn_of(gps() ? AT(gps(), O_CLASS, void *) : NULL, "GetGlobalTimeDilation");
+        o_dctx = parm(dil, "WorldContextObject"); o_dret = parm(dil, "ReturnValue");
+    }
+    float z = NAN, td = NAN;
+    if (loc.fn && o_loc >= 0) { u8 p[256]; memset(p, 0, sizeof p); call(pawn, loc, p); z = ((float *)(p + o_loc))[2]; }
+    if (dil.fn && o_dctx >= 0 && o_dret >= 0) { u8 p[256]; memset(p, 0, sizeof p); AT(p, o_dctx, void *) = pc; call(gps(), dil, p); td = AT(p, o_dret, float); }
+    logf_("test: %s: pawn height %.1f, time dilation %.2f, movement mode %d", what, z, td, movement_mode(pawn));
+}
 static void mt_tick(void)
 {
     if (!g_mt || !g_game_hwnd) return;
@@ -155,13 +171,13 @@ static void mt_tick(void)
     if (!pawn) { g_mt_since = 0; return; }
     if (!g_mt_since) { g_mt_since = now; g_mt_next = now + 25000; logf_("test: pawn %p in the match: mods test in 25 s", pawn); return; }
     switch (g_mt_step++) {
-    case 0: mt_shot(pc, "match"); g_mt_next = now + 1500; break;
+    case 0: mt_measure(pc, pawn, "match"); mt_shot(pc, "match"); g_mt_next = now + 1500; break;
     case 1: { static const UINT k[] = { VK_F8, VK_DOWN, VK_DOWN, VK_DOWN, VK_DOWN, VK_RETURN }; g_menu_sel = 0; mt_keys(k, sizeof k / sizeof k[0]); g_mt_next = now + 2000; break; }
-    case 2: mt_shot(pc, "match, menu: fly on"); g_mt_next = now + 1000; break;
-    case 3: post_key(VK_F8); PostMessageA(g_game_hwnd, WM_KEYDOWN, VK_SPACE, 1 | ((LPARAM)MapVirtualKeyA(VK_SPACE, MAPVK_VK_TO_VSC) << 16)); g_mt_next = now + 2500; break;
-    case 4: mt_shot(pc, "match, flying up (Space held)"); g_mt_next = now + 1500; break;
+    case 2: mt_measure(pc, pawn, "fly on"); mt_shot(pc, "match, menu: fly on"); g_mt_next = now + 1000; break;
+    case 3: mt_measure(pc, pawn, "Space down"); post_key(VK_F8); PostMessageA(g_game_hwnd, WM_KEYDOWN, VK_SPACE, 1 | ((LPARAM)MapVirtualKeyA(VK_SPACE, MAPVK_VK_TO_VSC) << 16)); g_mt_next = now + 2500; break;
+    case 4: mt_measure(pc, pawn, "Space held 2.5 s"); mt_shot(pc, "match, flying up (Space held)"); g_mt_next = now + 1500; break;
     case 5: { LPARAM sc = (LPARAM)MapVirtualKeyA(VK_SPACE, MAPVK_VK_TO_VSC) << 16; PostMessageA(g_game_hwnd, WM_KEYUP, VK_SPACE, 1 | sc | (1u << 30) | (1u << 31)); g_mt_next = now + 1500; break; }
-    case 6: mt_shot(pc, "match, flying"); g_mt_next = now + 1500; break;
+    case 6: mt_measure(pc, pawn, "Space up 1.5 s"); mt_shot(pc, "match, flying"); g_mt_next = now + 1500; break;
     default: g_mt_match_done = 1; logf_("test: match part done (menu drawn %ld times)", g_menu_draws); break;
     }
 }
