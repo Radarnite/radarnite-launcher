@@ -1746,15 +1746,27 @@ float App::settingsBody(float x, float y0, float w) {
 
 // The Mods tab (builds with patches\fnmods.dll: 14.30): what the mods DLL does in the game, saved to mods.json at once
 // (pakpatch/fnconfig.c reads it; a running game takes a change within a second). A row per mod: its switch and, where it
-// has a value, ‹ value › to change it.
-constexpr int MOD_BODY = 0, MOD_RAGDOLL = 1, MOD_CONSOLE = 2, MOD_MENU = 3, MOD_FOV = 4, MOD_FPS = 5, MOD_FX = 6, MOD_SLOMO = 7, MOD_FLY = 8, MOD_N = 9;
+// has a value, ‹ value › to change it. The aim cone and the bots of F9 are values only (no switch: the aim assist and the
+// cheat keys turn them on).
+constexpr int MOD_BODY = 0, MOD_RAGDOLL = 1, MOD_CONSOLE = 2, MOD_MENU = 3, MOD_FOV = 4, MOD_FPS = 5, MOD_FX = 6, MOD_SLOMO = 7, MOD_FLY = 8,
+              MOD_AIM = 9, MOD_CONE = 10, MOD_GOD = 11, MOD_KEYS = 12, MOD_SPAWN = 13, MOD_N = 14;
 static const wchar_t* const kModLabel[MOD_N] = { L"Body sliders", L"Ragdoll on elimination", L"Engine console", L"Mods menu (F8)",
-    L"Field of view", L"FPS cap", L"No post effects", L"Slow motion", L"Fly (in a match)" };
+    L"Field of view", L"FPS cap", L"No post effects", L"Slow motion", L"Fly (in a match)", L"Aim assist", L"Aim cone",
+    L"God mode", L"Teleport and bot keys (F6 F7 F9)", L"Bots spawned with F9" };
 // the engine key names the console can take (InputSettings ConsoleKeys)
 static const wchar_t* const kModKeys[] = { L"F10", L"Tilde", L"F2", L"Insert" };
 static const int kModFps[] = { 30, 60, 120, 144, 165, 240, 0 };
 static const float kModSlomo[] = { 0.1f, 0.25f, 0.5f, 0.75f };
-static bool* modSwitch(Mods& m, int i) {
+static const int kModCone[] = { 5, 10, 15, 20, 30, 45, 60, 90, 180 };
+static const int kModSpawn[] = { 1, 2, 3, 5, 10, 20 };
+static bool* modSwitch(Mods& m, int i) {   // nullptr = a value only
+    switch (i) {
+    case MOD_CONE: case MOD_SPAWN: return nullptr;
+    case MOD_AIM: return &m.aim;
+    case MOD_GOD: return &m.god;
+    case MOD_KEYS: return &m.cheatKeys;
+    default: break;
+    }
     switch (i) {
     case MOD_BODY: return &m.body;
     case MOD_RAGDOLL: return &m.ragdoll;
@@ -1764,7 +1776,8 @@ static bool* modSwitch(Mods& m, int i) {
     case MOD_FPS: return &m.fps;
     case MOD_FX: return &m.noPostFx;
     case MOD_SLOMO: return &m.slomo;
-    default: return &m.fly;
+    case MOD_FLY: return &m.fly;
+    default: return nullptr;
     }
 }
 static std::wstring modValue(const Mods& m, int i) {   // "" = a switch only
@@ -1774,6 +1787,10 @@ static std::wstring modValue(const Mods& m, int i) {   // "" = a switch only
     case MOD_FPS: return m.fpsValue ? fmt(L"%d fps", m.fpsValue) : L"No cap";
     case MOD_SLOMO: return fmt(L"%g\u00d7", m.slomoValue);
     case MOD_FLY: return m.ghost ? L"Ghost" : L"Fly";
+    case MOD_AIM: return m.aimStrength >= 10 ? std::wstring(L"Snap") : fmt(L"Strength %d", m.aimStrength);
+    case MOD_CONE: return fmt(L"%d\u00b0", m.aimCone);
+    case MOD_SPAWN: return m.spawnTeam ? fmt(m.spawnCount == 1 ? L"%d teammate" : L"%d teammates", m.spawnCount)
+                                       : fmt(m.spawnCount == 1 ? L"%d enemy" : L"%d enemies", m.spawnCount);
     default: return L"";
     }
 }
@@ -1799,6 +1816,20 @@ static void modStep(Mods& m, int i, int d) {
         break;
     }
     case MOD_FLY: m.ghost = !m.ghost; break;
+    case MOD_AIM: m.aimStrength = std::max(1, std::min(10, m.aimStrength + d)); break;
+    case MOD_CONE: {
+        int n = (int)(sizeof kModCone / sizeof kModCone[0]), k = 4;
+        for (int j = 0; j < n; j++) if (kModCone[j] == m.aimCone) k = j;
+        m.aimCone = kModCone[std::max(0, std::min(n - 1, k + d))];
+        break;
+    }
+    case MOD_SPAWN: {   // 1 ... 20 enemies, then 1 ... 20 teammates
+        int n = (int)(sizeof kModSpawn / sizeof kModSpawn[0]), k = 2;
+        for (int j = 0; j < n; j++) if (kModSpawn[j] == m.spawnCount) k = j;
+        k = std::max(0, std::min(2 * n - 1, k + (m.spawnTeam ? n : 0) + d));
+        m.spawnTeam = k >= n; m.spawnCount = kModSpawn[k % n];
+        break;
+    }
     }
 }
 bool App::modsBuild(const Build* b) const { return b && b->major == 14 && b->minor == 30; }
@@ -1807,21 +1838,26 @@ float App::modsBody(float x, float y, float w) {
     Font rf{ Face::UI, 13.5f, 400, false }, sf{ Face::UI, 12, 500, false }, af{ Face::UI, 16, 600, false };
     for (int i = 0; i < MOD_N; i++) {
         Mods m = st_.mods;
-        bool on = *modSwitch(m, i);
+        bool* swp = modSwitch(m, i);
+        // a value-only row follows the switch that turns it on (the aim cone the aim assist, the bots the keys)
+        bool on = swp ? *swp : i == MOD_CONE ? m.aim : m.cheatKeys;
         std::wstring v = modValue(m, i);
-        float stw = v.empty() ? 0.f : std::min(140.f, w - textW(kModLabel[i], rf) - 30 - 12 - 24);
+        float sww = swp ? 30.f + 12 : 0.f;
+        float stw = v.empty() ? 0.f : std::min(140.f, w - textW(kModLabel[i], rf) - sww - 24);
         if (stw < 70) stw = 0;
         fill(rc(x, y, w, 1), C::white, .1f);
-        text(kModLabel[i], rf, x, y, w - 30 - (stw > 0 ? stw + 12 : 0) - 12, 44, C::white);
+        text(kModLabel[i], rf, x, y, w - sww - (stw > 0 ? stw + 12 : 0), 44, C::white);
         int id = ID_MS0 + i;
         float sx = x + w - 30, sy = y + (44 - 17) / 2;
-        float sv = fx(K_SWITCH | id, on ? 1.f : 0.f, rc(sx, sy, 30, 17), T2, Curve::Ui);
-        if (sv < 1) fill(rc(sx, sy, 30, 17), C::white, .18f * (1 - sv), 8.5f);
-        if (sv > 0) fill(rc(sx, sy, 30, 17), 0x3FC46A, sv, 8.5f);
-        if (!measuring_) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(sx + 2 + 6.5f + 13 * sv, sy + 8.5f), 6.5f, 6.5f), br(C::white, .85f + .15f * sv));
-        hit(id, rc(x - 6, y + 1, w + 12, 43), F_FOCUS | F_HAND, 6);
+        if (swp) {
+            float sv = fx(K_SWITCH | id, on ? 1.f : 0.f, rc(sx, sy, 30, 17), T2, Curve::Ui);
+            if (sv < 1) fill(rc(sx, sy, 30, 17), C::white, .18f * (1 - sv), 8.5f);
+            if (sv > 0) fill(rc(sx, sy, 30, 17), 0x3FC46A, sv, 8.5f);
+            if (!measuring_) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(sx + 2 + 6.5f + 13 * sv, sy + 8.5f), 6.5f, 6.5f), br(C::white, .85f + .15f * sv));
+            hit(id, rc(x - 6, y + 1, w + 12, 43), F_FOCUS | F_HAND, 6);
+        }
         if (stw > 0) {   // ‹ value ›, dimmed while the mod is off (still changeable)
-            float bx = sx - 12 - stw, by = y + 7;
+            float bx = (swp ? sx - 12 : x + w) - stw, by = y + 7;
             int dn = ID_MD0 + i, up = ID_MU0 + i;
             float a0 = alpha_;
             if (!on) alpha_ = .6f * a0;
@@ -1856,7 +1892,8 @@ void App::modsActivate(int id) {
     Mods m = st_.mods;
     if (id >= ID_MU0) modStep(m, id - ID_MU0, 1);
     else if (id >= ID_MD0) modStep(m, id - ID_MD0, -1);
-    else { bool* sw = modSwitch(m, id - ID_MS0); *sw = !*sw; }
+    else if (bool* sw = modSwitch(m, id - ID_MS0)) *sw = !*sw;
+    else return;
     setMods(m);
 }
 
@@ -2218,6 +2255,11 @@ std::wstring App::tooltip(int id) const {
     case ID_MS0 + MOD_FX: return L"Motion blur, depth of field, bloom, lens flares, color fringe and film grain off";
     case ID_MS0 + MOD_SLOMO: case ID_MD0 + MOD_SLOMO: case ID_MU0 + MOD_SLOMO: return L"The whole game slower (in a match the match server does it)";
     case ID_MS0 + MOD_FLY: case ID_MD0 + MOD_FLY: case ID_MU0 + MOD_FLY: return L"In a match: Space up, Ctrl down; Ghost also flies through walls";
+    case ID_MS0 + MOD_AIM: case ID_MD0 + MOD_AIM: case ID_MU0 + MOD_AIM: return L"In a match, while the right mouse button is held: the camera turns to the nearest visible enemy's head";
+    case ID_MD0 + MOD_CONE: case ID_MU0 + MOD_CONE: return L"The aim assist takes enemies at most this far off the crosshair";
+    case ID_MS0 + MOD_GOD: return L"In a match: you take no damage";
+    case ID_MS0 + MOD_KEYS: return L"In a match: F6 teleports to the crosshair, F7 to your map pin, F9 spawns bots around you (also in the F8 menu)";
+    case ID_MD0 + MOD_SPAWN: case ID_MU0 + MOD_SPAWN: return L"How many bots F9 and the F8 menu spawn, and on which side";
     case ID_PROFILE: return L"Your save: level, battle pass, V-bucks, items and locker. A new name starts a new one";
     case ID_BUILDMENU: return L"Build actions";
     case ID_ACT: return L"Activity (Ctrl+L)";

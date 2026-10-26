@@ -63,6 +63,15 @@ Mods load() {
         if (num(root, "slowMotion", &d)) m.slomoValue = clampf((float)d, 0.1f, 1.0f);
         on(root, "fly", &m.fly);
         if (str(root, "fly", &s)) m.ghost = s == L"ghost";
+        on(root, "aimAssist", &m.aim);
+        if (num(root, "aimAssist", &d)) m.aimStrength = clampi((int)d, 1, 10);
+        if (num(root, "aimCone", &d)) m.aimCone = clampi((int)d, 5, 180);
+        on(root, "god", &m.god);
+        on(root, "cheatKeys", &m.cheatKeys);
+        if (num(root, "spawnBots", &d)) m.spawnCount = clampi((int)d, 1, 20);
+        yyjson_val* sb = mod(root, "spawnBots");
+        yyjson_val* side = sb ? yyjson_obj_get(sb, "side") : nullptr;
+        if (yyjson_is_str(side)) m.spawnTeam = json::wstr(side) == L"team";
     }
     if (doc) yyjson_doc_free(doc);
     return m;
@@ -83,7 +92,15 @@ bool save(const Mods& m) {
     t += std::string("  \"noPostEffects\": {\"on\": ") + b(m.noPostFx) + "},\r\n";
     snprintf(num, sizeof num, "%.2f", clampf(m.slomoValue, 0.1f, 1.0f));
     t += std::string("  \"slowMotion\": {\"on\": ") + b(m.slomo) + ", \"value\": " + num + "},\r\n";
-    t += std::string("  \"fly\": {\"on\": ") + b(m.fly) + ", \"value\": \"" + (m.ghost ? "ghost" : "fly") + "\"}\r\n}\r\n";
+    t += std::string("  \"fly\": {\"on\": ") + b(m.fly) + ", \"value\": \"" + (m.ghost ? "ghost" : "fly") + "\"},\r\n";
+    snprintf(num, sizeof num, "%d", clampi(m.aimStrength, 1, 10));
+    t += std::string("  \"aimAssist\": {\"on\": ") + b(m.aim) + ", \"value\": " + num + "},\r\n";
+    snprintf(num, sizeof num, "%d", clampi(m.aimCone, 5, 180));
+    t += std::string("  \"aimCone\": {\"value\": ") + num + "},\r\n";
+    t += std::string("  \"god\": {\"on\": ") + b(m.god) + "},\r\n";
+    t += std::string("  \"cheatKeys\": {\"on\": ") + b(m.cheatKeys) + "},\r\n";
+    snprintf(num, sizeof num, "%d", clampi(m.spawnCount, 1, 20));
+    t += std::string("  \"spawnBots\": {\"value\": ") + num + ", \"side\": \"" + (m.spawnTeam ? "team" : "enemy") + "\"}\r\n}\r\n";
     // the game reads the file whenever it changes: it must never see half of it
     std::wstring file = path(), tmp = file + L".tmp";
     if (!writeFile(tmp, t)) return false;
