@@ -194,7 +194,9 @@ static void settings_tick(void)
             SA.fly = want;
             logf_("settings: pawn %p movement mode %d before", pawn, movement_mode(pawn));
         }
-        static DWORD mode_log;
-        if (pawn && SA.fly && now >= mode_log) { mode_log = now + 3000; logf_("settings: pawn %p movement mode %d (5 = flying)", pawn, movement_mode(pawn)); }
+        static int mode_last = -2;   /* the movement mode while fly is on, logged when it changes */
+        int mode = pawn && SA.fly ? movement_mode(pawn) : -2;
+        if (mode != mode_last && mode != -2) logf_("settings: pawn %p movement mode %d (5 = flying)", pawn, mode);
+        mode_last = mode;
     }
 }

@@ -119,7 +119,7 @@ static void menu_draw(void)
     ts = 26.0f * k / th; if (ts < 0.35f) ts = 0.35f;   /* text 26 px at 1080 lines whatever the engine's font size is */
     float lh = 46 * k, pad = 22 * k, w = 560 * k, x = 48 * k, y = 140 * k;
     float h = pad * 2 + lh * (MI_N + 1) + 34 * k;
-    lcolor bg = { 0.02f, 0.025f, 0.06f, 0.82f }, sel = { 0.45f, 0.33f, 1.0f, 0.55f }, white = { 1, 1, 1, 1 }, mute = { 1, 1, 1, 0.55f },
+    lcolor bg = { 0.02f, 0.025f, 0.06f, 0.95f }, sel = { 0.45f, 0.33f, 1.0f, 0.55f }, white = { 1, 1, 1, 1 }, mute = { 1, 1, 1, 0.55f },
            green = { 0.25f, 0.85f, 0.45f, 1 }, off = { 1, 1, 1, 0.35f }, accent = { 0.72f, 0.61f, 1.0f, 1 };
     m_rect(x, y, w, h, bg);
     m_rect(x, y, w, 3 * k, accent);
