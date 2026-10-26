@@ -146,6 +146,9 @@ const MockScenario kScenarios[] = {
     { L"53-poster-activity-closed-760x520", 760, 520, 1.0f, true, 0, 0, 0, true },
     // an import started from a card far down the grid: its progress card comes into view at once
     { L"54-port-import-started-scrolled", 1280, 800, 1.0f, false, 0, 0, 11 },
+    // the Mods tab of the settings (14.30): some mods on with values, then at the minimum size (its rows scroll)
+    { L"55-mods-tab-1280x800", 1280, 800, 1.0f, false },
+    { L"56-mods-tab-760x520-125", 760, 520, 1.25f, false },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -290,6 +293,11 @@ public:
             l.text = L"Warning: the match server did not get ready (see offline\\userdir-server\\Saved\\Logs). The lobby still works."; l.level = Level::Warn; post.push_back(l);
         }
         else if (_wtoi(id.c_str()) >= 48 && _wtoi(id.c_str()) <= 53) { st.builds = withServer(many()); st.config.mode = L"bots"; st.config.bots = 35; st.selected = L"17.50"; post = logs(40); }   // the match settings
+        else if (_wtoi(id.c_str()) == 55 || _wtoi(id.c_str()) == 56) {
+            st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86";
+            st.mods.fov = true; st.mods.fovValue = 100; st.mods.fps = true; st.mods.fpsValue = 144; st.mods.fly = true; st.mods.ghost = true;
+            lock(); prefs_[L"settingsTab"] = L"mods"; unlock();
+        }
         else if (id.rfind(L"42-", 0) == 0) { st.builds = lobby(); st.selected = L"14.30"; st.config.displayName = L"GoldenTiger86"; }
         else if (portScenario()) { st.builds = { b1750(), b1430() }; st.selected = L"14.30"; }
         lock(); state_ = st; unlock();
@@ -426,6 +434,7 @@ public:
         if (p.fields & ConfigPatch::LateGame) c.lateGame = p.values.lateGame;
         unlock();
     }
+    void saveMods(const Mods& m) override { lock(); state_.mods = m; unlock(); }
 
     std::wstring uiPref(const wchar_t* key) override { lock(); auto it = prefs_.find(key); std::wstring v = it == prefs_.end() ? L"" : it->second; unlock(); return v; }
     void setUiPref(const wchar_t* key, const std::wstring& v) override { lock(); prefs_[key] = v; unlock(); }
