@@ -86,6 +86,11 @@ foreach ($f in 'build.json', 'aes.json', 'keychain.json', 'cosmetics.json', 'cus
     if (Test-Path $src) { Copy-Item -Force $src $off }
 }
 foreach ($d in 'sandbox-client', 'sandbox-server') { $p = Join-Path $off $d; if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
+# the client's settings as a player who already answered the first start's "Find Best Settings?" (the game's own key):
+# without it that dialog stays over the lobby and the match in every screenshot
+$gus = Join-Path $off 'sandbox-client\LocalAppData\FortniteGame\Saved\Config\WindowsClient'
+New-Item -ItemType Directory -Force $gus | Out-Null
+"[/Script/FortniteGame.FortGameUserSettings]`r`nInitialBenchmarkState=1`r`n" | Set-Content -Encoding ascii -NoNewline (Join-Path $gus 'GameUserSettings.ini')
 Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $off '*.log')
 foreach ($d in 'results', 'profiles') { $p = Join-Path $off $d; if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
 $pm = if ($PlayMode) { ',"playMode":"' + $PlayMode + '","profile":"bgtest"' } else { '' }
