@@ -1,16 +1,18 @@
 # Runs radarnite-play.exe --selftest-audio (play/Program.cs SelfTestAudio) in the signed-in user's session, where the
 # audio endpoints are (over ssh everything runs in session 0), waits for its result, removes the scheduled task and any
-# leftover process of this exe path only, prints the output. Nothing audible: the test player plays digital silence.
+# leftover process of this exe path only, prints the output. Nothing audible: the test player plays digital silence. No
+# window either: wscript runs the batch file hidden, so a console never takes the focus in the user's session.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File selftest-audio.ps1 -Dir S:\rl-integ-test\audio
 param([string]$Dir = 'S:\rl-integ-test\audio')
 $ErrorActionPreference = 'Stop'
-$exe = Join-Path $Dir 'radarnite-play.exe'; $txt = "$Dir\audio.txt"; $done = "$Dir\audio.done"; $cmd = "$Dir\selftest-audio.cmd"
+$exe = Join-Path $Dir 'radarnite-play.exe'; $txt = "$Dir\audio.txt"; $done = "$Dir\audio.done"; $cmd = "$Dir\selftest-audio.cmd"; $vbs = "$Dir\selftest-audio.vbs"
 $name = 'rn-play-audio-selftest'
 Remove-Item -Force $txt, $done -ErrorAction SilentlyContinue
 # a batch file waits for the (GUI subsystem) exe and keeps its exit code
 Set-Content -Encoding ascii $cmd "@`"$exe`" --selftest-audio > `"$txt`" 2>&1`r`n@> `"$done`" echo %ERRORLEVEL%"
+Set-Content -Encoding ascii $vbs "CreateObject(`"WScript.Shell`").Run `"cmd.exe /c `"`"$cmd`"`"`", 0, True"
 $sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
-$a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$cmd`"" -WorkingDirectory $Dir
+$a = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`"" -WorkingDirectory $Dir
 $p = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive
 Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Force | Out-Null
 try {
