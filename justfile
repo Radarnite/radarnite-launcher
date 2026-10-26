@@ -89,11 +89,12 @@ build-play: (_wait-cpu "mac") _sync-mac
 # Build patches/fnmods.dll (pakpatch/fnmods.c: the mods of 14.30, body sliders and ragdolls among them) and its mock
 # test on the Mac with zig cc, as release.yml does -> pakpatch/out
 build-fnmods: (_wait-cpu "mac") _sync-mac
-    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/pakpatch && rm -rf out && mkdir out && {{zig}} cc -target x86_64-windows-gnu -O2 -shared -s -o out/fnmods.dll fnmods.c -luser32 && {{zig}} cc -target x86_64-windows-gnu -O1 -o out/fnbody-mock.exe test/fnbody-mock.c -luser32'
+    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/pakpatch && rm -rf out && mkdir out && {{zig}} cc -target x86_64-windows-gnu -O2 -shared -s -o out/fnmods.dll fnmods.c -luser32 && {{zig}} cc -target x86_64-windows-gnu -O1 -o out/fnbody-mock.exe test/fnbody-mock.c -luser32 && {{zig}} cc -target x86_64-windows-gnu -O1 -o out/fnkeys-test.exe test/fnkeys-test.c -luser32'
     mkdir -p pakpatch/out
     mac get {{mac_dir}}/pakpatch/out/fnmods.dll pakpatch/out/fnmods.dll
     mac get {{mac_dir}}/pakpatch/out/fnbody-mock.exe pakpatch/out/fnbody-mock.exe
-    ls -l pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe
+    mac get {{mac_dir}}/pakpatch/out/fnkeys-test.exe pakpatch/out/fnkeys-test.exe
+    ls -l pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe pakpatch/out/fnkeys-test.exe
 
 # The same build of fnmods.dll and its mock test on the PC (zig in %LOCALAPPDATA%\fp-tools\zig), when the Mac is busy
 build-fnmods-pc:
@@ -104,10 +105,10 @@ build-fnmods-pc:
     pc sh '(if exist {{pc_dir}}\fnmods-src rmdir /s /q {{pc_dir}}\fnmods-src) & mkdir {{pc_dir}}\fnmods-src\test'
     scp -q pakpatch/*.c 'windows:{{pc_fwd}}/fnmods-src/'
     scp -q pakpatch/test/*.c 'windows:{{pc_fwd}}/fnmods-src/test/'
-    pc sh 'cd /d {{pc_dir}}\fnmods-src && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O2 -shared -s -o fnmods.dll fnmods.c -luser32 && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O1 -o fnbody-mock.exe test\fnbody-mock.c -luser32'
+    pc sh 'cd /d {{pc_dir}}\fnmods-src && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O2 -shared -s -o fnmods.dll fnmods.c -luser32 && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O1 -o fnbody-mock.exe test\fnbody-mock.c -luser32 && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O1 -o fnkeys-test.exe test\fnkeys-test.c -luser32'
     mkdir -p pakpatch/out
-    scp -q 'windows:{{pc_fwd}}/fnmods-src/fnmods.dll' 'windows:{{pc_fwd}}/fnmods-src/fnbody-mock.exe' pakpatch/out/
-    ls -l pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe
+    scp -q 'windows:{{pc_fwd}}/fnmods-src/fnmods.dll' 'windows:{{pc_fwd}}/fnmods-src/fnbody-mock.exe' 'windows:{{pc_fwd}}/fnmods-src/fnkeys-test.exe' pakpatch/out/
+    ls -l pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe pakpatch/out/fnkeys-test.exe
 
 # fnmods.dll's body sliders against the fake engine of pakpatch/test/fnbody-mock.c on the PC, names encoded as in 14.30
 # and plain (exit 0 = pass; never in CI)
@@ -121,6 +122,18 @@ test-fnmods:
     scp -q pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe 'windows:{{pc_fwd}}/fnmods/'
     pc sh '{{pc_dir}}\fnmods\fnbody-mock.exe {{pc_dir}}\fnmods'
     pc sh '{{pc_dir}}\fnmods\fnbody-mock.exe {{pc_dir}}\fnmods --plain'
+
+# fnmods.dll's check for mod keys another program holds as hotkeys (pakpatch/test/fnkeys-test.c and .ps1: hidden in the
+# signed-in session, on F13/F14, which no usual keyboard has; exit 0 = pass; never in CI)
+test-fnkeys:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f pakpatch/out/fnkeys-test.exe || just build-fnmods
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    pc sh '(if exist {{pc_dir}}\fnkeys rmdir /s /q {{pc_dir}}\fnkeys) & mkdir {{pc_dir}}\fnkeys'
+    scp -q pakpatch/out/fnkeys-test.exe pakpatch/test/fnkeys-test.ps1 'windows:{{pc_fwd}}/fnkeys/'
+    pc sh 'powershell -NoProfile -ExecutionPolicy Bypass -File {{pc_dir}}\fnkeys\fnkeys-test.ps1 -Exe {{pc_dir}}\fnkeys\fnkeys-test.exe'
 
 # The match server CI ships: build it from the committed sources, then vendor it into gameserver-reboot/prebuilt with
 # its manifest (tools/vendor-gameserver.sh); commit the two files. release.sh refuses a release whose server sources

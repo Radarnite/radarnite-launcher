@@ -6,7 +6,7 @@
  *   { "version": 1,
  *     "bodySliders": {"on": true}, "ragdoll": {"on": true},
  *     "console": {"on": true, "value": "F10"},      engine console; value = its key (an engine key name)
- *     "menu": {"on": true},                          the in-game menu on F8
+ *     "menu": {"on": true, "value": "F8"},           the in-game menu; value = its key (F8 by default; names: fnkeys.c)
  *     "fov": {"on": false, "value": 90},            field of view, degrees (60-120)
  *     "fpsCap": {"on": false, "value": 60},         frame rate cap (0 = none)
  *     "noPostEffects": {"on": false},               motion blur, depth of field, bloom, lens flares, fringe, grain off
@@ -25,7 +25,7 @@
 
 typedef struct {
     int body, ragdoll, console, menu;
-    char console_key[24];
+    char console_key[24], menu_key[24];
     int fov_on; float fov;
     int fps_on; int fps;
     int nofx;
@@ -41,7 +41,7 @@ static void cfg_defaults(mods_cfg *c)
 {
     memset(c, 0, sizeof *c);
     c->body = c->ragdoll = c->console = c->menu = 1;
-    strcpy(c->console_key, "F10");
+    strcpy(c->console_key, "F10"); strcpy(c->menu_key, "F8");
     c->fov = 90; c->fps = 60; c->slomo = 0.5f;
     c->aim_strength = 5; c->aim_cone = 30; c->spawn_n = 3;
 }
@@ -154,7 +154,7 @@ static int cfg_parse(const char *text, size_t len, mods_cfg *c)
         if (!strcmp(key, "bodySliders") && m.has_on) c->body = m.on;
         else if (!strcmp(key, "ragdoll") && m.has_on) c->ragdoll = m.on;
         else if (!strcmp(key, "console")) { if (m.has_on) c->console = m.on; if (m.has_str && m.str[0]) snprintf(c->console_key, sizeof c->console_key, "%s", m.str); }
-        else if (!strcmp(key, "menu") && m.has_on) c->menu = m.on;
+        else if (!strcmp(key, "menu")) { if (m.has_on) c->menu = m.on; if (m.has_str && key_vk(m.str)) snprintf(c->menu_key, sizeof c->menu_key, "%s", m.str); }
         else if (!strcmp(key, "fov")) { if (m.has_on) c->fov_on = m.on; if (m.has_num) c->fov = clampf((float)m.num, 60, 120); }
         else if (!strcmp(key, "fpsCap")) { if (m.has_on) c->fps_on = m.on; if (m.has_num) c->fps = (int)clampf((float)m.num, 0, 1000); }
         else if (!strcmp(key, "noPostEffects") && m.has_on) c->nofx = m.on;
@@ -176,9 +176,9 @@ static CRITICAL_SECTION g_cfg_lock;
 static FILETIME g_cfg_mtime;
 static void cfg_log(const char *why, const mods_cfg *c)
 {
-    logf_("config (%s): bodySliders %d, ragdoll %d, console %d (key %s), menu %d, fov %d/%.0f, fpsCap %d/%d, noPostEffects %d, slowMotion %d/%.2f, fly %d/%s, "
+    logf_("config (%s): bodySliders %d, ragdoll %d, console %d (key %s), menu %d (key %s), fov %d/%.0f, fpsCap %d/%d, noPostEffects %d, slowMotion %d/%.2f, fly %d/%s, "
           "aimAssist %d/%d, aimCone %d, god %d, cheatKeys %d, spawnBots %d %s",
-          why, c->body, c->ragdoll, c->console, c->console_key, c->menu, c->fov_on, c->fov, c->fps_on, c->fps, c->nofx, c->slomo_on, c->slomo,
+          why, c->body, c->ragdoll, c->console, c->console_key, c->menu, c->menu_key, c->fov_on, c->fov, c->fps_on, c->fps, c->nofx, c->slomo_on, c->slomo,
           c->fly_on, c->ghost ? "ghost" : "fly", c->aim_on, c->aim_strength, c->aim_cone, c->god, c->keys, c->spawn_n, c->spawn_team ? "team" : "enemy");
 }
 /* worker thread: read mods.json when it is new or changed; 1 = a new copy is there */

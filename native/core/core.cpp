@@ -706,6 +706,7 @@ public:
     void saveMods(const Mods& m) override {
         if (!mods::save(m)) c_->log(L"Mods: could not save " + mods::path() + L".", Level::Warn);
     }
+    bool modKeyHeld(const std::wstring& key) override { return mods::keyHeld(key); }
 
     void portCatalog(const std::wstring& build, bool refresh) override {
         c_->async([build, refresh](std::shared_ptr<Ctx> c) { c->portCatalog(build, refresh); });

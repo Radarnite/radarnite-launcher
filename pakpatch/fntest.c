@@ -157,12 +157,12 @@ static void mt_tick(void)
         if (!g_mt_since) { g_mt_since = now; g_mt_next = now + 20000; return; }
         switch (g_mt_step++) {
         case 0: mt_shot(pc, "lobby"); g_mt_next = now + 1500; break;
-        case 1: post_key(VK_F8); g_mt_next = now + 1500; break;
+        case 1: post_key(key_vk(g_cfg.menu_key)); g_mt_next = now + 1500; break;
         case 2: mt_shot(pc, "lobby, menu open"); g_mt_next = now + 1500; break;
         case 3: { static const UINT k[] = { VK_DOWN, VK_DOWN, VK_DOWN, VK_RETURN, VK_UP, VK_UP, VK_UP, VK_RETURN, VK_RIGHT, VK_RIGHT, VK_DOWN, VK_DOWN, VK_RETURN };
                   mt_keys(k, sizeof k / sizeof k[0]); g_mt_next = now + 2500; break; }
         case 4: mt_shot(pc, "lobby, menu: fov 100, slow motion 0.5, post effects off"); g_mt_next = now + 1500; break;
-        case 5: post_key(VK_F8); g_mt_next = now + 2000; break;
+        case 5: post_key(key_vk(g_cfg.menu_key)); g_mt_next = now + 2000; break;
         case 6: mt_shot(pc, "lobby, menu closed, settings on"); g_mt_next = now + 1500; break;
         case 7: logf_("test: console open: %d", console_open()); g_mt_next = now + 1000; break;
         case 8: mt_chars("stat fps"); g_mt_next = now + 1000; break;
@@ -182,9 +182,9 @@ static void mt_tick(void)
     if (!g_mt_since) { g_mt_since = now; g_mt_next = now + 25000; logf_("test: pawn %p in the match: mods test in 25 s", pawn); return; }
     switch (g_mt_step++) {
     case 0: mt_measure(pc, pawn, "match"); mt_shot(pc, "match"); g_mt_next = now + 1500; break;
-    case 1: { static const UINT k[] = { VK_F8, VK_DOWN, VK_DOWN, VK_DOWN, VK_DOWN, VK_RETURN }; g_menu_sel = 0; mt_keys(k, sizeof k / sizeof k[0]); g_mt_next = now + 2000; break; }
+    case 1: { UINT k[] = { key_vk(g_cfg.menu_key), VK_DOWN, VK_DOWN, VK_DOWN, VK_DOWN, VK_RETURN }; g_menu_sel = 0; mt_keys(k, sizeof k / sizeof k[0]); g_mt_next = now + 2000; break; }
     case 2: mt_measure(pc, pawn, "fly on"); mt_shot(pc, "match, menu: fly on"); g_mt_next = now + 1000; break;
-    case 3: mt_measure(pc, pawn, "Space down"); post_key(VK_F8); PostMessageA(g_game_hwnd, WM_KEYDOWN, VK_SPACE, 1 | ((LPARAM)MapVirtualKeyA(VK_SPACE, MAPVK_VK_TO_VSC) << 16)); g_mt_next = now + 2500; break;
+    case 3: mt_measure(pc, pawn, "Space down"); post_key(key_vk(g_cfg.menu_key)); PostMessageA(g_game_hwnd, WM_KEYDOWN, VK_SPACE, 1 | ((LPARAM)MapVirtualKeyA(VK_SPACE, MAPVK_VK_TO_VSC) << 16)); g_mt_next = now + 2500; break;
     case 4: mt_measure(pc, pawn, "Space held 2.5 s"); mt_shot(pc, "match, flying up (Space held)"); g_mt_next = now + 1500; break;
     case 5: { LPARAM sc = (LPARAM)MapVirtualKeyA(VK_SPACE, MAPVK_VK_TO_VSC) << 16; PostMessageA(g_game_hwnd, WM_KEYUP, VK_SPACE, 1 | sc | (1u << 30) | (1u << 31)); g_mt_next = now + 250; break; }
     /* after Space is released the pawn must hold its height: measured every 250 ms for 1.5 s */
@@ -247,9 +247,9 @@ static void ct_tick(void)
     switch (step++) {
     case 0: en0 = ct_count(pc, me, &tm0, &nd); logf_("test: before: %d enemies alive (nearest %.1f m), %d teammates", en0, nd, tm0);
             ct_shot(pc, "match"); next = now + 1500; break;
-    case 1: g_menu_sel = MI_AIM; post_key(VK_F8); next = now + 1500; break;
+    case 1: g_menu_sel = MI_AIM; post_key(key_vk(g_cfg.menu_key)); next = now + 1500; break;
     case 2: ct_shot_ui(pc, "match, F8 menu with the cheats"); next = now + 1500; break;
-    case 3: post_key(VK_F8); next = now + 1000; break;
+    case 3: post_key(key_vk(g_cfg.menu_key)); next = now + 1000; break;
     /* spawn bots with F9 */
     case 4: post_key(VK_F9); logf_("test: F9 (spawn %d %s)", g_cfg.spawn_n, g_cfg.spawn_team ? "team" : "enemy"); next = now + 6000; break;
     case 5: { int en = ct_count(pc, me, &tm, &nd);
@@ -308,7 +308,7 @@ static void ct_tick(void)
     case 19: g_cfg.god = 0; next = now + 1500; break;
     /* a random POI from the menu */
     case 22: { v3 a = actor_loc(me); CA.tp[0] = a.x; CA.tp[1] = a.y; CA.tp[2] = a.z;
-               g_menu_sel = MI_POI; post_key(VK_F8); next = now + 1200; break; }
+               g_menu_sel = MI_POI; post_key(key_vk(g_cfg.menu_key)); next = now + 1200; break; }
     case 23: ct_shot_ui(pc, "match, menu: random POI"); post_key(VK_RETURN); next = now + 8000; break;   /* the place streams in */
     case 24: { v3 a = actor_loc(me); logf_("test: random POI: the pawn moved %.0f m, now at %.0f %.0f %.0f", sqrtf((a.x - CA.tp[0]) * (a.x - CA.tp[0]) + (a.y - CA.tp[1]) * (a.y - CA.tp[1])) / 100, a.x, a.y, a.z);
                ct_shot(pc, "match, at a random POI"); next = now + 1500; break; }
