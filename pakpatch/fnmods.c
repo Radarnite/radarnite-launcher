@@ -9,6 +9,7 @@
  *   ragdoll   fnragdoll.c   ragdoll deaths instead of the digitize effect
  *   console   fnconsole.c   the engine console (Shipping builds have none)
  *   settings  fnsettings.c  field of view, frame rate cap, post effects, slow motion, fly
+ *   cheats    fncheats.c    aim assist, teleports (crosshair, map pin, random POI), bot spawns, god mode (match only)
  *   menu      fnmenu.c      the in-game menu on F8 for the settings and the console
  *   test      fntest.c      developer test hooks (environment variables only; the launcher never sets them)
  * The host:
@@ -43,6 +44,7 @@ static DWORD g_game_tid;   /* the game thread (set once its window is found) */
 #include "fnragdoll.c"
 #include "fnconsole.c"
 #include "fnsettings.c"
+#include "fncheats.c"
 #include "fnmenu.c"
 #include "fntest.c"
 
@@ -65,6 +67,7 @@ static void body_kill(void) { g_body_off = 1; }
 static void ragdoll_kill(void) { g_rd_mode = RD_OFF; }
 static void console_kill(void) { CN.state = -1; }
 static void settings_kill(void) { SN.state = -1; }
+static void cheats_kill(void) { CH.state = -1; g_rmb = 0; }
 static void menu_kill(void) { MN.dead = 1; g_menu_open = 0; }
 static void test_kill(void) { g_mt = 0; g_join_flag[0] = 0; g_shots = 0; }
 static int on_body(void) { return g_cfg.body; }
@@ -86,6 +89,7 @@ static module g_mods[] = {
     { "ragdoll", on_ragdoll, ragdoll_tick, ragdoll_kill, NEEDS(RAGDOLL_NEEDS), 0 },
     { "console", on_always, console_tick, console_kill, NEEDS(CONSOLE_NEEDS), 0 },
     { "settings", on_always, settings_tick, settings_kill, NEEDS(SETTINGS_NEEDS), 0 },
+    { "cheats", on_always, cheats_tick, cheats_kill, NEEDS(CHEATS_NEEDS), 0 },
     { "menu", on_always, menu_tick, menu_kill, NEEDS(MENU_NEEDS), 0 },
     { "test", on_always, tests_tick, test_kill, NULL, 0, 0 },
 };
@@ -167,7 +171,9 @@ static LRESULT CALLBACK getmsg(int code, WPARAM wp, LPARAM lp)
             int down = m->message == WM_KEYDOWN || m->message == WM_SYSKEYDOWN;
             if (m->wParam == VK_SPACE) g_key_up = down;
             if (m->wParam == VK_CONTROL || m->wParam == VK_LCONTROL) g_key_down = down;
-            if (menu_key(m->message, m->wParam)) m->message = WM_NULL;
+            if (menu_key(m->message, m->wParam) || cheats_key(m->message, m->wParam)) m->message = WM_NULL;
+        } else if (m->message == WM_RBUTTONDOWN || m->message == WM_RBUTTONUP) {
+            cheats_key(m->message, m->wParam);
         }
     }
     return CallNextHookEx(NULL, code, wp, lp);
