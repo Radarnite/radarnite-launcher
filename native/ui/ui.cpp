@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "port_ui.h"
+#include "../core/update.h"
 #include <commctrl.h>
 #include <math.h>
 #include <stdio.h>
@@ -1621,7 +1622,7 @@ float App::settingsBody(float x, float y0, float w) {
             y += 44;
             if (i == 0 && c.botsAI) {   // the page's warning when the bots' AI is on
                 Font wf{ Face::UI, 11.5f, 400, false };
-                std::wstring note = b->major == 14 ? L"**Bot AI is on.** Experimental: the game's own bots spawn but do not move or fight yet."
+                std::wstring note = b->major == 14 ? L"**Bot AI is on.** Experimental: the game's own bots move, fight and build; difficulty sets how well."
                                                    : L"**Bot AI is on.** On " + verLabel(*b) + L" it crashes the match server a few seconds after it starts.";
                 float th = rich(note, wf, 0, 0, w - 24, 16.5f, C::warnText, C::white, 0, false);
                 icon(Icon::Warn, x, y + 0.5f, 16, C::warn);
@@ -1789,7 +1790,13 @@ void App::drawTitle(float W) {
     float w1 = textW(L"Radarnite ", f, -0.13f);
     text(L"Radarnite", f, x, 0, w1, TB - 1, tc, 0, -0.13f);
     text(L"Launcher", f, x + w1, 0, 100, TB - 1, C::muted, 0, -0.13f);   // .mark span b keeps its colour when inactive
-    x += w1 + textW(L"Launcher", f, -0.13f) + 12;
+    x += w1 + textW(L"Launcher", f, -0.13f) + 8;
+    // the installed version, the one the updater compares (version.h RN_VERSION_STR as stamped at build time)
+    static const std::wstring kVer = rn::update::current().str();
+    Font vf{ Face::UI, 12, 400, false };
+    float vw = textW(kVer, vf);
+    text(kVer, vf, x, 0, vw + 2, TB - 1, C::dim);
+    x += vw + 12;
     if (W > 900 && loaded_ && !st_.builds.empty()) {
         bool fw = true; for (auto& b : st_.builds) if (b.firewall != L"OK") fw = false;
         dot(x + 8 + 4, (TB - 1) / 2, 8, fw ? C::ok : C::warn);
