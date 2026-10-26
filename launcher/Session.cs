@@ -123,6 +123,10 @@ public sealed class Session
         var (clientArgs, clientAc) = LaunchArgs($"{San(_c.DisplayName)}@offline.local");
         _client = StartGame(clientArgs, env, hidden: false);
         if (_client == null) { Fail("Could not start the game process."); return false; }
+        // Windows keeps an app's mute per exe path: a mute left by a test tool would silence every later game. A test run
+        // started with -nosound is left as it is.
+        if (!(Environment.GetEnvironmentVariable("FNOFFLINE_EXTRA_ARGS") ?? "").Contains("-nosound", StringComparison.OrdinalIgnoreCase))
+            try { AudioRestore = Audio.Restore(_client, _log); } catch { }
         StartFakeLaunchers(clientAc);
         if (!await InjectRedirect(_client, Path.Combine(off, "redirect-client.log"))) return false;
         LoadPakPatch(_client, "Game");
@@ -130,6 +134,9 @@ public sealed class Session
         Stage?.Invoke("game", "ok");
         return true;
     }
+
+    /// <summary>The client's sound check (Audio.Restore) while it runs, null when there is none; it never fails.</summary>
+    public Task? AudioRestore { get; private set; }
 
     /// <summary>Process id of the started game client (0 = none).</summary>
     public int ClientPid => _client?.Id ?? 0;
