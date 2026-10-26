@@ -26,8 +26,8 @@ PortType typeOfName(const std::string& t, bool* ok);      // fortnite-api's type
 
 // One output line of port.ps1 or fn-port, classified (the import's progress). Pure: the batch-status test runs it.
 struct Line {
-    enum Kind { Other, Ok, Failed, Batch, Done, Cpu, Items, Localization } kind = Other;
-    std::wstring path;   // Ok / Failed: the source path (trailing ':' dropped)
+    enum Kind { Other, Ok, Failed, NotInstalled, Batch, Done, Cpu, Items, Localization } kind = Other;
+    std::wstring path;   // Ok / Failed / NotInstalled: the source path (trailing ':' dropped)
     int toPort = 0;      // Items: "items: N listed, M to port" -> M
 };
 Line classify(const std::wstring& line);
@@ -68,6 +68,7 @@ private:
     void setPhase(const wchar_t* p);                // m_ held
     void note(const std::wstring& line);
     void result(const std::wstring& path, bool ok);
+    void notInstalled(const std::wstring& path);    // converted, but its signature fit failed: not in the build
     void next();
     void setInstalling(bool on);
     void kill();

@@ -323,6 +323,15 @@ Line classify(const std::wstring& raw) {
             return l;
         }
     }
+    // "NOT INSTALLED <path>: <why>": port.ps1 converted it but could not fit its pak to a signature of the build, so it
+    // stays out of Paks (staged-paks.ps1) and the next import retries it
+    if (starts(s, L"NOT INSTALLED ")) {
+        size_t a = 14, b = a;
+        while (b < s.size() && !iswspace(s[b])) b++;
+        std::wstring p = s.substr(a, b - a);
+        while (!p.empty() && p.back() == L':') p.pop_back();
+        if (!p.empty()) { l.kind = Line::NotInstalled; l.path = p; return l; }
+    }
     if (starts(s, L"batch ")) { l.kind = Line::Batch; return l; }
     if (starts(s, L"done:")) { l.kind = Line::Done; return l; }
     if (starts(s, L"cpu:")) { l.kind = Line::Cpu; return l; }
@@ -450,6 +459,18 @@ void Job::result(const std::wstring& path, bool ok) {
     s->st = ok ? L"ok" : L"failed";
     done_++;
     if (ok) ok_++; else failed_++;
+    if (ieq(current_, path)) current_.clear();
+}
+// An item counted as converted whose pak could not be fitted to the build's signature: it is not in the build.
+void Job::notInstalled(const std::wstring& path) {
+    std::lock_guard<std::mutex> g(m_);
+    State* s = find(path);
+    if (s && s->st == L"failed") return;
+    if (!s) { items_.push_back({ path, L"" }); s = &items_.back(); }
+    if (s->st == L"ok") ok_--;
+    else done_++;
+    s->st = L"failed";
+    failed_++;
     if (ieq(current_, path)) current_.clear();
 }
 // The next queued item of the batch becomes the one being converted.
@@ -643,6 +664,7 @@ bool importItems(const BuildInfo& b, const std::vector<std::wstring>& pathsIn, c
             { std::lock_guard<std::mutex> g(job->m_); job->setPhase(L"install"); }
             job->setInstalling(true);
             break;
+        case Line::NotInstalled: job->notInstalled(l.path); break;
         case Line::Batch: {
             job->setInstalling(false);
             std::lock_guard<std::mutex> g(job->m_);
