@@ -503,9 +503,11 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
             game = state == L"launching" || state == L"running" || state == L"stopping";
             if (!running && !game && !paths.empty()) portJob = job = std::make_shared<port::Job>();
         }
-        if (running) { log(L"A cosmetics import is already running.", Level::Warn); return; }
-        if (game) { log(L"Stop the game before importing cosmetics.", Level::Warn); return; }
+        // refused: the window already closed its dialog, so a toast says why nothing starts
+        if (running) { log(L"A cosmetics import is already running.", Level::Warn); toast(L"A cosmetics import is already running", Level::Warn); return; }
+        if (game) { log(L"Stop the game before importing cosmetics.", Level::Warn); toast(L"Stop the game before importing cosmetics", Level::Warn); return; }
         if (!job) return;
+        job->build = b.version;   // the first view already names the build ("IMPORTING INTO 14.30")
         postPortJob();
         std::weak_ptr<Ctx> w = shared_from_this();
         auto last = std::make_shared<std::atomic<ULONGLONG>>(0);

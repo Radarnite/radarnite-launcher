@@ -621,6 +621,7 @@ bool importItems(const BuildInfo& b, const std::vector<std::wstring>& pathsIn, c
         job->started_ = job->phaseSince_ = job->currentSince_ = GetTickCount64();
         GetSystemTimeAsFileTime(&job->startedFt_);
     }
+    progress();   // the item count at once, not with the first half-second report
     log(fmt(L"Importing %d cosmetics of the current Fortnite into ", (int)list.size()) + b.version +
         L" (fn-port; the build's files are backed up in offline\\backup-port-*)...");
     std::wstring args = L"-NoProfile -ExecutionPolicy Bypass -File \"" + tool.script + L"\" -Build \"" + b.dir + L"\" -Items \"" + file +
