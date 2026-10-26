@@ -86,7 +86,8 @@ update() {
   local out=out-paktools
   "$fv/tools/win-build.sh" dotnet "$mirror" publish tools/fn-modkit/fn-modkit.csproj -c Release -o "$out" \
     -p:DebugType=none -p:DebugSymbols=false -p:Deterministic=true -p:ContinuousIntegrationBuild=true
-  local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/rl-paktools.XXXXXX")"; trap 'rm -rf "$tmp"' EXIT
+  local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/rl-paktools.XXXXXX")"
+  trap "rm -rf '${tmp:?}'" EXIT   # expanded now: the trap runs after update() returned, when the local is gone (set -u)
   ssh -o BatchMode=yes "${PC_HOST:-windows}" "tar -c -f - -C \"%LOCALAPPDATA%\\fp-build\\$mirror\\src\\$out\" ." | tar -x -f - -C "$tmp"
   import "$tmp" "$fv"
 }
