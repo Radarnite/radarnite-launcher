@@ -41,6 +41,11 @@ branch runs nothing (one trigger per job).
   patches, notices) comes from the v2.2.1 installer, pinned by sha256
   (`tools/payload-from-release.sh` says why it is not built in CI). A new payload = pin there the installer of a
   release built with `just release`, which takes it from the PC's dev tree.
+- `gameserver\radarnite-server.dll` (the match server) ships from `gameserver-reboot/prebuilt/`, not from the payload:
+  CI cannot build it (MSVC, MinHook and curl are not in the repo), so after a server change it is built with
+  `just vendor-server` (`build-server-pc`, then `tools/vendor-gameserver.sh import`) and committed with its manifest.
+  The manifest records the committed server sources it was built from; `tools/release.sh` refuses to release when the
+  sources changed without a new DLL, so a push to main always ships the server of its own sources.
 - `patches\fnmods.dll` (the mods of the 14.30 client) is the one game DLL built in CI: `zig cc` from `pakpatch/fnmods.c`,
   passed to `tools/release.sh --fnmods`; `just test-fnmods` runs its mock test (never in CI).
 - Optional repository secret `RN_PRIVACY_BAN`: more strings for the privacy gate to ban, one per line.

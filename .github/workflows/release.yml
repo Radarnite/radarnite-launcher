@@ -6,7 +6,9 @@
 # tools/ci-version.sh picks the version (last stable tag + 1 patch, or VERSION when higher) and writes the notes.
 # Everything builds on ubuntu-latest: zig c++ for the core and the window, makensis for the installer; the backend is
 # backend/server.mjs on the Node runtime, which comes with the rest of the payload from the pinned 2.2.1 installer
-# (tools/payload-from-release.sh).
+# (tools/payload-from-release.sh). The match server DLL is not the payload's: release.sh ships the vendored
+# gameserver-reboot/prebuilt/radarnite-server.dll and checks it against its manifest and the committed sources
+# (tools/vendor-gameserver.sh).
 # CI only compiles and checks: the test suites are run by hand before a release (native/core/test/README.md,
 # `just release-selftest`).
 # Every action is pinned to a commit SHA (its tag in a comment). Third-party actions run only in the read-only jobs:

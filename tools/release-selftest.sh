@@ -84,6 +84,8 @@ if [ -f "$EXE" ]; then
   pt=0
   while read -r h f; do [ "$(sha "x1/tools/$f")" = "$h" ] || { pt=1; echo "  tools/$f differs from paktools/"; }; done < <(grep -v '^#' "$ROOT/paktools/pak-tools.manifest")
   [ "$pt" = 0 ] && ok "installer holds the pak tools of paktools/ byte for byte" || ko "installer pak tools"
+  [ "$(sha x1/gameserver/radarnite-server.dll)" = "$(grep -v '^#' "$ROOT/gameserver-reboot/prebuilt/radarnite-server.manifest" | cut -d' ' -f1)" ] \
+    && ok "installer holds the vendored match server (gameserver-reboot/prebuilt), not the payload's" || ko "installer match server"
 fi
 
 # ---- 2/3. planted builder path / identity in the 3.0 exes: the gate must fail ----

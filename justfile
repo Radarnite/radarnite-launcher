@@ -122,6 +122,13 @@ test-fnmods:
     pc sh '{{pc_dir}}\fnmods\fnbody-mock.exe {{pc_dir}}\fnmods'
     pc sh '{{pc_dir}}\fnmods\fnbody-mock.exe {{pc_dir}}\fnmods --plain'
 
+# The match server CI ships: build it from the committed sources, then vendor it into gameserver-reboot/prebuilt with
+# its manifest (tools/vendor-gameserver.sh); commit the two files. release.sh refuses a release whose server sources
+# changed without this.
+vendor-server:
+    just build-server-pc
+    tools/vendor-gameserver.sh import gameserver-reboot/out/radarnite-server.dll
+
 # Build gameserver\radarnite-server.dll (gameserver-reboot/, the local match server) on the PC with its build.cmd and the
 # portable MSVC -> gameserver-reboot/out. MinHook's sources and headers are not in the repo: they are copied from
 # RN_MINHOOK_DIR (a folder with minhook\ and mhinc\, default the PC's Reboot build folder). Low priority, RN_JOBS
@@ -190,14 +197,18 @@ release version="3.0.0-rc.1":
     just _sync-mac   # the exes in out/ are the ones shipped, wherever they were built
     just _wait-cpu windows
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
-    # RN_GAMESERVER=<radarnite-server.dll>: that match server DLL instead of the payload's (test builds of server changes)
+    # the match server ships from gameserver-reboot/prebuilt (tools/vendor-gameserver.sh), checked here against the
+    # committed sources; RN_GAMESERVER=<radarnite-server.dll> stages that build instead (test builds of server changes)
+    gs=""
     if [ -n "${RN_GAMESERVER:-}" ]; then
       [ "$(head -c 2 "$RN_GAMESERVER")" = MZ ] || { echo "RN_GAMESERVER: not a DLL: $RN_GAMESERVER" >&2; exit 1; }
-      scp -q "$RN_GAMESERVER" "mac:{{mac_dir}}-payload/gameserver/radarnite-server.dll"; echo "match server DLL: $RN_GAMESERVER"
+      scp -q "$RN_GAMESERVER" "mac:{{mac_dir}}-gameserver.dll"; gs=" --gameserver ~/{{mac_dir}}-gameserver.dll"; echo "match server DLL: $RN_GAMESERVER"
+    else
+      tools/vendor-gameserver.sh check
     fi
     mac sh 'p=~/{{mac_dir}}-payload; for f in node/node.exe redirect/fnredirect.dll gameserver/radarnite-server.dll tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done; ls "$p"/patches/fnpakpatch.dll* >/dev/null || { echo "payload: no pak patch in patches/" >&2; exit 1; }'
     just _wait-cpu mac
-    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --fnmods pakpatch/out/fnmods.dll --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
+    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --fnmods pakpatch/out/fnmods.dll --payload ~/{{mac_dir}}-payload'"$gs"' --out dist --makensis /opt/homebrew/bin/makensis'
     mkdir -p dist
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe dist/RadarniteLauncherSetup-{{version}}.exe
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe.sha256 dist/RadarniteLauncherSetup-{{version}}.exe.sha256
@@ -331,7 +342,7 @@ backend-measure-pc: _ref-setup
 
 # Remove this tree's work folders on the Mac and the PC
 clean-remote:
-    mac sh 'rm -rf ~/{{mac_dir}} ~/{{mac_dir}}-payload ~/{{mac_dir}}-relselftest'
+    mac sh 'rm -rf ~/{{mac_dir}} ~/{{mac_dir}}-payload ~/{{mac_dir}}-relselftest ~/{{mac_dir}}-gameserver.dll'
     flock {{pc_lock}} pc sh 'if exist {{pc_dir}} rmdir /s /q {{pc_dir}}'
 
 # The 2.2.1 installer in dist/ref, checked against the published sha256

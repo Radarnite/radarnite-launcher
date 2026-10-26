@@ -16,6 +16,8 @@
 *.ilk
 # ... except the pak tools, vendored prebuilt with their manifest (tools/vendor-pak-tools.sh): the one copy that ships
 !/paktools/**
+# ... and the match server, vendored with its manifest (tools/vendor-gameserver.sh): CI cannot build it
+!/gameserver-reboot/prebuilt/**
 
 # Release artifacts
 RadarniteLauncherSetup-*.exe
