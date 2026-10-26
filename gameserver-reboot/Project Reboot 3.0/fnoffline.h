@@ -587,7 +587,7 @@ namespace FnOffline
 		}
 	}
 
-	// Dead bodies: the game removes an eliminated pawn about 3 s after its death, while the client's ragdoll (fnbody.dll
+	// Dead bodies: the game removes an eliminated pawn about 3 s after its death, while the client's ragdoll (fnmods.dll
 	// fnragdoll.c) wants it for a few seconds more. FNOFFLINE_CORPSE_SECONDS=<s> sets each dying pawn's life span to s
 	// (0 = untouched). Every death is logged with what the game had set (life span, torn off) and when the pawn goes.
 	struct FTrackedPawn { UObject* Pawn; int32 Index; double DiedAt; int Logged; };

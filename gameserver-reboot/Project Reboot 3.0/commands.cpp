@@ -1,6 +1,7 @@
 #include "commands.h"
 
 #include "FortAthenaAIBotSpawnerData.h"
+#include "GameplayStatics.h"
 
 #include <map>
 #include <string>
@@ -1014,6 +1015,94 @@ void ServerCheatHook(AFortPlayerControllerAthena* PlayerController, FString Msg)
 			CheatManager = nullptr;
 			SendMessageToConsole(PlayerController, L"Destroyed target!");
 		}
+		else if (Command == "slomo")
+		{
+			// Radarnite (fnmods.dll's slow motion): the match world's time dilation, as UCheatManager::Slomo sets
+			// WorldSettings->TimeDilation; UGameplayStatics::SetGlobalTimeDilation clamps it to the world settings' range.
+			// TimeDilation is replicated: every client follows the server.
+			float Dilation = 1.f;
+
+			if (NumArgs >= 1)
+			{
+				try { Dilation = std::stof(Arguments[1]); }
+				catch (...) {}
+			}
+
+			if (!(Dilation > 0.f))
+				Dilation = 1.f;
+
+			static auto SetGlobalTimeDilationFn = FindObject<UFunction>(L"/Script/Engine.GameplayStatics.SetGlobalTimeDilation");
+
+			if (!SetGlobalTimeDilationFn)
+			{
+				SendMessageToConsole(PlayerController, L"SetGlobalTimeDilation not found!");
+				return;
+			}
+
+			struct { UObject* WorldContextObject; float TimeDilation; } SetGlobalTimeDilationParams{ GetWorld(), Dilation };
+			static auto GameplayStaticsClass = UGameplayStatics::StaticClass();
+			GameplayStaticsClass->ProcessEvent(SetGlobalTimeDilationFn, &SetGlobalTimeDilationParams);
+
+			LOG_INFO(LogDev, "slomo {}", Dilation);
+			SendMessageToConsole(PlayerController, std::wstring(L"Time dilation " + std::to_wstring(Dilation)).c_str());
+		}
+		else if (Command == "fly" || Command == "ghost" || Command == "walk")
+		{
+			// Radarnite (fnmods.dll's fly): UCheatManager::Fly / Ghost / Walk (UE 4.26). The owning client runs
+			// ACharacter::ClientCheatFly / ClientCheatGhost / ClientCheatWalk (an RPC: its own movement prediction), and the
+			// server's copy of the pawn gets the same: bCheatFlying, flying movement (falling when walking again) and, for
+			// ghost, no collision.
+			auto Pawn = Cast<APawn>(ReceivingController->GetPawn());
+
+			if (!Pawn)
+			{
+				SendMessageToConsole(PlayerController, L"No pawn!");
+				return;
+			}
+
+			bool bFly = Command != "walk", bGhost = Command == "ghost";
+
+			static auto ClientCheatFlyFn = FindObject<UFunction>(L"/Script/Engine.Character.ClientCheatFly");
+			static auto ClientCheatGhostFn = FindObject<UFunction>(L"/Script/Engine.Character.ClientCheatGhost");
+			static auto ClientCheatWalkFn = FindObject<UFunction>(L"/Script/Engine.Character.ClientCheatWalk");
+			auto ClientFn = bGhost ? ClientCheatGhostFn : bFly ? ClientCheatFlyFn : ClientCheatWalkFn;
+
+			if (ClientFn)
+				Pawn->ProcessEvent(ClientFn, nullptr);
+
+			static auto SetActorEnableCollisionFn = FindObject<UFunction>(L"/Script/Engine.Actor.SetActorEnableCollision");
+
+			if (SetActorEnableCollisionFn)
+			{
+				struct { bool bNewActorEnableCollision; } SetActorEnableCollisionParams{ !bGhost };
+				Pawn->ProcessEvent(SetActorEnableCollisionFn, &SetActorEnableCollisionParams);
+			}
+
+			static auto CharacterMovementOffset = Pawn->GetOffset("CharacterMovement", false);
+			auto CMC = CharacterMovementOffset != -1 ? Pawn->Get<UObject*>(CharacterMovementOffset) : nullptr;
+
+			if (CMC)
+			{
+				static auto bCheatFlyingOffset = CMC->GetOffset("bCheatFlying", false);
+
+				if (bCheatFlyingOffset != -1)
+				{
+					static auto bCheatFlyingFieldMask = GetFieldMask(CMC->GetProperty("bCheatFlying"));
+					CMC->SetBitfieldValue(bCheatFlyingOffset, bCheatFlyingFieldMask, bFly);
+				}
+
+				static auto SetMovementModeFn = FindObject<UFunction>(L"/Script/Engine.CharacterMovementComponent.SetMovementMode");
+
+				if (SetMovementModeFn)
+				{
+					struct { uint8 NewMovementMode; uint8 NewCustomMode; } SetMovementModeParams{ (uint8)(bFly ? 5 : 3), 0 };   // EMovementMode: MOVE_Flying 5, MOVE_Falling 3
+					CMC->ProcessEvent(SetMovementModeFn, &SetMovementModeParams);
+				}
+			}
+
+			LOG_INFO(LogDev, "{} for {} (client RPC {}, movement component {})", Command, (void*)Pawn, (void*)ClientFn, (void*)CMC);
+			SendMessageToConsole(PlayerController, bGhost ? L"Ghost: flying through walls" : bFly ? L"Flying" : L"Walking");
+		}
 		else if (Command == "bugitgo")
 		{
 			if (Arguments.size() <= 3)
@@ -1052,6 +1141,8 @@ void ServerCheatHook(AFortPlayerControllerAthena* PlayerController, FString Msg)
 cheat giveitem <ShortWID> <Count=1> - Gives a weapon to the executing player, if inventory is full drops a pickup on the player.
 cheat summon <BlueprintClassPathName> <Count=1> - Summons the specified blueprint class at the executing player's location. Note: There is a limit on the count.
 cheat bugitgo <X> <Y> <Z> - Teleport to a location.
+cheat slomo <Dilation=1> - Slow motion (time dilation of the match).
+cheat fly / ghost / walk - Fly, fly through walls, walk again.
 cheat launch <X> <Y> <Z> - Launches a player.
 cheat listplayers - Gives you all players names.
 cheat pausesafezone - Pauses the zone.
