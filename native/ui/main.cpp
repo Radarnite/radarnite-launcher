@@ -623,7 +623,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
                  items.empty() ? "" : ",", json(sc[i].id).c_str(), sc[i].width, sc[i].height, sc[i].scale, ok ? "true" : "false", msSinceStart() - ts, iss.c_str());
         items += line;
         if (!ok) failed++;
-        delete app; delete c;
+        delete c; delete app;   // the core first: a pending mock timer (an import's next report) never reaches a deleted App
     }
 
     // 3) interactions on an offscreen window state (scenario 20: the bots form)
