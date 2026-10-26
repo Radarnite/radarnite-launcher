@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# test-match-pc.sh - one background match on the PC with this checkout's fnbody.dll, match server DLL and backend
+# test-match-pc.sh - one background match on the PC with this checkout's fnmods.dll, match server DLL and backend
 # (tools/test-match-bg.ps1 does the run there), results in dist/test-match/. Developer test, never in CI.
 #   tools/test-match-pc.sh <pc work dir> [minutes] ["NAME=value;NAME=value" for the game processes]
 # RN_PLAYMODE=legal|legal-vbucks|unlocked: the run's config.json play mode (profile "bgtest"; default none).
 # RN_BOTS_AI=1: the bots use the game's own AI; RN_BOT_SKILL=1-10 their difficulty.
 # RN_AUTOSTART=<s>: the bus leaves s seconds after joining (default 0: the match stays in the warmup).
 # RN_BOTS=<n>: how many bots (default 6).
+# RN_MODS_JSON=<file>: the run's mods.json (fnmods.dll's settings; default: the installed launcher's, or none).
+# RN_LAUNCHER_DIR=<PC folder>: the launcher folder copied for the run (default the installed launcher).
 # Waits (RN_WAIT_MIN, default 10 minutes) while the PC is busy, another game process runs or the Paks just changed.
 # The launcher folder of the run (rc\) is a copy
 # of the installed launcher, refreshed from it on every run, with this checkout's files on top:
-# pakpatch/out/fnbody.dll, gameserver-reboot/out/radarnite-server.dll and play/out/radarnite-play.exe when built,
+# pakpatch/out/fnmods.dll, gameserver-reboot/out/radarnite-server.dll and play/out/radarnite-play.exe when built,
 # backend/*.mjs and backend/seasons always.
 set -euo pipefail
 DIR="${1:?usage: test-match-pc.sh <pc dir> [minutes] [env]}"
@@ -40,10 +42,14 @@ PS
   sleep 30
 done
 
-inst='%LOCALAPPDATA%\Programs\Radarnite Launcher'
+inst="${RN_LAUNCHER_DIR:-%LOCALAPPDATA%\Programs\Radarnite Launcher}"
 pc sh "if not exist $DIR mkdir $DIR"
 pc sh "robocopy \"$inst\" $DIR\\rc /MIR /XD cache port /XF config.json update.log \"Uninstall Radarnite Launcher.exe\" /NFL /NDL /NJH /NJS /NP >nul & if errorlevel 8 (exit 1) else (exit 0)"
-[ -f pakpatch/out/fnbody.dll ] && scp -q pakpatch/out/fnbody.dll "windows:$FWD/rc/patches/fnbody.dll"
+if [ -f pakpatch/out/fnmods.dll ]; then
+  scp -q pakpatch/out/fnmods.dll "windows:$FWD/rc/patches/fnmods.dll"
+  pc sh "if exist $DIR\\rc\\patches\\fnbody.dll del $DIR\\rc\\patches\\fnbody.dll"
+fi
+[ -n "${RN_MODS_JSON:-}" ] && scp -q "$RN_MODS_JSON" "windows:$FWD/rc/mods.json"
 [ -f gameserver-reboot/out/radarnite-server.dll ] && scp -q gameserver-reboot/out/radarnite-server.dll "windows:$FWD/rc/gameserver/radarnite-server.dll"
 [ -f play/out/radarnite-play.exe ] && scp -q play/out/radarnite-play.exe "windows:$FWD/rc/radarnite-play.exe"
 scp -q backend/*.mjs "windows:$FWD/rc/backend/"

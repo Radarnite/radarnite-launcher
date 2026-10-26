@@ -13,7 +13,7 @@
 # the repo; the gameserver is an MSVC project whose MinHook and curl libraries are not in the repo; and the DLLs loaded
 # into the game (redirect, the pak patches) ship as the binaries that were played with, not rebuilt by another
 # toolchain. A new payload ships by publishing a release built with `just release` and pinning it here.
-# patches\fnbody.dll (body sliders) is not in 2.2.1: release.yml builds it from pakpatch/fnbody.c, release.sh --fnbody.
+# patches\fnmods.dll (the 14.30 mods) is not in 2.2.1: release.yml builds it from pakpatch/fnmods.c, release.sh --fnmods.
 set -euo pipefail
 DEST="${1:?usage: payload-from-release.sh <dest-dir> [<version> <sha256>]}"
 VERSION="${2:-2.2.1}"

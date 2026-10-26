@@ -1,6 +1,6 @@
 /*
- * fnragdoll.c - ragdoll deaths in Fortnite 14.30, part of fnbody.dll (#included by fnbody.c, which owns the engine
- * access: object array, names, reflection, ProcessEvent, the game-thread tick and the fault guard).
+ * fnragdoll.c - the ragdoll deaths module of fnmods.dll (#included by fnmods.c, which owns the engine access: object
+ * array, names, reflection, ProcessEvent, the game-thread tick and the fault guard).
  *
  * The game plays a "digitize" effect when a player dies: the pawn's blueprint (PlayerPawn_Athena_C.OnDeathPlayEffects)
  * swaps the character's materials for dissolving ones and sends a beam to the sky, and the body vanishes. Undoing that
@@ -16,9 +16,9 @@
  *   - after RAGDOLL_HOLD_MS lets it sink through the floor (collision off, gravity on) and hides it.
  * The pawn actor itself is the server's: it removes it about 3 s after the death unless the match server sets a longer
  * life span (gameserver-reboot fnoffline.h, FNOFFLINE_CORPSE_SECONDS). The player's own pawn keeps the game's effect.
- * Everything is logged to fnbody.log with a "ragdoll:" prefix, including the events the game runs on a dying pawn.
+ * Everything is logged to fnmods.log with a "ragdoll:" prefix, including the events the game runs on a dying pawn.
  *
- * FNRAGDOLL=0 turns it off (the game's own effect), FNRAGDOLL=observe logs what happens at each death without touching
+ * mods.json "ragdoll" or FNRAGDOLL=0 turns it off (the game's own effect), FNRAGDOLL=observe logs what happens at each death without touching
  * it, FNRAGDOLL=alternate does observe / ragdoll on every other death (test runs).
  */
 
@@ -29,70 +29,6 @@
 enum { RD_OFF, RD_ON, RD_OBSERVE, RD_ALTERNATE };
 static int g_rd_mode = RD_ON;
 static void *g_skip_fn[4]; static int g_nskip;   /* OnDeathPlayEffects UFunctions (pe_hook drops them) */
-
-/* a bit of a bitfield bool property (FBoolProperty: FieldSize 0x78, ByteOffset 0x79, ByteMask 0x7A, FieldMask 0x7B) */
-typedef struct { int off; u8 mask; } boolp;
-static boolp bool_prop(void *st, const char *name)
-{
-    boolp b = { -1, 0 };
-    void *f = find_prop(st, name);
-    if (!f) return b;
-    b.off = AT(f, P_OFFSET, int32_t) + AT(f, 0x79, u8);
-    b.mask = AT(f, 0x7B, u8);
-    if (!b.mask) b.mask = 0xFF;   /* a plain bool */
-    return b;
-}
-static int bool_get(void *o, boolp b) { return b.off >= 0 && (AT(o, b.off, u8) & b.mask) != 0; }
-
-/* classes by package and name, in one pass over the objects */
-typedef struct { const char *pkg, *name; void *found; } cls_req;
-static void find_classes(cls_req *req, int n)
-{
-    for (int32_t i = 0; i < g_objs->num; i++) {
-        void *o = obj_at(i, NULL); char b[128];
-        if (!o || !name_str(AT(o, O_NAME, uint32_t), b, sizeof b)) continue;
-        for (int k = 0; k < n; k++) {
-            if (req[k].found || strcmp(b, req[k].name)) continue;
-            void *c = AT(o, O_CLASS, void *), *outer = AT(o, O_OUTER, void *);
-            if ((obj_name_is(c, "Class") || obj_name_is(c, "BlueprintGeneratedClass")) && obj_name_is(outer, req[k].pkg)) req[k].found = o;
-        }
-    }
-}
-static void *find_object_named(const char *name)
-{
-    for (int32_t i = 0; i < g_objs->num; i++) { void *o = obj_at(i, NULL); if (o && obj_name_is(o, name)) return o; }
-    return NULL;
-}
-
-/* a UFunction call: parameters by name into a zeroed buffer of the function's size */
-typedef struct { void *fn; int size; } ufn;
-static ufn fn_of(void *cls, const char *name)
-{
-    ufn f = { NULL, 0 };
-    if (!cls) return f;
-    f.fn = find_func(cls, name);
-    if (f.fn) f.size = AT(f.fn, S_PROPSIZE, int32_t);
-    if (f.size < 0 || f.size > 512) f.fn = NULL;
-    return f;
-}
-static int parm(ufn f, const char *name) { return f.fn ? prop_off(f.fn, name) : -1; }
-static void call(void *obj, ufn f, u8 *parms) { if (obj && f.fn) g_pe(obj, f.fn, parms); }
-static void call0(void *obj, ufn f) { u8 p[512]; memset(p, 0, sizeof p); call(obj, f, p); }
-static void call_bool(void *obj, ufn f, const char *pn, int v)
-{
-    u8 p[512]; memset(p, 0, sizeof p);
-    int o = parm(f, pn); if (o < 0 && f.size > 0) o = 0;
-    if (o >= 0) p[o] = (u8)v;
-    call(obj, f, p);
-}
-static void call_bool2(void *obj, ufn f, const char *a, int va, const char *b, int vb)
-{
-    u8 p[512]; memset(p, 0, sizeof p);
-    int oa = parm(f, a), ob = parm(f, b);
-    if (oa >= 0) p[oa] = (u8)va;
-    if (ob >= 0) p[ob] = (u8)vb;
-    call(obj, f, p);
-}
 
 static struct {
     int ok;
@@ -205,8 +141,6 @@ static const char *cls_name(void *o, char *b, int cap) { return obj_name(o ? AT(
 /* A copy of the pawn class's vtable (with the RTTI pointer in front of it, vtbl[-1]) whose ProcessEvent entry is
    pe_hook. The hook only compares and forwards: it runs inside the engine, outside the fault guard. Calls on watched
    pawns go to a ring the tick reads (names resolved there). */
-#define VT_SLOTS 0x400
-#define PE_INDEX 0x43
 typedef struct { void **orig, **clone; process_event_fn pe; } vtswap;   /* pe: the class's own entry (AActor's) */
 static vtswap g_vt[8]; static int g_nvt;
 static volatile LONG g_skip_count;
@@ -245,22 +179,6 @@ static void add_skip_of(void *cls)
     g_skip_fn[g_nskip++] = f;
 }
 static int was_skipped(void *pawn) { for (int k = 0; k < SKIPPED; k++) if (g_skipped[k] == pawn) return 1; return 0; }
-/* AActor's ProcessEvent: the entry of Actor's class default object (its vtable is AActor's own). A pawn class's entry
-   must be that one or UObject's, so the swapped slot is surely ProcessEvent (3 arguments, what pe_hook takes). */
-static void *actor_pe(void)
-{
-    static void *pe; static int tried;
-    if (tried) return pe;
-    tried = 1;
-    for (int32_t i = 0; i < g_objs->num && !pe; i++) {
-        int32_t fl; void *o = obj_at(i, &fl);
-        if (!o || AT(o, O_CLASS, void *) != RD.actor || !(AT(o, O_FLAGS, uint32_t) & RF_ClassDefaultObject)) continue;
-        void **vt = AT(o, 0, void **); void *e;
-        if (vt && rd(vt + PE_INDEX, &e, sizeof e)) pe = e;
-    }
-    logf_("ragdoll: AActor's ProcessEvent %p (exe+0x%llx)", pe, pe ? (unsigned long long)((u8 *)pe - g_base) : 0ull);
-    return pe;
-}
 static int vt_swap(void *o)
 {
     void **vt = AT(o, 0, void **);
@@ -270,7 +188,7 @@ static int vt_swap(void *o)
     if (!v) {
         if (g_nvt >= (int)(sizeof g_vt / sizeof g_vt[0])) return 0;
         /* actors override ProcessEvent (AActor::ProcessEvent checks the world, then calls UObject's): the entry differs
-           from the UObject one fnbody found */
+           from the UObject one the engine layer found */
         void *e = vt[PE_INDEX];
         if (e != (void *)g_pe && e != actor_pe()) { logf_("ragdoll: vtable %p: entry 0x%x %p is not ProcessEvent, left alone", vt, PE_INDEX, e); return 0; }
         void **mem = VirtualAlloc(NULL, (VT_SLOTS + 1) * sizeof(void *), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);

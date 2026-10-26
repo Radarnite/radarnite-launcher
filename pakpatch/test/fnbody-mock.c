@@ -1,5 +1,5 @@
 /*
- * fnbody-mock.exe - runs fnbody.dll against a fake engine built in this process: the GUObjectArray pattern, the
+ * fnbody-mock.exe - runs fnmods.dll (its body sliders module) against a fake engine built in this process: the GUObjectArray pattern, the
  * ProcessEvent string reference, an FNamePool, classes / properties / functions with UE 4.26's layout, a character
  * (base mesh + body part with FNBody_* morph targets and a dynamic material instance carrying FNBody_* parameters)
  * and an "UnrealWindow" pumping messages. It checks that the DLL finds everything, calls SetMorphTarget with
@@ -7,7 +7,7 @@
  * another name staying idle. It cannot check the real game's layout.
  *
  * Build: zig cc -target x86_64-windows-gnu -O1 -o fnbody-mock.exe fnbody-mock.c -luser32
- * Run:   fnbody-mock.exe <folder with fnbody.dll> [--plain]   (exit 0 = pass; names XOR-encoded as in 14.30 unless --plain)
+ * Run:   fnbody-mock.exe <folder with fnmods.dll> [--plain]   (exit 0 = pass; names XOR-encoded as in 14.30 unless --plain)
  */
 #include <windows.h>
 #include <stdio.h>
@@ -177,12 +177,12 @@ int main(int argc, char **argv)
 
     char dir[MAX_PATH], dll[MAX_PATH], log[MAX_PATH];
     snprintf(dir, sizeof dir, "%s", argc > 1 ? argv[1] : ".");
-    snprintf(log, sizeof log, "%s\\fnbody.log", dir); DeleteFileA(log);
+    snprintf(log, sizeof log, "%s\\fnmods.log", dir); DeleteFileA(log);
     SetEnvironmentVariableA("FNOFFLINE_SANDBOX", dir);
-    snprintf(dll, sizeof dll, "%s\\fnbody.dll", dir);
+    snprintf(dll, sizeof dll, "%s\\fnmods.dll", dir);
     if (!LoadLibraryA(dll)) { printf("FAIL: LoadLibrary %lu\n", GetLastError()); return 1; }
     /* the same code under a second name (an old launcher injects it as fnpakpatch.dll): must stay idle */
-    char dll2[MAX_PATH]; snprintf(dll2, sizeof dll2, "%s\\fnbody-copy.dll", dir);
+    char dll2[MAX_PATH]; snprintf(dll2, sizeof dll2, "%s\\fnmods-copy.dll", dir);
     if (!CopyFileA(dll, dll2, FALSE) || !LoadLibraryA(dll2)) { printf("FAIL: second copy %lu\n", GetLastError()); return 1; }
     DWORD t0 = GetTickCount();
     while (GetTickCount() - t0 < 6000) {
