@@ -12,6 +12,19 @@ $paks = Join-Path $Build 'FortniteGame\Content\Paks'; $off = Join-Path $Build 'o
 $list = @((Get-Content $cc -Raw -Encoding UTF8 | ConvertFrom-Json).items | ForEach-Object { $_.paks } | Where-Object { $_ -like '*.pak' } | Sort-Object -Unique |
           ForEach-Object { Join-Path $paks $_ } | Where-Object { Test-Path $_ })
 if (-not $list) { 'no custom paks'; exit 0 }
+# a pak that passed before and whose pak and .sig keep their size and write time (rsync's quick check) is not read again:
+# offline\sigfit-checked.json, name -> "pak size:pak time:sig size:sig time" of the last pass
+$okFile = Join-Path $off 'sigfit-checked.json'
+function Stamp([string]$p) { $s = [IO.Path]::ChangeExtension($p, '.sig'); if (-not (Test-Path $s)) { return '' }
+  $a = Get-Item $p; $b = Get-Item $s; "$($a.Length):$($a.LastWriteTimeUtc.Ticks):$($b.Length):$($b.LastWriteTimeUtc.Ticks)" }
+$known = @{}
+if (Test-Path $okFile) { try { (Get-Content $okFile -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $known[$_.Name] = "$($_.Value)" } } catch { $known = @{} } }
+$all = $list
+$list = @($all | Where-Object { $known[(Split-Path $_ -Leaf)] -ne (Stamp $_) })
+$same = $all.Count - $list.Count
+function Save-Checked { $o = [ordered]@{}; foreach ($p in $all) { $n = Split-Path $p -Leaf; if ($known[$n]) { $o[$n] = $known[$n] } }
+  [IO.File]::WriteAllText($okFile, ([pscustomobject]$o | ConvertTo-Json)) }
+if (-not $list) { "0 fitted, $($all.Count) already fine ($same unchanged since their last check), 0 failed"; exit 0 }
 $tmp = Join-Path $off 'sigfit-tmp'; New-Item -ItemType Directory $tmp -Force | Out-Null
 $env:DOTNET_ROOT = "$env:LOCALAPPDATA\fp-dotnet"
 $ErrorActionPreference = 'Continue'   # its progress notes on stderr are not errors (Windows PowerShell 5)
@@ -23,8 +36,8 @@ if ($LASTEXITCODE -gt 1 -or $results.Count -ne $list.Count) { throw "fn-modkit s
 $bak = Join-Path $off ('backup-sigfit-' + (Get-Date -Format 'yyyyMMdd-HHmmss')); $done = 0; $bad = 0
 foreach ($line in $results) {
     $r = $line | ConvertFrom-Json
-    if (-not $r.ok) { $bad++; "FAILED $($r.pak): $($r.error)"; continue }
-    if ($r.already) { continue }
+    if (-not $r.ok) { $bad++; $known.Remove($r.pak); "FAILED $($r.pak): $($r.error)"; continue }
+    if ($r.already) { $known[$r.pak] = Stamp (Join-Path $paks $r.pak); continue }
     New-Item -ItemType Directory $bak -Force | Out-Null
     foreach ($ext in '.pak', '.sig') {
         $name = [IO.Path]::ChangeExtension($r.pak, $ext)
@@ -32,7 +45,9 @@ foreach ($line in $results) {
         Move-Item (Join-Path $tmp $name) (Join-Path $paks $name) -Force
     }
     $done++; "fitted $($r.pak) <- $($r.Donor).sig ($($r.Chunks) chunks, $($r.Files) files)"
+    $known[$r.pak] = Stamp (Join-Path $paks $r.pak)
 }
 Remove-Item $tmp -Recurse -Force
-"$done fitted, $($list.Count - $done - $bad) already fine, $bad failed" + $(if ($done) { "; originals in $bak" } else { '' })
+Save-Checked
+"$done fitted, $($all.Count - $done - $bad) already fine$(if ($same) { " ($same unchanged since their last check)" }), $bad failed" + $(if ($done) { "; originals in $bak" } else { '' })
 if ($bad) { exit 1 }

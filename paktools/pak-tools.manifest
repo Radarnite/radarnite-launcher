@@ -1,5 +1,5 @@
 # Radarnite Launcher pak tools: fn-modkit sigfit and the game guard from fn-viewer tools/fn-modkit (tools/vendor-pak-tools.sh)
-# version b3eef211
+# version 727eba99
 ce70a0b4923f9fc0beaec77bf7edf68190ba14f18c5c2813cfb560012f247787  fn-modkit-sigfit/Berrysoft.XXTea.dll
 5c9b60c21f1140792eb5094fa9a6fa738bbeda5325ec9b06e2532d2d402e49cc  fn-modkit-sigfit/Blake3.dll
 e5eeaf6d263c493619982fd3638e6135077311d08c961e1fe128f9107d29ebc6  fn-modkit-sigfit/BouncyCastle.Cryptography.dll
@@ -31,8 +31,8 @@ e32c17ed422f5e6419050fe4bb43f752ed11c8a7796c45f693865237d8a200a3  fn-modkit-sigf
 f1746ed5806fe466af60938dfe7543ea524716816575fbb6a22d83cc0fc38673  fn-modkit-sigfit/Zlib-ng.NET.dll
 b285bb9f59928becb8e048bf2a75e872f6555f8773d7b72386a9f77f447f425c  fn-modkit-sigfit/ZstdSharp.dll
 b77ce4e30c030057ec6bf4af7fb4eb203eff64b68b583653ad976fe936d26370  fn-modkit-sigfit/fn-modkit.deps.json
-a7765c63202aae79cf00e12e1effd132ca630bf02ad465fc862e3a4d89c88a23  fn-modkit-sigfit/fn-modkit.dll
+030cd90bb3ff1c630f8bb8e0c929565c101c32a6312d8ec75dcdd9f2c2709763  fn-modkit-sigfit/fn-modkit.dll
 39fd969dee95b3d879c7e87a8afe24602f91b3458da3831481f81be991f1005e  fn-modkit-sigfit/fn-modkit.exe
 2ca90a18bac3b48286c20acd3c1ae4f83fa38de5acf4b2f8cdd277bf90dc9bd7  fn-modkit-sigfit/fn-modkit.runtimeconfig.json
 907211a6d852c531b8d46a9b15dc7132d71656f7cd6e9d469727d494bc29f645  game-guard.ps1
-918527940f7d00f6af5a11989ef93114b41fb7bc3305ef1f782f36ab099b1354  sigfit-installed.ps1
+f0a8c2e36bb7271fa7daef5cf96ce4a2d6a4ddb2804991a5b54086a488132547  sigfit-installed.ps1
