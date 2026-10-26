@@ -598,6 +598,7 @@ int selftest(HINSTANCE inst, std::wstring dir) {
             for (int pass = 0; pass < 3; pass++) {
                 rt->BeginDraw(); app->paint((float)sc[i].width, (float)sc[i].height); rt->EndDraw();
                 if (pass == 0) for (int t = 0; t < sc[i].tabs; t++) app->key(VK_TAB, false, false);   // keyboard focus scenarios
+                if (pass == 0 && sc[i].port) app->portSceneFramed(sc[i].port);   // what needs the laid-out panel
                 if (pass == 0 && sc[i].clickActClose) {
                     D2D1_RECT_F xr = app->actCloseRect();
                     float cx = (xr.left + xr.right) / 2, cy = (xr.top + xr.bottom) / 2;

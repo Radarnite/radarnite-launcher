@@ -144,6 +144,8 @@ const MockScenario kScenarios[] = {
     { L"52-poster-activity-760x520", 760, 520, 1.0f, true },
     // the same after a click on Activity's X: the panel closed
     { L"53-poster-activity-closed-760x520", 760, 520, 1.0f, true, 0, 0, 0, true },
+    // an import started from a card far down the grid: its progress card comes into view at once
+    { L"54-port-import-started-scrolled", 1280, 800, 1.0f, false, 0, 0, 11 },
 };
 
 // ---- the cosmetics (tests/ui-port-catalog.json, padded to the size of the real list with older made-up items)
@@ -470,7 +472,7 @@ private:
     std::shared_ptr<PortCatalog> cat_;
     std::shared_ptr<PortJob> job_;
     int jobSeq_ = 0;
-    bool portScenario() const { int n = _wtoi(id_.c_str()); return n >= 27 && n <= 41; }
+    bool portScenario() const { int n = _wtoi(id_.c_str()); return (n >= 27 && n <= 41) || n == 54; }
 };
 
 } // namespace

@@ -264,8 +264,10 @@ public:
     // Selftest: open the panel on the selected build and put it in a state: 1 open, 2 filters popup, 3 Import all
     // dialog, 4 preview of the second card, 5 three cards selected and one hovered, 6 scrolled to the end, 7 preview
     // of the first card, 8 the item sheet with its whole shop history, 9 the same scrolled to its appearance history
-    // (full history open), 10 the player's controls (paused at 0:05 of 0:30, volume 60 %, hovered)
+    // (full history open), 10 the player's controls (paused at 0:05 of 0:30, volume 60 %, hovered), 11 an import
+    // started from a card far down the grid (portSceneFramed, once the first frame laid the grid out)
     void portScene(int what);
+    void portSceneFramed(int what);
     Images& images() { return img_; }
     void imagesArrived();                       // WM_APP_IMG
     // WM_APP_VIDEO: the first frame repaints the window, a status only the player's bar

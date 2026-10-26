@@ -174,6 +174,9 @@ void App::portEvent(Event& e) {
         if (e.job && (e.job->phase == L"done" || e.job->phase == L"stopped" || e.job->phase == L"failed")) { pjEnd_ = std::move(e.job); e.job.reset(); }
         else if (e.job) pjEnd_.reset();
         bool ended = pj_ && !e.job;
+        // a new import: its card sits at the top of the scrolled body, so the body goes back to the top to show it
+        // (later views leave the scroll alone: the grid stays browsable while it runs)
+        if (!pj_ && e.job) pScroll_ = 0;
         pj_ = std::move(e.job);
         pjAt_ = GetTickCount64();
         if (ended && pCat_ && !pBuild_.empty()) core_->portCatalog(pBuild_, false);
@@ -228,7 +231,7 @@ void App::portShow(bool open) {
     menu_ = 0;
     if (open) {
         if (pBuild_ != selected_ || !pCat_) portLoad(false);
-        else { pDirty_ = true; }
+        else { pDirty_ = true; if (pj_) pScroll_ = 0; }   // reopened during an import: its card in view
         focus_ = 0;
     } else {
         pPop_ = 0; pDlg_ = false; pPv_ = -1;
@@ -1978,6 +1981,18 @@ void App::portScene(int what) {
     invalidate();
 }
 
+void App::portSceneFramed(int what) {
+    if (what != 11 || !pCat_) return;
+    // the grid scrolled far down and a card imported like from its preview: the dialog's Import, then the core's first view
+    pScroll_ = 12000;
+    int item = -1;
+    for (size_t k = pList_.size() / 3; k < pList_.size() && item < 0; k++) if (importable(pCat_->items[pList_[k]])) item = pList_[k];
+    if (item < 0) return;
+    portConfirm({ item }, false);
+    portActivate(ID_P_DLG_IMPORT);
+    drain();
+}
+
 std::vector<std::pair<std::wstring, bool>> App::portCheck(float W, float H) {
     std::vector<std::pair<std::wstring, bool>> out;
     auto frame = [&] { rt_->BeginDraw(); paint(W, H); rt_->EndDraw(); };
@@ -2029,6 +2044,22 @@ std::vector<std::pair<std::wstring, bool>> App::portCheck(float W, float H) {
     check(L"End scrolls the last card into view", pCursor_ == (int)pList_.size() - 1 && pScroll_ > 0);
     key(VK_HOME, false, false); frame();
     check(L"Home goes back to the top", pCursor_ == 0 && pScroll_ < 1);
+    // an import started far down the grid (a card's preview, then the dialog): its progress card is in view at once
+    setFocus(ID_P_GRID, true); key(VK_END, false, false); frame();
+    {
+        int item = pCursor_ >= 0 && pCursor_ < (int)pList_.size() ? pList_[pCursor_] : -1;
+        for (int k = (int)pList_.size() - 1; k >= 0 && (item < 0 || !importable(pCat_->items[item])); k--) item = pList_[k];
+        bool scrolled = pScroll_ > 0;
+        portPreviewOpen(item); drain(); frame();
+        click(ID_P_PV_IMPORT);
+        click(ID_P_DLG_IMPORT);
+        bool shown = pj_ && pJobR_.bottom > pBody_.top && pJobR_.top < pBody_.bottom;
+        check(L"an import started far down the grid shows its progress card at once", scrolled && shown);
+        click(ID_P_STOP);
+        for (int i = 0; i < 40 && pj_; i++) { Sleep(50); drain(); }
+        portActivate(ID_P_JOBX);
+        pScroll_ = 0; pCursor_ = 0; frame();
+    }
     click(ID_P_IMPORTALL);
     bool dlgAll = pDlg_ && (int)pPending_.size() == pTodo_;
     click(ID_P_DLG_IMPORT);
