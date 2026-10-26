@@ -41,7 +41,7 @@ build:
     if just _cpu-ok mac; then just build-mac; else echo "Mac busy or away: building the core and the window on the PC" >&2; just build-pc; fi
     just build-backend
     just build-play
-    just build-fnbody
+    just build-fnmods
 
 # Build the core on the Mac: native/core/out/librncore.a and rn-core-cli.exe (as RN_VERSION when set)
 build-core: (_wait-cpu "mac") _sync-mac
@@ -86,41 +86,41 @@ build-play: (_wait-cpu "mac") _sync-mac
     mac get {{mac_dir}}/play/out/radarnite-play.exe play/out/radarnite-play.exe
     ls -l play/out/radarnite-play.exe
 
-# Build patches/fnbody.dll (pakpatch/fnbody.c, the body sliders of fn-port outfits in 14.30) and its mock test on the
-# Mac with zig cc, as release.yml does -> pakpatch/out
-build-fnbody: (_wait-cpu "mac") _sync-mac
-    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/pakpatch && rm -rf out && mkdir out && {{zig}} cc -target x86_64-windows-gnu -O2 -shared -s -o out/fnbody.dll fnbody.c -luser32 && {{zig}} cc -target x86_64-windows-gnu -O1 -o out/fnbody-mock.exe test/fnbody-mock.c -luser32'
+# Build patches/fnmods.dll (pakpatch/fnmods.c: the mods of 14.30, body sliders and ragdolls among them) and its mock
+# test on the Mac with zig cc, as release.yml does -> pakpatch/out
+build-fnmods: (_wait-cpu "mac") _sync-mac
+    mac sh 'set -o pipefail; cd ~/{{mac_dir}}/pakpatch && rm -rf out && mkdir out && {{zig}} cc -target x86_64-windows-gnu -O2 -shared -s -o out/fnmods.dll fnmods.c -luser32 && {{zig}} cc -target x86_64-windows-gnu -O1 -o out/fnbody-mock.exe test/fnbody-mock.c -luser32'
     mkdir -p pakpatch/out
-    mac get {{mac_dir}}/pakpatch/out/fnbody.dll pakpatch/out/fnbody.dll
+    mac get {{mac_dir}}/pakpatch/out/fnmods.dll pakpatch/out/fnmods.dll
     mac get {{mac_dir}}/pakpatch/out/fnbody-mock.exe pakpatch/out/fnbody-mock.exe
-    ls -l pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe
+    ls -l pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe
 
-# The same build of fnbody.dll and its mock test on the PC (zig in %LOCALAPPDATA%\fp-tools\zig), when the Mac is busy
-build-fnbody-pc:
+# The same build of fnmods.dll and its mock test on the PC (zig in %LOCALAPPDATA%\fp-tools\zig), when the Mac is busy
+build-fnmods-pc:
     #!/usr/bin/env bash
     set -euo pipefail
     exec 9>{{pc_lock}}; flock 9
     just _wait-cpu windows
-    pc sh '(if exist {{pc_dir}}\fnbody-src rmdir /s /q {{pc_dir}}\fnbody-src) & mkdir {{pc_dir}}\fnbody-src\test'
-    scp -q pakpatch/*.c 'windows:{{pc_fwd}}/fnbody-src/'
-    scp -q pakpatch/test/*.c 'windows:{{pc_fwd}}/fnbody-src/test/'
-    pc sh 'cd /d {{pc_dir}}\fnbody-src && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O2 -shared -s -o fnbody.dll fnbody.c -luser32 && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O1 -o fnbody-mock.exe test\fnbody-mock.c -luser32'
+    pc sh '(if exist {{pc_dir}}\fnmods-src rmdir /s /q {{pc_dir}}\fnmods-src) & mkdir {{pc_dir}}\fnmods-src\test'
+    scp -q pakpatch/*.c 'windows:{{pc_fwd}}/fnmods-src/'
+    scp -q pakpatch/test/*.c 'windows:{{pc_fwd}}/fnmods-src/test/'
+    pc sh 'cd /d {{pc_dir}}\fnmods-src && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O2 -shared -s -o fnmods.dll fnmods.c -luser32 && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O1 -o fnbody-mock.exe test\fnbody-mock.c -luser32'
     mkdir -p pakpatch/out
-    scp -q 'windows:{{pc_fwd}}/fnbody-src/fnbody.dll' 'windows:{{pc_fwd}}/fnbody-src/fnbody-mock.exe' pakpatch/out/
-    ls -l pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe
+    scp -q 'windows:{{pc_fwd}}/fnmods-src/fnmods.dll' 'windows:{{pc_fwd}}/fnmods-src/fnbody-mock.exe' pakpatch/out/
+    ls -l pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe
 
-# fnbody.dll against the fake engine of pakpatch/test/fnbody-mock.c on the PC, names encoded as in 14.30 and plain
-# (exit 0 = pass; never in CI)
-test-fnbody:
+# fnmods.dll's body sliders against the fake engine of pakpatch/test/fnbody-mock.c on the PC, names encoded as in 14.30
+# and plain (exit 0 = pass; never in CI)
+test-fnmods:
     #!/usr/bin/env bash
     set -euo pipefail
-    test -f pakpatch/out/fnbody-mock.exe || just build-fnbody
+    test -f pakpatch/out/fnbody-mock.exe || just build-fnmods
     exec 9>{{pc_lock}}; flock 9
     just _wait-cpu windows
-    pc sh '(if exist {{pc_dir}}\fnbody rmdir /s /q {{pc_dir}}\fnbody) & mkdir {{pc_dir}}\fnbody'
-    scp -q pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe 'windows:{{pc_fwd}}/fnbody/'
-    pc sh '{{pc_dir}}\fnbody\fnbody-mock.exe {{pc_dir}}\fnbody'
-    pc sh '{{pc_dir}}\fnbody\fnbody-mock.exe {{pc_dir}}\fnbody --plain'
+    pc sh '(if exist {{pc_dir}}\fnmods rmdir /s /q {{pc_dir}}\fnmods) & mkdir {{pc_dir}}\fnmods'
+    scp -q pakpatch/out/fnmods.dll pakpatch/out/fnbody-mock.exe 'windows:{{pc_fwd}}/fnmods/'
+    pc sh '{{pc_dir}}\fnmods\fnbody-mock.exe {{pc_dir}}\fnmods'
+    pc sh '{{pc_dir}}\fnmods\fnbody-mock.exe {{pc_dir}}\fnmods --plain'
 
 # Build gameserver\radarnite-server.dll (gameserver-reboot/, the local match server) on the PC with its build.cmd and the
 # portable MSVC -> gameserver-reboot/out. MinHook's sources and headers are not in the repo: they are copied from
@@ -159,9 +159,9 @@ season-data-pc season="14" build='S:\FortniteBuilds\14.30':
     scp -q "windows:$(echo '{{build}}' | tr '\\' /)/offline/cosmetics.json" dist/season-cosmetics.json
     python3 tools/season-data.py dist/season{{season}}-dump.json dist/season-cosmetics.json backend/seasons/season{{season}}.json
 
-# One local match of 14.30 in the background on the PC with this checkout's fnbody.dll, match server and backend
+# One local match of 14.30 in the background on the PC with this checkout's fnmods.dll, match server and backend
 # (tools/test-match-pc.sh, tools/test-match-bg.ps1): off screen, muted, idle priority, no input; logs, screenshots and
-# clip.mp4 in dist/test-match/. env: "NAME=value;..." for the game processes (FNRAGDOLL, FNOFFLINE_TEST_DEATHS, ...).
+# clip.mp4 in dist/test-match/. env: "NAME=value;..." for the game processes (FNRAGDOLL, FNMODS_TEST, FNOFFLINE_TEST_DEATHS, ...).
 # Refuses while a game runs on the PC. Never in CI.
 test-match-pc minutes="4" env="":
     #!/usr/bin/env bash
@@ -197,7 +197,7 @@ release version="3.0.0-rc.1":
     fi
     mac sh 'p=~/{{mac_dir}}-payload; for f in node/node.exe redirect/fnredirect.dll gameserver/radarnite-server.dll tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done; ls "$p"/patches/fnpakpatch.dll* >/dev/null || { echo "payload: no pak patch in patches/" >&2; exit 1; }'
     just _wait-cpu mac
-    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --fnbody pakpatch/out/fnbody.dll --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
+    mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --fnmods pakpatch/out/fnmods.dll --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
     mkdir -p dist
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe dist/RadarniteLauncherSetup-{{version}}.exe
     mac get {{mac_dir}}/dist/RadarniteLauncherSetup-{{version}}.exe.sha256 dist/RadarniteLauncherSetup-{{version}}.exe.sha256

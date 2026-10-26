@@ -12,6 +12,8 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - Play modes per profile: Legal (start with the defaults; levels, battle pass and V-bucks from matches; today's real
   item shop limited to what the build has), Legal with infinite V-bucks, or everything unlocked.
 - Ragdoll deaths on 14.30: eliminated players fall with physics instead of the digitize effect.
+- Mods for 14.30, on or off in the Mods tab: the engine console (F10), an in-game menu (F8), field of view, FPS cap,
+  no post effects, slow motion and fly.
 - One-click firewall rules so a build can never reach the internet.
 - WebView2 desktop UI (with a plain WinForms fallback).
 - Per-user install under `%LOCALAPPDATA%\Programs\Radarnite Launcher`; no administrator needed.
@@ -24,13 +26,11 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - `redirect/` — the DLL that redirects the game's traffic to the local backend.
 - `gameserver-reboot/` — the local match server.
 - `cosmetics-gen/`, `pakpatch/` — cosmetics and pak tooling.
-- `pakpatch/fnbody.c` — `fnbody.dll`, injected by the launcher into the 14.30 client: turns the body-slider styles of
-  fn-port outfits into morph target weights (`pakpatch/test/fnbody-mock.c` runs it against a fake engine).
 - `paktools/` — the one copy of the pak signature fitter (sigfit) and the game guard the launcher ships
   (`tools/vendor-pak-tools.sh`).
-- `pakpatch/fnbody.c` — `fnbody.dll`, injected by the launcher into the 14.30 client: turns the body-slider styles of
-  fn-port outfits into morph target weights (`pakpatch/test/fnbody-mock.c` runs it against a fake engine), and
-  ragdoll deaths (`pakpatch/fnragdoll.c`).
+- `pakpatch/fnmods.c` — `fnmods.dll`, injected by the launcher into the 14.30 client: one DLL with modules (body
+  sliders of fn-port outfits, ragdoll deaths, engine console, settings, F8 menu), each on or off in `mods.json`
+  (`pakpatch/test/fnbody-mock.c` runs the body sliders against a fake engine).
 - `backend/progress.mjs` — play modes, profiles, levels, battle pass (`backend/seasons/`), V-bucks and the item shop.
 - `radarnite.nsi` — the NSIS installer script.
 - `tools/release.sh` — builds `RadarniteLauncherSetup-<version>.exe` and its `.sha256`.

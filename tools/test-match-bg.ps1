@@ -18,7 +18,7 @@ hand while someone plays.
 Every window of the game is kept off the screen and non-activating (-WinX/-WinY, then WS_EX_NOACTIVATE and SetWindowPos
 with SWP_NOACTIVATE), without sound (-nosound), at idle priority; if one ever takes the foreground anyway, the window
 that had it gets it back (logged). Nothing here sends input: the
-client joins the match through fnbody.dll's FNTEST_JOIN (a flag file this script creates once the server listens).
+client joins the match through fnmods.dll's FNTEST_JOIN (a flag file this script creates once the server listens).
 Every process the run started is closed at the end, whatever happens (finally): radarnite-play's tree, the backend and
 any game process started from <Root>\build.
 #>
@@ -162,6 +162,7 @@ finally {
 
     # ---- results
     $sc = Join-Path $off 'sandbox-client'
+    Copy-Item -ErrorAction SilentlyContinue (Join-Path $sc 'fnmods.log') $out
     Copy-Item -ErrorAction SilentlyContinue (Join-Path $sc 'fnbody.log') $out
     Copy-Item -ErrorAction SilentlyContinue (Join-Path $off 'backend.log') $out
     Copy-Item -ErrorAction SilentlyContinue (Join-Path $off 'unknown-routes.log') $out

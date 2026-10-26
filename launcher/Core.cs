@@ -34,7 +34,9 @@ public static class Paths
     public static string RedirectDll => Path.Combine(LauncherDir, "redirect", "fnredirect.dll");
     public static string GameServerDll => Path.Combine(LauncherDir, "gameserver", "radarnite-server.dll");
     public static string PakPatchDll => Path.Combine(LauncherDir, "patches", "fnpakpatch.dll");
-    public static string BodySlidersDll => Path.Combine(LauncherDir, "patches", "fnbody.dll");
+    public static string ModsDll => Path.Combine(LauncherDir, "patches", "fnmods.dll");
+    /// <summary>fnmods.dll's settings: written by the 3.0 launcher's Mods tab, read by the DLL (FNMODS_CONFIG).</summary>
+    public static string ModsConfig => Path.Combine(LauncherDir, "mods.json");
     public static string CosmeticsGen => Path.Combine(LauncherDir, "tools", "cosmetics-gen", "fn-cosmetics-gen.exe");
     public static string Win64(string build) => Path.Combine(build, "FortniteGame", "Binaries", "Win64");
     public static string Shipping(string build) => Path.Combine(Win64(build), "FortniteClient-Win64-Shipping.exe");

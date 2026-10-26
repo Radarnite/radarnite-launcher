@@ -189,7 +189,7 @@ Function ${UN}CheckRunning
   ${EndIf}
   retry:
   ClearErrors
-  ${ForEach} $1 0 6 + 1
+  ${ForEach} $1 0 7 + 1
     ${Select} $1
       ${Case} 0
         StrCpy $2 "$INSTDIR\${EXE}"
@@ -204,7 +204,9 @@ Function ${UN}CheckRunning
       ${Case} 5
         StrCpy $2 "$INSTDIR\node\node.exe"
       ${Case} 6
-        StrCpy $2 "$INSTDIR\patches\fnbody.dll"
+        StrCpy $2 "$INSTDIR\patches\fnbody.dll"   ; before 3.0.6: the game an older launcher started holds it
+      ${Case} 7
+        StrCpy $2 "$INSTDIR\patches\fnmods.dll"
     ${EndSelect}
     ${If} ${FileExists} $2
       FileOpen $0 $2 a

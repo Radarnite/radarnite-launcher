@@ -42,7 +42,7 @@ cc() { "$ZIG" cc -target x86_64-windows-gnu -O2 -s -Wl,--subsystem,windows "$@" 
 mkdir -p in
 cc -DNAME='"RadarniteLauncher"' -o in/RadarniteLauncher.exe
 cc -DNAME='"radarnite-play"' -o in/radarnite-play.exe
-cc -DNAME='"fnbody"' -o in/fnbody.dll
+cc -DNAME='"fnmods"' -o in/fnmods.dll
 cc -DNAME='"RadarniteLauncher"' "-DPLANT=\"/Users/${USER:-builder}/agent-work/planted/main.c\"" -o in/launcher-planted.exe
 cc -DNAME='"RadarniteLauncher"' '-DWPLANT=L"C:\\Users\\Planted\\src\\launcher.pdb"' -o in/launcher-planted16.exe
 cc -DNAME='"fn-cosmetics-gen"' -o in/tool.exe
@@ -62,7 +62,7 @@ printf 'notices\n' > payload/THIRD-PARTY-NOTICES.txt
 printf 'readme\n' > payload/README-offline.md
 
 # the placeholders have no version resource: --no-version-check (case 8 runs with NOVC= to get the check)
-build() { "$REL" build --makensis "$MAKENSIS" --play in/radarnite-play.exe --fnbody in/fnbody.dll --payload "${PAYLOAD:-payload}" --out out ${NOVC---no-version-check} "$@"; }
+build() { "$REL" build --makensis "$MAKENSIS" --play in/radarnite-play.exe --fnmods in/fnmods.dll --payload "${PAYLOAD:-payload}" --out out ${NOVC---no-version-check} "$@"; }
 
 # ---- 1. clean build, prerelease version ----
 V=3.0.0-rc.1
@@ -78,7 +78,7 @@ grep -q 'scrubbed .*ThirdParty.dll' t1.log && ok "third-party PDB paths scrubbed
 grep -q 'removed 1 pdb' t1.log && ok "payload pdb stripped" || ko "pdb strip"
 if [ -f "$EXE" ]; then
   rm -rf x1 && mkdir x1 && 7z x -y -bso0 -bsp0 -ox1 "$EXE" >/dev/null
-  [ -f x1/tools/cosmetics-gen/LICENSE ] && [ -f x1/node/node.exe ] && [ -f x1/backend/server.mjs ] && [ -f x1/radarnite-play.exe ] && [ -f x1/patches/fnbody.dll ] && [ ! -e x1/tools/cosmetics-gen/fn-cosmetics-gen.pdb ] \
+  [ -f x1/tools/cosmetics-gen/LICENSE ] && [ -f x1/node/node.exe ] && [ -f x1/backend/server.mjs ] && [ -f x1/radarnite-play.exe ] && [ -f x1/patches/fnmods.dll ] && [ ! -e x1/patches/fnbody.dll ] && [ ! -e x1/tools/cosmetics-gen/fn-cosmetics-gen.pdb ] \
     && ok "installer holds the payload (incl. extension-less files), no pdb" || ko "installer content"
   [ -f "x1/\$PLUGINSDIR/own-processes.ps1" ] || ls x1 x1/\$PLUGINSDIR 2>/dev/null | head -5
   pt=0

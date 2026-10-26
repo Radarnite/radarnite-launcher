@@ -114,11 +114,12 @@ public sealed class Session
     }
 
     /// <summary>The game client alone, for a backend that already runs (StartAsync, and radarnite-play.exe for the 3.0
-    /// launcher): redirect DLL loaded at process start, the suspended stubs, the pak patch, the body sliders. false =
+    /// launcher): redirect DLL loaded at process start, the suspended stubs, the pak patch, the mods. false =
     /// Failure says why; nothing is stopped here (the caller does).</summary>
     public async Task<bool> StartClientAsync(string off)
     {
         var env = GameEnv(Path.Combine(off, "redirect-client.log"), "sandbox-client");
+        env["FNMODS_CONFIG"] = Paths.ModsConfig;   // fnmods.dll's settings (the launcher's Mods tab); read again when saved
         Stage?.Invoke("game", "run");
         var (clientArgs, clientAc) = LaunchArgs($"{San(_c.DisplayName)}@offline.local");
         _client = StartGame(clientArgs, env, hidden: false);
@@ -130,7 +131,7 @@ public sealed class Session
         StartFakeLaunchers(clientAc);
         if (!await InjectRedirect(_client, Path.Combine(off, "redirect-client.log"))) return false;
         LoadPakPatch(_client, "Game");
-        LoadBodySliders(_client);
+        LoadMods(_client);
         Stage?.Invoke("game", "ok");
         return true;
     }
@@ -370,13 +371,13 @@ public sealed class Session
         _log(Native.Inject(p.Id, Paths.PakPatchDll) ? $"{who}: pak patch loaded (see offline\\sandbox-*\\pakpatch.log)." : $"Warning: {who}: could not load fnpakpatch.dll.");
     }
 
-    // Body sliders of fn-port outfits (FortnitePorting tools/fn-port/BodySliders.cs): fnbody.dll (src\pakpatch\fnbody.c)
-    // turns their FNBody_* style values into morph target weights. Client only; it patches no game code.
-    static readonly string[] BodySliderBuilds = { "14.30" };
-    void LoadBodySliders(Process p)
+    // The mods of 14.30: fnmods.dll (src\pakpatch\fnmods.c) with its modules (body sliders of fn-port outfits, ragdoll
+    // deaths, the engine console, settings, the F8 menu), each on or off in mods.json. Client only; it patches no game code.
+    static readonly string[] ModsBuilds = { "14.30" };
+    void LoadMods(Process p)
     {
-        if (!BodySliderBuilds.Contains(_b.Version) || !File.Exists(Paths.BodySlidersDll)) return;
-        _log(Native.Inject(p.Id, Paths.BodySlidersDll) ? "Game: body sliders loaded (see offline\\sandbox-client\\fnbody.log)." : "Warning: Game: could not load fnbody.dll.");
+        if (!ModsBuilds.Contains(_b.Version) || !File.Exists(Paths.ModsDll)) return;
+        _log(Native.Inject(p.Id, Paths.ModsDll) ? "Game: mods loaded (see offline\\sandbox-client\\fnmods.log)." : "Warning: Game: could not load fnmods.dll.");
     }
 
     async Task<bool> CheckRedirect(string log)
