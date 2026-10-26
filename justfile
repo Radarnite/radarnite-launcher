@@ -303,6 +303,18 @@ selftest-pc *args: _exe
     jq -e '.failed == 0' native/ui/selftest/selftest.json >/dev/null
 alias run-pc := selftest-pc
 
+# radarnite-play.exe's game-sound check (launcher/Audio.cs) in the signed-in user's session on the PC: a silent player
+# muted at volume 0 like the test tooling does, run again, then Audio.Restore must unmute it (play/tools/selftest-audio.ps1)
+selftest-audio-pc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f play/out/radarnite-play.exe || just build-play
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    pc sh 'if not exist {{pc_dir}}\audio mkdir {{pc_dir}}\audio'
+    scp -q play/out/radarnite-play.exe play/tools/selftest-audio.ps1 'windows:{{pc_fwd}}/audio/'
+    ssh -o BatchMode=yes windows 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {{pc_dir}}\audio\selftest-audio.ps1 -Dir {{pc_dir}}\audio'
+
 # Backend ready / RSS on a scratch copy of 14.30's offline data (baseline/measure-backend.ps1): Rust, then 2.2.1's Node
 backend-measure-pc: _ref-setup
     #!/usr/bin/env bash
