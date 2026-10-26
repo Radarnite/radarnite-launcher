@@ -14,6 +14,8 @@
 # into the game (redirect, the pak patches) ship as the binaries that were played with, not rebuilt by another
 # toolchain. A new payload ships by publishing a release built with `just release` and pinning it here.
 # patches\fnmods.dll (the 14.30 mods) is not in 2.2.1: release.yml builds it from pakpatch/fnmods.c, release.sh --fnmods.
+# gameserver\radarnite-server.dll is taken here for the payload's shape only: release.sh replaces it with the vendored
+# build of the committed server sources, gameserver-reboot/prebuilt (tools/vendor-gameserver.sh).
 set -euo pipefail
 DEST="${1:?usage: payload-from-release.sh <dest-dir> [<version> <sha256>]}"
 VERSION="${2:-2.2.1}"

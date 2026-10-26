@@ -3,7 +3,7 @@
 # with makensis, 7z and perl works the same).
 #
 #   tools/release.sh build --version 3.0.0-rc.1 --launcher <RadarniteLauncher.exe> --play <radarnite-play.exe> \
-#       --fnmods <fnmods.dll> --payload <dir> [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>]
+#       --fnmods <fnmods.dll> --payload <dir> [--gameserver <radarnite-server.dll>] [--out <dir>] [--icon <ico>] [--nsi <radarnite.nsi>] [--makensis <path>]
 #       [--ban <text>]... [--no-version-check]
 #   tools/release.sh privacy-scan <file|dir>...   the privacy gate alone (exit 1 on any hit)
 #   tools/release.sh scrub <dir>                  the payload's same-length path scrub alone, in place (vendor-pak-tools.sh)
@@ -26,6 +26,9 @@
 # payload that carries its own copy is refused, and the staged ones must match paktools/pak-tools.manifest.
 # --fnmods is patches\fnmods.dll (pakpatch/fnmods.c, zig cc -s): built from this checkout, not a payload binary, so it
 # replaces any copy the payload brings and is never scrubbed either.
+# gameserver\radarnite-server.dll is gameserver-reboot/prebuilt/radarnite-server.dll (tools/vendor-gameserver.sh: built
+# from the committed server sources, checked against its manifest), never the payload's; --gameserver <dll> stages
+# another build instead (local test builds of server changes, scrubbed like the payload).
 # Those prebuilt binaries get the same-length path scrub of the 2.x build. The 3.0 exes
 # are never scrubbed: they must come out of their builds clean (-s / strip, --remap-path-prefix), or the gate fails.
 #
@@ -145,7 +148,7 @@ product_version() {
 
 # ---------------------------------------------------------------- build
 cmd_build() {
-  local version="" launcher="" play="" fnmods="" payload="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
+  local version="" launcher="" play="" fnmods="" payload="" gameserver="" out="$ROOT/dist" icon="$ROOT/launcher/radarnite.ico"
   local nsi="$ROOT/radarnite.nsi" makensis="" keep=0 vcheck=1
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -154,6 +157,7 @@ cmd_build() {
       --play) play="$2"; shift 2 ;;
       --fnmods) fnmods="$2"; shift 2 ;;
       --payload) payload="$2"; shift 2 ;;
+      --gameserver) gameserver="$2"; shift 2 ;;
       --out) out="$2"; shift 2 ;;
       --icon) icon="$2"; shift 2 ;;
       --nsi) nsi="$2"; shift 2 ;;
@@ -168,7 +172,13 @@ cmd_build() {
   local vnum="${version%%-*}"
   for f in "$launcher" "$play" "$fnmods" "$icon" "$nsi" "$ROOT/backend/server.mjs" "$ROOT/backend/progress.mjs"; do [ -f "$f" ] || die "missing file: '$f'"; done
   [ -d "$payload" ] || die "missing payload folder: '$payload'"
-  for f in "$launcher" "$play" "$fnmods"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
+  local vendored=0
+  if [ -z "$gameserver" ]; then
+    gameserver="$ROOT/gameserver-reboot/prebuilt/radarnite-server.dll"; vendored=1
+    "$ROOT/tools/vendor-gameserver.sh" check || die "gameserver-reboot/prebuilt does not match its manifest or the server's sources"
+  fi
+  [ -f "$gameserver" ] || die "missing file: '$gameserver'"
+  for f in "$launcher" "$play" "$fnmods" "$gameserver"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
   if [ "$vcheck" = 1 ]; then
     local pv; pv="$(product_version "$launcher")"
     [ "$pv" = "$version" ] || die "the launcher's ProductVersion is '$pv', not $version: build it as $version (RN_VERSION=$version, just release $version)"
@@ -200,6 +210,8 @@ cmd_build() {
   [ -z "$bad" ] || die "the payload must not carry its own pak tools (they ship from paktools/):$bad"
   "$ROOT/tools/vendor-pak-tools.sh" check || die "paktools/ does not match its manifest"
   mkdir -p "$app/tools"; cp -R "$ROOT/paktools/." "$app/tools/"
+  # the match server: the vendored build of the committed sources (or --gameserver), never the payload's older one
+  mkdir -p "$app/gameserver"; cp "$gameserver" "$app/gameserver/radarnite-server.dll"
   local npdb; npdb=$(find "$app" -type f -iname '*.pdb' | wc -l | tr -d ' ')
   find "$app" -type f -iname '*.pdb' -delete
   echo "  removed $npdb pdb"
@@ -210,6 +222,13 @@ cmd_build() {
     [ "$(sha256 "$app/tools/$f")" = "$h" ] || die "staged tools/$f is not the one in paktools/pak-tools.manifest (re-vendor with tools/vendor-pak-tools.sh)"
   done < <(grep -v '^#' "$ROOT/paktools/pak-tools.manifest")
   echo "  pak tools $(sed -n 's/^# version //p' "$ROOT/paktools/pak-tools.manifest") staged as in the manifest"
+  if [ "$vendored" = 1 ]; then
+    [ "$(sha256 "$app/gameserver/radarnite-server.dll")" = "$(grep -v '^#' "$ROOT/gameserver-reboot/prebuilt/radarnite-server.manifest" | cut -d' ' -f1)" ] \
+      || die "staged gameserver/radarnite-server.dll is not the vendored one (re-vendor with tools/vendor-gameserver.sh)"
+    echo "  match server $(sed -n 's/^# sources //p' "$ROOT/gameserver-reboot/prebuilt/radarnite-server.manifest") staged as in the manifest"
+  else
+    echo "  match server: $gameserver (--gameserver)"
+  fi
   cp "$launcher" "$app/RadarniteLauncher.exe"
   [ -s "$app/node/node.exe" ] || die "the payload has no node/node.exe (the backend runs on it)"
   # the backend: server.mjs and its modules (*.mjs), and the season data of the progression (seasons/*.json)
