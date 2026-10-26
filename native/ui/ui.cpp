@@ -10,7 +10,7 @@ namespace {
 
 enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
-    ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3,
+    ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3, ID_PM0, ID_PM1, ID_PM2, ID_PROFILE, ID_BS0, ID_BS9 = ID_BS0 + 9,
     ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_ACT_X, ID_LINES, ID_ACT, ID_PLAY,
     ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
@@ -200,6 +200,7 @@ App::App(Gfx& g, Core* core) : g_(g), core_(core) {
     edits_[1].id = ID_BOTS; edits_[1].f = { Face::Display, 24, 900, true }; edits_[1].bg = FIELD; edits_[1].lazy = true;
     edits_[2].id = ID_SEARCH; edits_[2].f = { Face::UI, 12, 400, false };
     edits_[3].id = ID_P_SEARCH; edits_[3].f = { Face::UI, 13, 400, false }; edits_[3].bg = FIELD;   // the panel's search: a field on the season art, like the name
+    edits_[4].id = ID_PROFILE; edits_[4].f = { Face::UI, 13, 600, false }; edits_[4].bg = FIELD;
     float h = 0;
     std::wstring v = core_->uiPref(L"activityHeight");
     if (!v.empty() && (h = (float)_wtof(v.c_str())) >= 140) actH_ = h;
@@ -334,7 +335,7 @@ void App::createEdits() {
         DWORD style = WS_CHILD | WS_CLIPSIBLINGS | ES_AUTOHSCROLL | (e.id == ID_BOTS ? ES_CENTER | ES_NUMBER : 0);
         e.hwnd = CreateWindowExW(0, L"EDIT", L"", style, 0, 0, 10, 10, hwnd_, (HMENU)(INT_PTR)e.id, GetModuleHandleW(nullptr), nullptr);
         SendMessageW(e.hwnd, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
-        SendMessageW(e.hwnd, EM_LIMITTEXT, e.id == ID_NAME ? 24 : e.id == ID_BOTS ? 2 : 200, 0);
+        SendMessageW(e.hwnd, EM_LIMITTEXT, e.id == ID_NAME || e.id == ID_PROFILE ? 24 : e.id == ID_BOTS ? 2 : 200, 0);
         if (e.id == ID_SEARCH) SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)L"Filter");
         if (e.id == ID_P_SEARCH) SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search name or ID (EID_\u2026)");
         SetWindowSubclass(e.hwnd, editProc, (UINT_PTR)e.id, 0);
@@ -482,6 +483,9 @@ void App::setConfig(uint32_t fields, const Config& v) {
     if (fields & ConfigPatch::InfiniteMaterials) c.infiniteMaterials = v.infiniteMaterials;
     if (fields & ConfigPatch::InfiniteAmmo) c.infiniteAmmo = v.infiniteAmmo;
     if (fields & ConfigPatch::LateGame) c.lateGame = v.lateGame;
+    if (fields & ConfigPatch::PlayMode) c.playMode = v.playMode;
+    if (fields & ConfigPatch::Profile) c.profile = v.profile;
+    if (fields & ConfigPatch::BotSkill) c.botSkill = v.botSkill;
     ConfigPatch p; p.fields = fields; p.values = c;
     core_->saveConfig(p);
     syncEdits();
@@ -528,6 +532,7 @@ void App::syncEdits() {
     };
     set(edits_[0], st_.config.displayName);
     set(edits_[1], std::to_wstring(botsDrag_ >= 0 ? botsDrag_ : st_.config.bots));
+    set(edits_[4], st_.config.profile);
 }
 
 void App::commitEdit(int id) {
@@ -539,6 +544,14 @@ void App::commitEdit(int id) {
         while (!v.empty() && iswspace(v.front())) v.erase(v.begin());
         if (!v.empty() && v != st_.config.displayName) { Config c; c.displayName = v; setConfig(ConfigPatch::DisplayName, c); }
         else SetWindowTextW(edits_[0].hwnd, st_.config.displayName.c_str());
+    } else if (id == ID_PROFILE) {
+        // another name switches to (or starts) that profile; the one left keeps its progress
+        GetWindowTextW(edits_[4].hwnd, buf, 64);
+        std::wstring v = buf;
+        while (!v.empty() && iswspace(v.back())) v.pop_back();
+        while (!v.empty() && iswspace(v.front())) v.erase(v.begin());
+        if (!v.empty() && v != st_.config.profile && !busy()) { Config c; c.profile = v; setConfig(ConfigPatch::Profile, c); }
+        else SetWindowTextW(edits_[4].hwnd, st_.config.profile.c_str());
     } else if (id == ID_BOTS) {
         GetWindowTextW(edits_[1].hwnd, buf, 64);
         int v = std::max(0, std::min(99, _wtoi(buf)));
@@ -569,8 +582,8 @@ void App::editKey(int id, UINT vk, bool ctrl, bool shift) {
         else if (id == ID_SEARCH) SetWindowTextW(edits_[2].hwnd, L"");
         else {   // name / bots: back to the saved value; already there: Escape goes on to the window
             wchar_t buf[64] = L"";
-            EditBox& e = edits_[id == ID_NAME ? 0 : 1];
-            std::wstring saved = id == ID_NAME ? st_.config.displayName : std::to_wstring(st_.config.bots);
+            EditBox& e = edits_[id == ID_NAME ? 0 : id == ID_PROFILE ? 4 : 1];
+            std::wstring saved = id == ID_NAME ? st_.config.displayName : id == ID_PROFILE ? st_.config.profile : std::to_wstring(st_.config.bots);
             GetWindowTextW(e.hwnd, buf, 64);
             if (saved == buf) key(VK_ESCAPE, false, false);
             else SetWindowTextW(e.hwnd, saved.c_str());
@@ -1608,11 +1621,29 @@ float App::settingsBody(float x, float y0, float w) {
             y += 44;
             if (i == 0 && c.botsAI) {   // the page's warning when the bots' AI is on
                 Font wf{ Face::UI, 11.5f, 400, false };
-                std::wstring note = L"**Bot AI is on.** On " + verLabel(*b) + L" it crashes the match server a few seconds after it starts.";
+                std::wstring note = b->major == 14 ? L"**Bot AI is on.** Experimental: the game's own bots spawn but do not move or fight yet."
+                                                   : L"**Bot AI is on.** On " + verLabel(*b) + L" it crashes the match server a few seconds after it starts.";
                 float th = rich(note, wf, 0, 0, w - 24, 16.5f, C::warnText, C::white, 0, false);
                 icon(Icon::Warn, x, y + 0.5f, 16, C::warn);
                 rich(note, wf, x + 24, y, w - 24, 16.5f, C::warnText, C::white);
                 y += th + 10;
+
+                // their difficulty: ten segments like the Progress control
+                Font sf{ Face::UI, 12, 500, false };
+                float cw = std::max(20.f, textW(L"10", sf) + 10), segW = std::min(2 * 3 + 10 * cw + 9 * 2, w - textW(L"Bot difficulty", rf) - 24);
+                cw = (segW - 6 - 18) / 10;
+                row(L"Bot difficulty", segW);
+                float sx = x + w - segW, sy = y + 7, px = sx + 3;
+                box(rc(sx, sy, segW, 30), 8, C::bg2, 1, C::line2);
+                for (int k = 0; k < 10; k++) {
+                    int bid = ID_BS0 + k;
+                    bool on = c.botSkill == k + 1;
+                    if (on) fill(rc(px, sy + 3, cw, 24), C::hover, 1, 6);
+                    text(std::to_wstring(k + 1), sf, px, sy + 3, cw, 24, on || hover_ == bid ? C::text : C::muted, 1);
+                    hit(bid, rc(px, sy + 3, cw, 24), F_FOCUS | F_HAND, 6);
+                    px += cw + 2;
+                }
+                y += 44;
             }
         }
     }
@@ -1631,6 +1662,55 @@ float App::settingsBody(float x, float y0, float w) {
         if (!e.show || measuring_) text(c.displayName, Font{ Face::UI, 13, 600, false }, inner.left, fr.top, inner.right - inner.left, 32, C::white);
         hit(ID_NAME, fr, F_FOCUS | F_EDIT, 9);
         y += 44;
+    }
+
+    // progression: the play mode (three segments like the activity filters) and the profile (an EDIT like the name).
+    // Read by the backend when a session starts: locked while one runs.
+    {
+        bool lock = busy() && !dis;
+        float a1 = alpha_; bool nh = noHit_;
+        if (lock) { alpha_ = .5f * a1; noHit_ = true; }
+        const wchar_t* ml[3] = { L"Legal", L"\u221E V-bucks", L"All unlocked" };
+        const wchar_t* mk[3] = { L"legal", L"legal-vbucks", L"unlocked" };
+        int cur = 2;
+        for (int i = 0; i < 3; i++) if (c.playMode == mk[i]) cur = i;
+        Font sf{ Face::UI, 12, 500, false };
+        float bw[3], segW = 2 + 2 + 2 * 2;
+        for (int i = 0; i < 3; i++) { bw[i] = 20 + textW(ml[i], sf); segW += bw[i]; }
+        segW = std::min(segW, w - textW(L"Progress", rf) - 24);
+        {   // a narrow panel: the segments share the room left, their padding shrinks first
+            float tw[3], sum = 0;
+            for (int i = 0; i < 3; i++) { tw[i] = textW(ml[i], sf); sum += tw[i]; }
+            float pad = std::max(4.f, std::min(20.f, (segW - 8 - sum) / 3));
+            for (int i = 0; i < 3; i++) bw[i] = tw[i] + pad;
+        }
+        row(L"Progress", segW);
+        float sx = x + w - segW, sy = y + 7;
+        box(rc(sx, sy, segW, 30), 8, C::bg2, 1, C::line2);
+        float px = sx + 3;
+        for (int i = 0; i < 3; i++) {
+            int id = ID_PM0 + i;
+            bool on = cur == i;
+            if (on) fill(rc(px, sy + 3, bw[i], 24), C::hover, 1, 6);
+            text(ml[i], sf, px, sy + 3, bw[i], 24, on || hover_ == id ? C::text : C::muted, 1);
+            hit(id, rc(px, sy + 3, bw[i], 24), F_FOCUS | F_HAND, 6);
+            px += bw[i] + 2;
+        }
+        y += 44;
+
+        row(L"Profile", std::min(220.f, w - textW(L"Profile", rf) - 24));
+        EditBox& e = edits_[4];
+        bool foc = hwnd_ && GetFocus() == e.hwnd;
+        float fw = std::min(220.f, w - textW(L"Profile", rf) - 24);
+        D2D1_RECT_F fr = rc(x + w - fw, y + 6, fw, 32);
+        float fv = fx(K_COLOR | ID_PROFILE, foc ? 1.f : hover_ == ID_PROFILE ? .45f : 0.f, fr);
+        box(fr, 9, FIELD, 1, C::white, .1f + .3f * fv);
+        D2D1_RECT_F inner = { fr.left + 12, fr.top + 1, fr.right - 12, fr.bottom - 1 };
+        if (!measuring_) { e.r = { inner.left, inner.top + oy_, inner.right, inner.bottom + oy_ }; e.clip = clip_; e.show = hwnd_ && !dis && !lock; }
+        if (!e.show || measuring_) text(c.profile, Font{ Face::UI, 13, 600, false }, inner.left, fr.top, inner.right - inner.left, 32, C::white);
+        hit(ID_PROFILE, fr, F_FOCUS | F_EDIT, 9);
+        y += 44;
+        alpha_ = a1; noHit_ = nh;
     }
     alpha_ = a0; noHit_ = false;
     return y;
@@ -1973,6 +2053,12 @@ std::wstring App::tooltip(int id) const {
     case ID_TG1: return L"Small storm, shields";
     case ID_TG2: return L"Battle Royale (practice always has them)";
     case ID_TG3: return L"Battle Royale (practice always has it)";
+    case ID_PM0: return L"Start with the default items; earn levels, battle pass rewards and V-bucks in matches; buy from today's item shop";
+    case ID_PM1: return L"Like Legal, with V-bucks that never run out";
+    case ID_PM2: return L"Every cosmetic of the build owned";
+    case ID_BS0: case ID_BS0 + 1: case ID_BS0 + 2: case ID_BS0 + 3: case ID_BS0 + 4: case ID_BS0 + 5: case ID_BS0 + 6: case ID_BS0 + 7:
+    case ID_BS0 + 8: case ID_BS9: return L"Aim, reaction, building and dodging of the bots: 1 easy, 6 like the game's own bots, 10 hardest";
+    case ID_PROFILE: return L"Your save: level, battle pass, V-bucks, items and locker. A new name starts a new one";
     case ID_BUILDMENU: return L"Build actions";
     case ID_ACT: return L"Activity (Ctrl+L)";
     case ID_PREV: return L"Previous build (Q)";
@@ -2130,6 +2216,13 @@ void App::activate(int id) {
     case ID_TG1: c.lateGame = !st_.config.lateGame; setConfig(ConfigPatch::LateGame, c); break;
     case ID_TG2: c.infiniteMaterials = !st_.config.infiniteMaterials; setConfig(ConfigPatch::InfiniteMaterials, c); break;
     case ID_TG3: c.infiniteAmmo = !st_.config.infiniteAmmo; setConfig(ConfigPatch::InfiniteAmmo, c); break;
+    case ID_BS0: case ID_BS0 + 1: case ID_BS0 + 2: case ID_BS0 + 3: case ID_BS0 + 4: case ID_BS0 + 5: case ID_BS0 + 6: case ID_BS0 + 7:
+    case ID_BS0 + 8: case ID_BS9: c.botSkill = id - ID_BS0 + 1; setConfig(ConfigPatch::BotSkill, c); break;
+    case ID_PM0: case ID_PM1: case ID_PM2: {
+        static const wchar_t* modes[3] = { L"legal", L"legal-vbucks", L"unlocked" };
+        if (busy()) break;   // the backend reads it when a session starts
+        c.playMode = modes[id - ID_PM0]; setConfig(ConfigPatch::PlayMode, c); break;
+    }
     case ID_F0: case ID_F1: case ID_F2: filter_ = id - ID_F0; rowsDirty_ = true; invalidate(); break;
     case ID_COPY: {
         std::wstring all;
@@ -2252,7 +2345,7 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     }
     // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above; not
     // from the match settings' controls)
-    bool inSettings = f == ID_RANGE || f == ID_BOTS || f == ID_NAME || (f >= ID_TG0 && f <= ID_TG3);
+    bool inSettings = f == ID_RANGE || f == ID_BOTS || f == ID_NAME || (f >= ID_TG0 && f <= ID_PROFILE);
     if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !inSettings && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_ACT_X)) {
         stepBuild(vk == VK_RIGHT ? 1 : -1);
         return true;

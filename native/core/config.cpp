@@ -214,6 +214,39 @@ std::string LauncherConfig::serialize() const {
     return o + "\r\n}";
 }
 
+std::wstring LauncherConfig::extraStr(const char* key) const {
+    for (auto& x : extra) {
+        if (x.first != key) continue;
+        yyjson_doc* d = json::parse(x.second);
+        std::wstring v = d ? json::wstr(yyjson_doc_get_root(d)) : L"";
+        if (d) yyjson_doc_free(d);
+        return v;
+    }
+    return L"";
+}
+
+int LauncherConfig::extraInt(const char* key, int def) const {
+    for (auto& x : extra) {
+        if (x.first != key) continue;
+        yyjson_doc* d = json::parse(x.second);
+        yyjson_val* v = d ? yyjson_doc_get_root(d) : nullptr;
+        int r = v && yyjson_is_num(v) ? (int)yyjson_get_num(v) : def;
+        if (d) yyjson_doc_free(d);
+        return r;
+    }
+    return def;
+}
+
+void LauncherConfig::setExtraInt(const char* key, int value) {
+    for (auto& x : extra) if (x.first == key) { x.second = std::to_string(value); return; }
+    extra.emplace_back(key, std::to_string(value));
+}
+
+void LauncherConfig::setExtraStr(const char* key, const std::wstring& value) {
+    for (auto& x : extra) if (x.first == key) { x.second = json::relaxed(value); return; }
+    extra.emplace_back(key, json::relaxed(value));
+}
+
 bool LauncherConfig::save() const {
     paths::ConfigLock lock;
     bool ok = writeFile(paths::config(), serialize());

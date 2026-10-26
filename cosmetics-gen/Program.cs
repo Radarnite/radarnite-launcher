@@ -114,6 +114,55 @@ if (Arg(args, "--playlists") is { } plOut)
     return 0;
 }
 
+// --season <number> <out.json>: developer aid, the build's AthenaSeason<number> asset (battle pass rewards per level,
+// offer ids) and the data tables its XP curves point to, as CUE4Parse JSON (tools turn it into backend/seasons/).
+if (Arg(args, "--season") is { } seasonNum)
+{
+    var outFile = args[Array.IndexOf(args, "--season") + 2];
+    var seasonDump = new Newtonsoft.Json.Linq.JObject();
+    foreach (var f in provider.Files.Keys.Where(k => k.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
+                 && Path.GetFileNameWithoutExtension(k).Equals($"AthenaSeason{seasonNum}", StringComparison.OrdinalIgnoreCase)))
+    {
+        var pkgPath = f[..^".uasset".Length];
+        if (!provider.TryLoadPackage(pkgPath, out var sp)) { Console.WriteLine($"cannot load {pkgPath}"); continue; }
+        var exports = new Newtonsoft.Json.Linq.JArray();
+        foreach (var ex in sp.GetExports())
+        {
+            exports.Add(Newtonsoft.Json.Linq.JToken.Parse(Newtonsoft.Json.JsonConvert.SerializeObject(ex)));
+            foreach (var curve in new[] { "SeasonXpCurve", "BookXpCurve", "SeasonXpOnlyExtendedCurve" })
+                try
+                {
+                    if (ex.GetOrDefault<FPackageIndex?>(curve) is { IsNull: false } idx && idx.TryLoad(out UObject? table) && table is not null)
+                        seasonDump[curve] = Newtonsoft.Json.Linq.JToken.Parse(Newtonsoft.Json.JsonConvert.SerializeObject(table));
+                }
+                catch (Exception e) { Console.WriteLine($"{curve}: {e.Message}"); }
+        }
+        seasonDump[pkgPath] = exports;
+        Console.WriteLine($"{pkgPath}: {exports.Count} exports");
+    }
+    File.WriteAllText(outFile, seasonDump.ToString(Newtonsoft.Json.Formatting.Indented));
+    return seasonDump.Count > 0 ? 0 : 4;
+}
+
+// --json <package path>[,<package path>...] <out.json>: developer aid, every export of those packages as CUE4Parse JSON.
+if (Arg(args, "--json") is { } jsonPkgs)
+{
+    var outFile = args[Array.IndexOf(args, "--json") + 2];
+    var all = new Newtonsoft.Json.Linq.JObject();
+    foreach (var pkgPath in jsonPkgs.Split(','))
+    {
+        if (!provider.TryLoadPackage(pkgPath, out var jp)) { Console.WriteLine($"cannot load {pkgPath}"); continue; }
+        var exports = new Newtonsoft.Json.Linq.JArray();
+        foreach (var ex in jp.GetExports())
+            try { exports.Add(Newtonsoft.Json.Linq.JToken.Parse(Newtonsoft.Json.JsonConvert.SerializeObject(ex))); }
+            catch (Exception e) { Console.WriteLine($"{pkgPath} {ex.Name}: {e.Message}"); }
+        all[pkgPath] = exports;
+        Console.WriteLine($"{pkgPath}: {exports.Count} exports");
+    }
+    File.WriteAllText(outFile, all.ToString(Newtonsoft.Json.Formatting.Indented));
+    return all.Count > 0 ? 0 : 4;
+}
+
 // --dump <package path>[,<package path>...]: developer aid, prints the ItemVariants objects of those packages as JSON.
 if (Arg(args, "--dump") is { } dump)
 {

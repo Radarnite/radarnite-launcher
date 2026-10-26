@@ -501,12 +501,18 @@ static uint32_t morphs_of(void *comp, uint32_t *names)
 }
 
 static DWORD g_scan_max; static int g_scans;
-static void collect(void)
+/* The scan for candidates goes over every object (about 300,000 in a match): done in one tick it held the game thread
+   10-20 ms every 250 ms. It runs in slices of COLLECT_SLICE objects per tick instead (about a millisecond each)
+   into g_new; the finished list replaces g_c, which apply() keeps using meanwhile. */
+#define COLLECT_SLICE 8192
+static cand g_new[MAXC]; static int g_nnew; static int32_t g_cur = -1; static DWORD g_pass_us;
+static void collect_begin(void) { g_cur = 0; g_nnew = 0; g_pass_us = 0; }
+static void collect_step(void)
 {
     LARGE_INTEGER f0, t0, t1; QueryPerformanceFrequency(&f0); QueryPerformanceCounter(&t0);
-    static cand old[MAXC]; int nold = g_nc; memcpy(old, g_c, sizeof(cand) * (size_t)g_nc);
-    g_nc = 0;
-    for (int32_t i = 0; i < g_objs->num && g_nc < MAXC; i++) {
+    cand *old = g_c; int nold = g_nc;
+    int32_t end = g_cur + COLLECT_SLICE; if (end > g_objs->num) end = g_objs->num;
+    for (int32_t i = g_cur; i < end && g_nnew < MAXC; i++) {
         int32_t fl; void *o = obj_at(i, &fl);
         if (!o || (fl & (EIF_PendingKill | EIF_Unreachable)) || (AT(o, O_FLAGS, uint32_t) & (RF_ClassDefaultObject | RF_ArchetypeObject | RF_NeedLoad))) continue;
         if (!is_a(o, R.skc)) continue;
@@ -526,8 +532,16 @@ static void collect(void)
             char mn[128]; void *mesh = AT(o, R.o_mesh, void *);
             logf_("component %p (mesh %s): morphs 0x%x, parameters:%s", o, obj_name(mesh, mn, sizeof mn), c.morph_mask, n ? b : " none");
         }
-        g_c[g_nc++] = c;
+        g_new[g_nnew++] = c;
     }
+    g_cur = end;
+    QueryPerformanceCounter(&t1);
+    DWORD step_us = (DWORD)((t1.QuadPart - t0.QuadPart) * 1000000 / f0.QuadPart);
+    g_pass_us += step_us;
+    if (step_us > g_scan_max) { g_scan_max = step_us; logf_("scan slice: %lu us (max so far)", step_us); }
+    if (g_cur < g_objs->num && g_nnew < MAXC) return;
+    /* the pass is complete */
+    memcpy(g_c, g_new, sizeof(cand) * (size_t)g_nnew); g_nc = g_nnew; g_cur = -1;
     static int listed;
     if (g_testing && !g_nc && !listed && GetTickCount() - g_ready_at > 20000) {
         listed = 1; int shown = 0;
@@ -544,9 +558,8 @@ static void collect(void)
             shown++;
         }
     }
-    QueryPerformanceCounter(&t1);
-    DWORD us = (DWORD)((t1.QuadPart - t0.QuadPart) * 1000000 / f0.QuadPart); g_scans++;
-    if (us > g_scan_max || g_scans == 1 || g_scans % 2400 == 0) { if (us > g_scan_max) g_scan_max = us; logf_("scan %d: %lu us over %d objects (max %lu us)", g_scans, us, g_objs->num, g_scan_max); }
+    g_scans++;
+    if (g_scans == 1 || g_scans % 2400 == 0) logf_("scan %d: %lu us in slices over %d objects (slowest slice %lu us)", g_scans, g_pass_us, g_objs->num, g_scan_max);
     static int last = -1;
     if (g_nc != last) { logf_("%d skeletal mesh components with body slider morphs or parameters", g_nc); last = g_nc; }
 }
@@ -717,9 +730,39 @@ static void apply(void)
     }
 }
 
+/* ---------------------------------------------------------------- ragdoll deaths and test hooks */
+static void test_on_death(void *pawn, int ragdoll);
+static DWORD g_game_tid;   /* the game thread (set once its window is found) */
+#include "fnragdoll.c"
+#include "fntest.c"
+
 /* ---------------------------------------------------------------- game thread */
-static UINT g_msg; static DWORD g_game_tid; static volatile LONG g_pending; static int g_ready, g_dead;
+static UINT g_msg; static volatile LONG g_pending; static int g_ready, g_dead;
 static DWORD g_last_collect;
+
+static int g_body_off;
+static void body_tick(void)
+{
+    if (!g_ready) {
+        /* the lobby is still loading the first seconds: try again every 10 s for 2 minutes */
+        static int tries; static DWORD next;
+        if (GetTickCount() < next) return;
+        if (!resolve()) {
+            next = GetTickCount() + 10000;
+            if (++tries >= 12) { g_body_off = 1; logf_("FAIL: engine types not found: body sliders disabled"); }
+            else logf_("engine types not found yet (try %d of 12)", tries);
+            return;
+        }
+        g_ready = 1; g_ready_at = GetTickCount(); logf_("ready");
+    }
+    DWORD now = GetTickCount();
+    /* a full scan every 250 ms, and right away when a known component died or changed mesh (a re-applied style); in
+       slices, see collect_step */
+    if (g_cur < 0 && (g_rescan || now - g_last_collect >= 250)) { g_rescan = 0; collect_begin(); g_last_collect = now; }
+    if (g_cur >= 0) collect_step();
+    apply();
+    test_step();
+}
 
 static void tick(void)
 {
@@ -727,26 +770,12 @@ static void tick(void)
     g_guarded = 1;
     if (__builtin_setjmp(g_jmp)) {
         g_dead = 1;
-        logf_("FAULT in fnbody (reading engine memory): body sliders disabled for this session");
+        logf_("FAULT in fnbody (reading engine memory): body sliders and ragdolls disabled for this session");
         return;
     }
-    if (!g_ready) {
-        /* the lobby is still loading the first seconds: try again every 10 s for 2 minutes */
-        static int tries; static DWORD next;
-        if (GetTickCount() < next) { g_guarded = 0; return; }
-        if (!resolve()) {
-            next = GetTickCount() + 10000;
-            if (++tries >= 12) { g_dead = 1; logf_("FAIL: engine types not found: body sliders disabled"); }
-            else logf_("engine types not found yet (try %d of 12)", tries);
-            g_guarded = 0; return;
-        }
-        g_ready = 1; g_ready_at = GetTickCount(); logf_("ready");
-    }
-    DWORD now = GetTickCount();
-    /* a full scan every 250 ms, and right away when a known component died or changed mesh (a re-applied style) */
-    if (g_rescan || now - g_last_collect >= 250) { g_rescan = 0; collect(); g_last_collect = now; }
-    apply();
-    test_step();
+    ragdoll_tick();
+    test_tick();
+    if (!g_body_off) body_tick();
     g_guarded = 0;
 }
 
@@ -826,6 +855,8 @@ static DWORD WINAPI worker(LPVOID unused)
 {
     (void)unused;
     test_parse();
+    ragdoll_init();
+    test_init();
     int i;
     for (i = 0; i < 600 && !g_objs; i++) { scan(PAT_OBJS, "xxx????xxxxxxxx", sizeof PAT_OBJS, objs_cb, NULL, NULL); if (!g_objs) Sleep(500); }
     if (!g_objs) { logf_("FAIL: GUObjectArray not found after %d s", i / 2); return 0; }

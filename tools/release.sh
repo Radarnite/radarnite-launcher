@@ -18,7 +18,7 @@
 # exactly --version, so the updater, the version resource, DisplayVersion and the installer name always agree
 # (--no-version-check: only for placeholder exes without a version resource, tools/release-selftest.sh).
 #
-# The backend is Node: node\node.exe from the payload runs backend\server.mjs, copied from this checkout.
+# The backend is Node: node\node.exe from the payload runs backend\server.mjs (with progress.mjs and seasons\), copied from this checkout.
 # --payload is the rest of the program folder exactly as installed: node\node.exe, redirect\fnredirect.dll,
 # gameserver\radarnite-server.dll, patches\fnpakpatch.dll, tools\cosmetics-gen, THIRD-PARTY-NOTICES.txt,
 # README-offline.md (tools/fetch-payload.sh copies it from the PC). The pak tools (tools\fn-modkit-sigfit,
@@ -166,7 +166,7 @@ cmd_build() {
   done
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "--version must be semver (3.0.0, 3.0.0-rc.1 or 3.0.0-feat-3-0.1), got '$version'"
   local vnum="${version%%-*}"
-  for f in "$launcher" "$play" "$fnbody" "$icon" "$nsi" "$ROOT/backend/server.mjs"; do [ -f "$f" ] || die "missing file: '$f'"; done
+  for f in "$launcher" "$play" "$fnbody" "$icon" "$nsi" "$ROOT/backend/server.mjs" "$ROOT/backend/progress.mjs"; do [ -f "$f" ] || die "missing file: '$f'"; done
   [ -d "$payload" ] || die "missing payload folder: '$payload'"
   for f in "$launcher" "$play" "$fnbody"; do [ "$(head -c 2 "$f")" = MZ ] || die "not a Windows executable: $f"; done
   if [ "$vcheck" = 1 ]; then
@@ -212,7 +212,9 @@ cmd_build() {
   echo "  pak tools $(sed -n 's/^# version //p' "$ROOT/paktools/pak-tools.manifest") staged as in the manifest"
   cp "$launcher" "$app/RadarniteLauncher.exe"
   [ -s "$app/node/node.exe" ] || die "the payload has no node/node.exe (the backend runs on it)"
-  mkdir -p "$app/backend"; cp "$ROOT/backend/server.mjs" "$app/backend/"
+  # the backend: server.mjs and its modules (*.mjs), and the season data of the progression (seasons/*.json)
+  mkdir -p "$app/backend"; cp "$ROOT"/backend/*.mjs "$app/backend/"
+  if [ -d "$ROOT/backend/seasons" ]; then mkdir -p "$app/backend/seasons"; cp "$ROOT"/backend/seasons/*.json "$app/backend/seasons/"; fi
   cp "$play" "$app/radarnite-play.exe"
   mkdir -p "$app/patches"; cp "$fnbody" "$app/patches/fnbody.dll"
   cp "$icon" "$app/radarnite.ico"; cp "$icon" "$stage/radarnite.ico"

@@ -95,6 +95,20 @@ build-fnbody: (_wait-cpu "mac") _sync-mac
     mac get {{mac_dir}}/pakpatch/out/fnbody-mock.exe pakpatch/out/fnbody-mock.exe
     ls -l pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe
 
+# The same build of fnbody.dll and its mock test on the PC (zig in %LOCALAPPDATA%\fp-tools\zig), when the Mac is busy
+build-fnbody-pc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    pc sh '(if exist {{pc_dir}}\fnbody-src rmdir /s /q {{pc_dir}}\fnbody-src) & mkdir {{pc_dir}}\fnbody-src\test'
+    scp -q pakpatch/*.c 'windows:{{pc_fwd}}/fnbody-src/'
+    scp -q pakpatch/test/*.c 'windows:{{pc_fwd}}/fnbody-src/test/'
+    pc sh 'cd /d {{pc_dir}}\fnbody-src && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O2 -shared -s -o fnbody.dll fnbody.c -luser32 && "%LOCALAPPDATA%\fp-tools\zig\zig.exe" cc -target x86_64-windows-gnu -O1 -o fnbody-mock.exe test\fnbody-mock.c -luser32'
+    mkdir -p pakpatch/out
+    scp -q 'windows:{{pc_fwd}}/fnbody-src/fnbody.dll' 'windows:{{pc_fwd}}/fnbody-src/fnbody-mock.exe' pakpatch/out/
+    ls -l pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe
+
 # fnbody.dll against the fake engine of pakpatch/test/fnbody-mock.c on the PC, names encoded as in 14.30 and plain
 # (exit 0 = pass; never in CI)
 test-fnbody:
@@ -107,6 +121,55 @@ test-fnbody:
     scp -q pakpatch/out/fnbody.dll pakpatch/out/fnbody-mock.exe 'windows:{{pc_fwd}}/fnbody/'
     pc sh '{{pc_dir}}\fnbody\fnbody-mock.exe {{pc_dir}}\fnbody'
     pc sh '{{pc_dir}}\fnbody\fnbody-mock.exe {{pc_dir}}\fnbody --plain'
+
+# Build gameserver\radarnite-server.dll (gameserver-reboot/, the local match server) on the PC with its build.cmd and the
+# portable MSVC -> gameserver-reboot/out. MinHook's sources and headers are not in the repo: they are copied from
+# RN_MINHOOK_DIR (a folder with minhook\ and mhinc\, default the PC's Reboot build folder). Low priority, RN_JOBS
+# compiler processes (default 4).
+build-server-pc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    mh='{{env_var_or_default("RN_MINHOOK_DIR", '%LOCALAPPDATA%\fp-build\rb-pc')}}'
+    pc sh 'if not exist {{pc_dir}}\rb mkdir {{pc_dir}}\rb'
+    pc sh "if not exist {{pc_dir}}\rb\minhook (xcopy /e /i /q /y \"$mh\minhook\" {{pc_dir}}\rb\minhook && xcopy /e /i /q /y \"$mh\mhinc\" {{pc_dir}}\rb\mhinc) >nul"
+    pc sh '(if exist "{{pc_dir}}\rb\Project Reboot 3.0" rmdir /s /q "{{pc_dir}}\rb\Project Reboot 3.0") & (if exist {{pc_dir}}\rb\vendor rmdir /s /q {{pc_dir}}\rb\vendor) & (if exist {{pc_dir}}\rb\obj rmdir /s /q {{pc_dir}}\rb\obj) & (if exist {{pc_dir}}\rb\out rmdir /s /q {{pc_dir}}\rb\out)'
+    tar -c -C gameserver-reboot "Project Reboot 3.0" vendor build.cmd | ssh -o BatchMode=yes windows 'tar -x -C {{pc_dir}}\rb'
+    pc sh 'cd /d {{pc_dir}}\rb && set JOBS={{env_var_or_default("RN_JOBS", "4")}} && start "" /low /wait /b cmd /c build.cmd > build.txt 2>&1 & type build.txt | findstr /v /c:"Note: including" & findstr /c:"BUILD OK" build.txt >nul'
+    mkdir -p gameserver-reboot/out
+    scp -q 'windows:{{pc_fwd}}/rb/out/radarnite-server.dll' gameserver-reboot/out/
+    ls -l gameserver-reboot/out/radarnite-server.dll
+
+# Battle pass and XP data of a season from a build's own Paks (cosmetics-gen --season, built on the PC with the .NET 10
+# SDK in %LOCALAPPDATA%\fp-dotnet against the CUE4Parse checkout in RN_CUE4PARSE_DIR) -> backend/seasons/season<N>.json
+# (tools/season-data.py). Developer step: the result is committed; nothing of this runs in CI or on players' machines.
+season-data-pc season="14" build='S:\FortniteBuilds\14.30':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec 9>{{pc_lock}}; flock 9
+    just _wait-cpu windows
+    cue='{{env_var_or_default("RN_CUE4PARSE_DIR", '%LOCALAPPDATA%\fp-build\rl-cos\CUE4Parse')}}'
+    pc sh '(if exist {{pc_dir}}\cosgen rmdir /s /q {{pc_dir}}\cosgen) & mkdir {{pc_dir}}\cosgen'
+    scp -q cosmetics-gen/Program.cs cosmetics-gen/cosmetics-gen.csproj 'windows:{{pc_fwd}}/cosgen/'
+    pc sh "cd /d {{pc_dir}}\cosgen && start \"\" /low /wait /b \"%LOCALAPPDATA%\\fp-dotnet\\dotnet.exe\" build -c Release -nologo -v q -p:CUE4ParseDir=\"$cue\" -o out > build.txt 2>&1 & findstr /c:\"error\" build.txt & if exist out\fn-cosmetics-gen.exe (exit 0) else (exit 1)"
+    pc sh 'cd /d {{pc_dir}}\cosgen && set "DOTNET_ROOT=%LOCALAPPDATA%\fp-dotnet" && start "" /low /wait /b out\fn-cosmetics-gen.exe --build "{{build}}" --out x.json --engine 4.26 --aes "{{build}}\offline\aes.json" --season {{season}} season.json'
+    mkdir -p dist
+    scp -q 'windows:{{pc_fwd}}/cosgen/season.json' dist/season{{season}}-dump.json
+    scp -q "windows:$(echo '{{build}}' | tr '\\' /)/offline/cosmetics.json" dist/season-cosmetics.json
+    python3 tools/season-data.py dist/season{{season}}-dump.json dist/season-cosmetics.json backend/seasons/season{{season}}.json
+
+# One local match of 14.30 in the background on the PC with this checkout's fnbody.dll, match server and backend
+# (tools/test-match-pc.sh, tools/test-match-bg.ps1): off screen, muted, idle priority, no input; logs, screenshots and
+# clip.mp4 in dist/test-match/. env: "NAME=value;..." for the game processes (FNRAGDOLL, FNOFFLINE_TEST_DEATHS, ...).
+# Refuses while a game runs on the PC. Never in CI.
+test-match-pc minutes="4" env="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec 9>{{pc_lock}}; flock 9
+    # a copy runs: bash reads a script while it runs, an edit to the checkout's copy during a run would break it
+    t=$(mktemp); trap 'rm -f "$t"' EXIT; cp tools/test-match-pc.sh "$t"
+    RN_ROOT="$PWD" bash "$t" '{{pc_dir}}' {{minutes}} '{{env}}'
 
 # Build the backend on the Mac (backend-build: radarnite-backend.exe + the Linux aarch64 binary for `just parity`)
 build-backend: _sync-mac
@@ -127,6 +190,11 @@ release version="3.0.0-rc.1":
     just _sync-mac   # the exes in out/ are the ones shipped, wherever they were built
     just _wait-cpu windows
     tools/fetch-payload.sh mac:{{mac_dir}}-payload
+    # RN_GAMESERVER=<radarnite-server.dll>: that match server DLL instead of the payload's (test builds of server changes)
+    if [ -n "${RN_GAMESERVER:-}" ]; then
+      [ "$(head -c 2 "$RN_GAMESERVER")" = MZ ] || { echo "RN_GAMESERVER: not a DLL: $RN_GAMESERVER" >&2; exit 1; }
+      scp -q "$RN_GAMESERVER" "mac:{{mac_dir}}-payload/gameserver/radarnite-server.dll"; echo "match server DLL: $RN_GAMESERVER"
+    fi
     mac sh 'p=~/{{mac_dir}}-payload; for f in node/node.exe redirect/fnredirect.dll gameserver/radarnite-server.dll tools/cosmetics-gen/fn-cosmetics-gen.exe THIRD-PARTY-NOTICES.txt README-offline.md; do test -s "$p/$f" || { echo "payload: missing $f" >&2; exit 1; }; done; ls "$p"/patches/fnpakpatch.dll* >/dev/null || { echo "payload: no pak patch in patches/" >&2; exit 1; }'
     just _wait-cpu mac
     mac sh '{{mac_path}}; cd ~/{{mac_dir}} && tools/release.sh build --version {{version}} --launcher native/ui/out/RadarniteLauncher.exe --play play/out/radarnite-play.exe --fnbody pakpatch/out/fnbody.dll --payload ~/{{mac_dir}}-payload --out dist --makensis /opt/homebrew/bin/makensis'
@@ -148,6 +216,13 @@ publish-test tag notes="":
     [ -f "$env" ] || { echo "no $env (RN_FEED_DIR, RN_FEED_BIND, RN_FEED_PORT)" >&2; exit 1; }
     . "$env"
     base=$(sed -n 's/^#define RN_VERSION_STR "\([^"]*\)".*/\1/p' native/core/version.h)
+    # above every release already out (an installed 3.0.4 never takes a 3.0.0-test.N): the highest stable tag plus one patch
+    git fetch -q --tags origin 2>/dev/null || true
+    last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+    if [ -n "$last" ]; then
+      next=$(awk -F. '{ print $1 "." $2 "." $3 + 1 }' <<< "$last")
+      [ "$(printf '%s\n%s\n' "$base" "$next" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$next" ] && base=$next
+    fi
     version=$(tools/test-feed.py next "$RN_FEED_DIR" "$base" {{quote(tag)}})
     cur=$(tools/test-feed.py current "$RN_FEED_DIR")
     if [ -n "$cur" ] && ! tools/test-feed.py newer "$version" "$cur"; then

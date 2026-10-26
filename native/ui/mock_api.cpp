@@ -91,6 +91,7 @@ const MockScenario kScenarios[] = {
     { L"10-loading", 1200, 800, 1.0f, false },
     { L"12-bots-no-ai-125", 1180, 760, 1.25f, false },
     { L"13-bots-ai-on-warning", 1200, 800, 1.0f, false },
+    { L"13b-bots-ai-14.30-difficulty", 1200, 800, 1.0f, false },
     { L"14-match-waiting", 1200, 800, 1.0f, false },
     { L"15-match-warmup-150", 880, 587, 1.5f, false },
     { L"16-match-storm", 1200, 800, 1.0f, false },
@@ -261,6 +262,7 @@ public:
         else if (id.rfind(L"09-", 0) == 0) { st.builds = many(); st.config.mode = L"bots"; st.selected = L"17.50"; }
         else if (id.rfind(L"10-", 0) == 0) { return; }   // loading: the host never answers
         else if (id.rfind(L"12-", 0) == 0) { st.builds = one(); st.config.mode = L"bots"; st.selected = L"17.50"; }
+        else if (id.rfind(L"13b-", 0) == 0) { st.builds = withServer(std::vector<Build>{ b1430() }); st.config.mode = L"bots"; st.config.botsAI = true; st.config.botSkill = 8; st.selected = L"14.30"; }
         else if (id.rfind(L"13-", 0) == 0) { st.builds = one(); st.config.mode = L"bots"; st.config.botsAI = true; st.selected = L"17.50"; }
         else if (id.rfind(L"14-", 0) == 0) { st.builds = one(); st.config.mode = L"bots"; st.selected = L"17.50"; hasSession = true; se = running(MatchPhase::Waiting, L"Waiting for you: press PLAY in the game"); }
         else if (id.rfind(L"15-", 0) == 0) { st.builds = one(); st.config.mode = L"bots"; st.selected = L"17.50"; hasSession = true; se = running(MatchPhase::Warmup, L"Warm-up island \u00b7 bus in 60 s"); }
@@ -414,6 +416,9 @@ public:
         if (p.fields & ConfigPatch::Mode) c.mode = p.values.mode;
         if (p.fields & ConfigPatch::Bots) c.bots = p.values.bots;
         if (p.fields & ConfigPatch::BotsAI) c.botsAI = p.values.botsAI;
+        if (p.fields & ConfigPatch::PlayMode) c.playMode = p.values.playMode;
+        if (p.fields & ConfigPatch::Profile) c.profile = p.values.profile;
+        if (p.fields & ConfigPatch::BotSkill) c.botSkill = p.values.botSkill;
         if (p.fields & ConfigPatch::InfiniteMaterials) c.infiniteMaterials = p.values.infiniteMaterials;
         if (p.fields & ConfigPatch::InfiniteAmmo) c.infiniteAmmo = p.values.infiniteAmmo;
         if (p.fields & ConfigPatch::LateGame) c.lateGame = p.values.lateGame;

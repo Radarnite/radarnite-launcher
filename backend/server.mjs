@@ -12,6 +12,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { createProgress } from './progress.mjs';
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
 const BUILD = arg('--build');
@@ -38,14 +40,17 @@ cosmetics.items ??= [];
 for (const it of customCosmetics.items || [])
   if (it?.templateId && !cosmetics.items.some((c) => c.templateId.toLowerCase() === it.templateId.toLowerCase())) cosmetics.items.push({ variants: [], ...it });
 const statePath = path.join(OFF, 'state.json');
-const state = readJson(statePath, {});
+// Play modes and profiles (progress.mjs): only when config.json has "playMode"; then the locker, owned items, level and
+// V-bucks live in offline/profiles/<profile>.json and state.json is not written.
+const prog = createProgress({ config, cosmetics, off: OFF, legacyState: readJson(statePath, null), dataDir: path.dirname(fileURLToPath(import.meta.url)), log });
+const state = prog ? prog.profile : readJson(statePath, {});
 state.slots ??= {};            // Character, Backpack, Pickaxe, Glider, SkyDiveContrail, MusicPack, LoadingScreen, Dance[6], ItemWrap[7]
 state.favorites ??= {};
 state.seen ??= {};
 state.banner ??= { icon: 'BRSeason01', color: 'DefaultColor1' };
 state.lockerName ??= '';
 state.rvn ??= {};
-const saveState = () => { try { fs.writeFileSync(statePath, JSON.stringify(state)); } catch (e) { log('state save failed', e.message); } };
+const saveState = () => { if (prog) return prog.save(); try { fs.writeFileSync(statePath, JSON.stringify(state)); } catch (e) { log('state save failed', e.message); } };
 
 const now = () => new Date().toISOString();
 const FAR = '9999-12-31T23:59:59.999Z';
@@ -103,6 +108,7 @@ function athena(info) {
   const items = {};
   for (const it of cosmetics.items || []) {
     const id = it.templateId.toLowerCase();
+    if (prog && !prog.owns(id)) continue;
     items[id] = { templateId: it.templateId, attributes: { max_level_bonus: 0, level: 1, item_seen: true, xp: 0, variants: stylesOf(id), favorite: !!state.favorites[id], rnd_sel_cnt: 0 }, quantity: 1 };
   }
   for (const id of Object.values(DEFAULTS)) items[id.toLowerCase()] ??= { templateId: id, attributes: { item_seen: true, variants: [], favorite: false }, quantity: 1 };
@@ -125,12 +131,13 @@ function athena(info) {
       favorite_dance: slotItems('Dance'), favorite_itemwraps: slotItems('ItemWrap'), banner_icon: state.banner.icon, banner_color: state.banner.color,
       favorite_victorypose: '', favorite_consumableemote: '', favorite_callingcard: '', favorite_spray: [], favorite_hat: '', favorite_mapmarker: '',
       party_assist_quest: '', pinned_quest: '', inventory_limit_bonus: 0, daily_rewards: {}, competitive_identity: {}, season_update: 0, alien_style_points: 0,
+      ...(prog ? prog.athenaStats(s) : {}),
     } },
   };
 }
 function commonCore() {
   return { _id: ACCOUNT_ID, created: '2018-01-01T00:00:00.000Z', updated: now(), rvn: state.rvn.common_core || 1, wipeNumber: 1, accountId: ACCOUNT_ID, profileId: 'common_core', version: 'offline', commandRevision: state.rvn.common_core || 1,
-    items: { 'Currency:MtxPurchased': { templateId: 'Currency:MtxPurchased', attributes: { platform: 'EpicPC' }, quantity: 0 } },
+    items: { 'Currency:MtxPurchased': { templateId: 'Currency:MtxPurchased', attributes: { platform: 'EpicPC' }, quantity: prog ? prog.vbucks() : 0 } },
     stats: { attributes: { survey_data: {}, personal_offers: {}, intro_game_played: true, import_friends_claimed: {}, mtx_purchase_history: { refundsUsed: 0, refundCredits: 3, purchases: [] },
       undo_cooldowns: [], mtx_affiliate_set_time: '', inventory_limit_bonus: 0, current_mtx_platform: 'EpicPC', mtx_affiliate: '', forced_intro_played: 'Coconut',
       weekly_purchases: {}, daily_purchases: {}, ban_history: {}, in_app_purchases: {}, permissions: [], undo_timeout: 'min', monthly_purchases: {},
@@ -149,6 +156,7 @@ function mcp(command, profileId, body, info, rvnClient) {
   const slotOf = (cat) => ({ Character: 'Character', Backpack: 'Backpack', Pickaxe: 'Pickaxe', Glider: 'Glider', SkyDiveContrail: 'SkyDiveContrail', MusicPack: 'MusicPack', LoadingScreen: 'LoadingScreen', Dance: 'Dance', ItemWrap: 'ItemWrap', ItemWraps: 'ItemWrap' })[cat];
   const setSlot = (slot, idx, item, variantUpdates) => {
     if (!slot) return;
+    if (prog && item && !prog.owns(item)) { log(`equip refused, not owned: ${item}`); return; }
     const arr = slotItems(slot);
     const all = idx === -1;
     for (let i = 0; i < arr.length; i++) if (all || i === (idx || 0)) arr[i] = item || '';
@@ -188,6 +196,18 @@ function mcp(command, profileId, body, info, rvnClient) {
       if (body.targetItemId) { state.favorites[body.targetItemId.toLowerCase()] = !!body.bFavorite; changed = true; } break;
     case 'SetItemFavoriteStatusBatch':
       (body.itemIds || []).forEach((id, i) => { state.favorites[id.toLowerCase()] = !!(body.itemFavStatus || [])[i]; }); changed = true; break;
+    case 'PurchaseCatalogEntry': {
+      if (!prog) break;
+      const res = prog.purchase(body, info.season);
+      if (res.error) return { error: res.error, message: res.message };
+      state.rvn.common_core = (state.rvn.common_core || 1) + 1; state.rvn.athena = (state.rvn.athena || 1) + 1; saveState();
+      const cc = commonCore(), ath = athena(info);
+      return { profileRevision: cc.rvn, profileId: 'common_core', profileChangesBaseRevision: cc.rvn, profileChanges: [{ changeType: 'fullProfileUpdate', profile: cc }],
+        notifications: [{ type: 'CatalogPurchase', primary: true, lootResult: { items: res.lootItems.map((t) => ({ itemType: t, itemGuid: t.toLowerCase(), itemProfile: 'athena', quantity: 1 })) } }],
+        profileCommandRevision: cc.commandRevision, serverTime: now(),
+        multiUpdate: [{ profileRevision: ath.rvn, profileId: 'athena', profileChangesBaseRevision: ath.rvn, profileChanges: [{ changeType: 'fullProfileUpdate', profile: ath }], profileCommandRevision: ath.commandRevision }],
+        responseVersion: 1 };
+    }
     case 'PutModularCosmeticLoadout': case 'SetRandomCosmeticLoadoutFlag': case 'MarkItemSeen': case 'SetHardcoreModifier':
     case 'ClientQuestLogin': case 'QueryProfile': case 'SetMtxPlatform': case 'RefreshExpeditions': case 'SetAffiliateName':
     case 'IncrementNamedCounterStat': case 'SetReceiveGiftsEnabled': case 'MarkNewQuestNotificationSent': case 'SetPartyAssistQuest':
@@ -209,7 +229,7 @@ function timeline(info) {
     'client-events': { states: [{ validFrom: '2018-01-01T00:00:00.000Z', activeEvents: events, state: {
       activeStorefronts: [], eventNamedWeights: {}, seasonNumber: s, seasonTemplateId: `AthenaSeason:athenaseason${s}`, matchXpBonusPoints: 0,
       seasonBegin: '2018-01-01T00:00:00Z', seasonEnd: FAR, seasonDisplayedEnd: FAR, weeklyStoreEnd: FAR, stwEventStoreEnd: FAR, stwWeeklyStoreEnd: FAR,
-      sectionStoreEnds: {}, dailyStoreEnd: FAR } }], cacheExpire: FAR },
+      sectionStoreEnds: {}, dailyStoreEnd: prog && !prog.unlocked ? prog.dailyStoreEnd() : FAR } }], cacheExpire: FAR },
   }, eventsTimeOffsetHrs: 0, cacheIntervalMins: 10, currentTime: now() };
 }
 function content(info) {
@@ -221,7 +241,7 @@ function content(info) {
     emergencynotice: { news: { platform_messages: [], _type: 'Battle Royale News', messages: [] }, _title: 'emergencynotice', _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
     emergencynoticev2: { 'jcr:isCheckedOut': true, _title: 'emergencynoticev2', _noIndex: false, emergencynotices: { _type: 'Emergency Notices', emergencynotices: [] }, _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
     dynamicbackgrounds: { backgrounds: { backgrounds: [{ stage: `season${s}`, _type: 'DynamicBackground', key: 'lobby' }, { stage: `season${s}`, _type: 'DynamicBackground', key: 'vault' }], _type: 'DynamicBackgroundList' }, _title: 'dynamicbackgrounds', _noIndex: false, _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
-    shopSections: { sectionList: { _type: 'ShopSectionList', sections: [] }, _title: 'shop-sections', _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
+    shopSections: { sectionList: { _type: 'ShopSectionList', sections: prog ? prog.shopSections() : [] }, _title: 'shop-sections', _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
     playlistinformation: { conversion_config: { containerName: 'playlist_info', _type: 'Conversion Config', contentName: 'playlists' }, playlist_info: { _type: 'Playlist Information', playlists: [] }, _title: 'playlistinformation', _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
     tournamentinformation: { tournament_info: { tournaments: [], _type: 'Tournaments Info' }, _title: 'tournamentinformation', _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
     subgameselectdata: { saveTheWorldUnowned: { _type: 'CommonUI Simple Message', message: { image: '', hidden: false, messagetype: 'normal', _type: 'CommonUI Simple Message Base', title: '', body: '', spotlight: false } }, _title: 'subgameselectdata', battleRoyale: { _type: 'CommonUI Simple Message', message: { image: '', hidden: false, messagetype: 'normal', _type: 'CommonUI Simple Message Base', title: '', body: '', spotlight: false } }, creative: { _type: 'CommonUI Simple Message', message: { image: '', hidden: false, messagetype: 'normal', _type: 'CommonUI Simple Message Base', title: '', body: '', spotlight: false } }, saveTheWorld: { _type: 'CommonUI Simple Message', message: { image: '', hidden: false, messagetype: 'normal', _type: 'CommonUI Simple Message Base', title: '', body: '', spotlight: false } }, _activeDate: '2018-01-01T00:00:00.000Z', lastModified: now(), _locale: 'en-US' },
@@ -299,10 +319,13 @@ on('PUT', '/fortnite/api/cloudstorage/user/:id/:file', (q, r, m, info, body) => 
 // profiles
 on('POST', '/fortnite/api/game/v2/profile/:id/:kind/:command', (q, r, m, info, body, url) => {
   let json = {}; try { json = JSON.parse(body.toString() || '{}'); } catch {}
-  J(r, 200, mcp(m[3], url.searchParams.get('profileId') || 'athena', json, info, Number(url.searchParams.get('rvn') || -1)));
+  const res = mcp(m[3], url.searchParams.get('profileId') || 'athena', json, info, Number(url.searchParams.get('rvn') || -1));
+  if (res.error) return J(r, 400, { errorCode: res.error, errorMessage: res.message, messageVars: [], numericErrorCode: 1040, originatingService: 'fortnite', intent: 'prod' });
+  J(r, 200, res);
 });
-// store / economy (nothing to buy: everything is owned)
-on('GET', '/fortnite/api/storefront/v2/catalog', (q, r) => J(r, 200, { refreshIntervalHrs: 24, dailyPurchaseHrs: 24, expiration: FAR, storefronts: [] }));
+// store / economy (nothing to buy without play modes: everything is owned; with them, progress.mjs's shop)
+on('GET', '/fortnite/api/storefront/v2/catalog', (q, r, m, info) => J(r, 200, prog ? prog.catalog(info.season) : { refreshIntervalHrs: 24, dailyPurchaseHrs: 24, expiration: FAR, storefronts: [] }));
+on('GET', '/offline/progress', (q, r, m, info) => prog ? J(r, 200, prog.summary(info.season || buildSeason)) : J(r, 200, { mode: null }));
 on('GET', '/fortnite/api/storefront/v2/keychain', (q, r) => J(r, 200, [...readJson(path.join(OFF, 'keychain.json'), []), ...(customCosmetics.keychain || [])]));
 on('GET', '/fortnite/api/storefront/v2/gift/check_eligibility/*', (q, r) => J(r, 200, { price: { currencyType: 'MtxCurrency', currencySubType: '', regularPrice: 0, finalPrice: 0, saleExpiration: FAR, basePrice: 0 }, items: [] }));
 on('GET', '/fortnite/api/receipts/v1/account/:id/receipts', (q, r) => J(r, 200, []));
@@ -535,10 +558,13 @@ server.on('upgrade', (req, socket) => {
   ];
   steps.forEach((f, i) => setTimeout(f, 200 + i * 400));
   // Queued until the match server for this playlist is ready (starting one takes 30-120 s), then the assignment.
-  let closed = false; socket.on('close', () => { closed = true; }); socket.on('error', () => { closed = true; });
+  // At least one Queued always comes first: 14.30 rejects a SessionAssignment while it is still in WaitingForParty
+  // ("Invalid state", the MMS communication error) when the server was already waiting.
+  let closed = false, queued = false; socket.on('close', () => { closed = true; }); socket.on('error', () => { closed = true; });
   const poll = setInterval(() => {
     if (closed) return clearInterval(poll);
-    const g = serverFor(w);
+    const g = queued ? serverFor(w) : null;
+    queued = true;
     if (!g) return send({ payload: { ticketId, queuedPlayers: 0, estimatedWaitSec: Math.max(5, 90 - Math.round((Date.now() - t0) / 1000)), status: {}, state: 'Queued' }, name: 'StatusUpdate' });
     clearInterval(poll);
     send({ payload: { matchId, state: 'SessionAssignment' }, name: 'StatusUpdate' });
@@ -549,5 +575,9 @@ server.on('upgrade', (req, socket) => {
     log('matchmaker: client sent to', JSON.stringify(g));
   }, 1000);
 });
-server.listen(PORT, '127.0.0.1', () => { log(`listening on 127.0.0.1:${PORT} as ${DISPLAY_NAME} (${ACCOUNT_ID}), ${(cosmetics.items || []).length} cosmetics`); console.log(`ready 127.0.0.1:${PORT}`); });
+// match results the match server leaves in offline/results/ (applied once to the active profile)
+const buildSeason = (() => { const v = String(readJson(path.join(OFF, 'build.json'), {}).version || ''); const mj = Number(v.split('.')[0]) || 0; return mj > 2 ? mj : 2; })();
+if (prog) { prog.pollResults(buildSeason); setInterval(() => { if (prog.pollResults(buildSeason)) { state.rvn.athena = (state.rvn.athena || 1) + 1; state.rvn.common_core = (state.rvn.common_core || 1) + 1; saveState(); } }, 2000).unref(); }
+server.listen(PORT, '127.0.0.1', () => { log(`listening on 127.0.0.1:${PORT} as ${DISPLAY_NAME} (${ACCOUNT_ID}), ${(cosmetics.items || []).length} cosmetics`); console.log(`ready 127.0.0.1:${PORT}`);
+  if (prog) log(`progress: ${prog.mode}, profile "${prog.profile.name}" (${prog.file}), level ${prog.summary(buildSeason).level}, ${prog.vbucks()} V-bucks`); });
 server.on('error', e => { log('server error', e.message); console.error(e.message); process.exit(1); });

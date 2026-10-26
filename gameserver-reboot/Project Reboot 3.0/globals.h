@@ -27,6 +27,9 @@ namespace Globals
 	extern inline int AmountOfListens = 0; // TODO: Switch to this for LastNum
 	extern inline bool bDeveloperMode = false;
 	extern inline bool bFnOfflineBotsAI = false; // fnoffline: FNOFFLINE_BOTS_AI
+	extern inline int FnOfflineBotSkill = 0; // fnoffline: FNOFFLINE_BOT_SKILL, 1-10 (0 = the game's own skill)
+	extern inline std::string FnOfflineKilledBy = ""; // fnoffline: name of whoever eliminated the player (ClientOnPawnDied)
+	extern inline void (*FnOfflineTick)() = nullptr; // fnoffline: FnOffline::Tick, run on the game thread by TickFlushHook
 }
 
 extern inline int NumToSubtractFromSquadId = 0; // I think 2?

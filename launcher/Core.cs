@@ -62,6 +62,8 @@ public sealed class Config
     public bool BotsAI { get; set; } = false;
     /// <summary>Seconds after the player connects before the bus starts by itself (0 = no automatic start).</summary>
     public int AutoStartSeconds { get; set; } = 60;
+    /// <summary>Difficulty 1-10 of the bots on the game's AI (radarnite-play --bot-skill; 3.x keeps it in config.json "botSkill").</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public int BotSkill { get; set; } = 6;
     /// <summary>Where the builds live ("" = the folder that contains the launcher folder).</summary>
     public string BuildsFolder { get; set; } = "";
 

@@ -42,6 +42,9 @@ void UNetDriver::RemoveNetworkActor(AActor* Actor)
 
 void UNetDriver::TickFlushHook(UNetDriver* NetDriver)
 {
+	if (Globals::FnOfflineTick) // fnoffline: test deaths, match report (fnoffline.h)
+		Globals::FnOfflineTick();
+
 	if (bShouldDestroyAllPlayerBuilds) // i hate this
 	{
 		auto AllBuildingSMActors = UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABuildingSMActor::StaticClass());

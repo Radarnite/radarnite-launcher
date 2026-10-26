@@ -11,7 +11,7 @@ namespace FnOffline;
 ///
 ///   radarnite-play.exe --build &lt;dir&gt; [--launcher-dir &lt;dir&gt;] [--port 3551] [--name &lt;displayName&gt;]
 ///       [--last-playlist &lt;code&gt;] [--practice-playlist &lt;path&gt;] [--bots 20] [--infinite-materials 1] [--infinite-ammo 0]
-///       [--late-game 0] [--bots-ai 0] [--autostart 60]
+///       [--late-game 0] [--bots-ai 0] [--autostart 60] [--bot-skill 6]
 ///
 /// stdout, UTF-8, one event per line:
 ///   log: &lt;text&gt;               an Activity line
@@ -50,7 +50,7 @@ static class PlayProgram
             o[args[i][2..]] = args[++i];
         }
         string[] known = ["build", "launcher-dir", "port", "name", "last-playlist", "practice-playlist", "bots", "infinite-materials",
-                          "infinite-ammo", "late-game", "bots-ai", "autostart"];
+                          "infinite-ammo", "late-game", "bots-ai", "autostart", "bot-skill"];
         if (o.Keys.FirstOrDefault(k => !known.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } unknown) { Out("error", $"radarnite-play: unknown option --{unknown}"); return 2; }
         if (!o.TryGetValue("build", out var dir) || string.IsNullOrWhiteSpace(dir)) { Out("error", "radarnite-play: --build <dir> is required"); return 2; }
         if (o.TryGetValue("launcher-dir", out var ld) && !string.IsNullOrWhiteSpace(ld)) Paths.LauncherDir = Path.GetFullPath(ld).TrimEnd('\\');
@@ -65,6 +65,7 @@ static class PlayProgram
             PracticePlaylist = Str("practice-playlist", def.PracticePlaylist), Bots = Int("bots", def.Bots),
             InfiniteMaterials = Bool("infinite-materials", def.InfiniteMaterials), InfiniteAmmo = Bool("infinite-ammo", def.InfiniteAmmo),
             LateGame = Bool("late-game", def.LateGame), BotsAI = Bool("bots-ai", def.BotsAI), AutoStartSeconds = Int("autostart", def.AutoStartSeconds),
+            BotSkill = Math.Clamp(Int("bot-skill", def.BotSkill), 1, 10),
         };
 
         var b = BuildInfo.Read(dir, out var why);

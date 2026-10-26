@@ -239,6 +239,9 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         st.config.infiniteMaterials = cfg.infiniteMaterials;
         st.config.infiniteAmmo = cfg.infiniteAmmo;
         st.config.lateGame = cfg.lateGame;
+        st.config.playMode = cfg.playMode();
+        st.config.profile = cfg.profile();
+        st.config.botSkill = cfg.botSkill();
         st.root = root;
         std::lock_guard<std::mutex> g(sinkM);
         {
@@ -690,6 +693,9 @@ public:
         if (p.fields & ConfigPatch::InfiniteMaterials) c.infiniteMaterials = v.infiniteMaterials;
         if (p.fields & ConfigPatch::InfiniteAmmo) c.infiniteAmmo = v.infiniteAmmo;
         if (p.fields & ConfigPatch::LateGame) c.lateGame = v.lateGame;
+        if (p.fields & ConfigPatch::PlayMode) c.setExtraStr("playMode", v.playMode);
+        if (p.fields & ConfigPatch::BotSkill) c.setExtraInt("botSkill", v.botSkill < 1 ? 1 : v.botSkill > 10 ? 10 : v.botSkill);
+        if (p.fields & ConfigPatch::Profile) { std::wstring n = trim(v.profile).substr(0, 24); c.setExtraStr("profile", n.empty() ? L"Main" : n); }
         c.save();
     }
 

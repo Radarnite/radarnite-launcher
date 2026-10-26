@@ -226,7 +226,7 @@ private:
     bool maximized_ = false, active_ = true;
     int drag_ = 0;              // id being dragged (range, grip, scrollbars)
     float dragY0_ = 0, dragV0_ = 0;
-    EditBox edits_[4];          // [3]: the cosmetics panel's search
+    EditBox edits_[5];          // [3]: the cosmetics panel's search, [4]: the progression's profile
     HBRUSH editBrush_ = nullptr, fieldBrush_ = nullptr;
     // lobby screen
     ArtLoader art_;

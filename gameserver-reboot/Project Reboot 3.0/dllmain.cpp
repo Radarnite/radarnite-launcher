@@ -682,6 +682,21 @@ void ChangeLevels()
     constexpr bool bShouldRemoveLocalPlayer = true;
 
     LOG_INFO(LogDev, "FindGIsClient(): 0x{:x}", FindGIsClient() - __int64(GetModuleHandleW(0)));
+    PlayerBot::PrepareNavigationBeforeMapLoad(); // fnoffline
+
+    // fnoffline developer (FNOFFLINE_BOT_DIAG): the code of a match-start crash seen in some test matches (a write near
+    // address 0xba0 at exe+0x590c031, called from exe+0x49c1270 / 0x49bd5bf / 0x58d1d56), for reading offline
+    {
+        char V[8] = {};
+        if (GetEnvironmentVariableA("FNOFFLINE_BOT_DIAG", V, sizeof(V)) && V[0] == '1')
+            for (auto [Off, Before] : { std::pair{ 0x590c031, 0x80 }, std::pair{ 0x49c1270, 0x40 }, std::pair{ 0x49bd5bf, 0x40 }, std::pair{ 0x58d1d56, 0x40 } })
+            {
+                auto P = (uint8_t*)(__int64(GetModuleHandleW(nullptr)) + Off - Before);
+                std::string H; char B[4];
+                for (int k = 0; k < Before + 0x40; k++) { snprintf(B, sizeof(B), "%02x", P[k]); H += B; }
+                LOG_INFO(LogDev, "[fnoffline] code exe+0x{:x}-0x{:x}: {}", Off, Before, H);
+            }
+    }
 
     // auto bruh = std::wstring(CustomMapName.begin(), CustomMapName.end());
     // auto CustomMapOpenWStr = (L"open " + bruh);
@@ -910,6 +925,7 @@ DWORD WINAPI Main(LPVOID)
     InitLogger();
 
     FnOffline::ApplyEnv(); // fnoffline: env overrides before any global is used
+    Globals::FnOfflineTick = FnOffline::Tick;
 
     std::cin.tie(0);
     std::cout.tie(0);

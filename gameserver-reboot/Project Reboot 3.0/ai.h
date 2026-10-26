@@ -4,6 +4,7 @@
 #include "Actor.h"
 #include "SoftObjectPath.h"
 #include "KismetStringLibrary.h"
+#include "KismetSystemLibrary.h"
 #include "GameplayStatics.h"
 #include "FortPlayerPawn.h"
 #include "FortAthenaMutator.h"
@@ -112,14 +113,17 @@ static inline AFortAthenaMutator_Bots* SpawnBotMutator() //sets up all the class
    auto GameMode = Cast<AFortGameModeAthena>(GetWorld()->GetGameMode());
 
    static auto BGAClass = FindObject<UClass>(L"/Script/Engine.BlueprintGeneratedClass");
-   //auto PhoebeMutatorClass = LoadObject<UClass>(L"/Game/Athena/AI/Phoebe/BP_Phoebe_Mutator.BP_Phoebe_Mutator_C", BGAClass);
+   // fnoffline: the Phoebe blueprint (its spawning item data, MMR spawning and skill override tables), the base class
+   // only when the blueprint is missing
+   auto PhoebeMutatorClass = Fortnite_Version >= 14 ? LoadObject<UClass>(L"/Game/Athena/AI/Phoebe/BP_Phoebe_Mutator.BP_Phoebe_Mutator_C", BGAClass) : nullptr;
 
    if (!AFortAthenaMutator_Bots::StaticClass())
    {
        return nullptr;
    }
 
-    BotMutator = GetWorld()->SpawnActor<AFortAthenaMutator_Bots>(AFortAthenaMutator_Bots::StaticClass());
+    BotMutator = GetWorld()->SpawnActor<AFortAthenaMutator_Bots>(PhoebeMutatorClass ? PhoebeMutatorClass : AFortAthenaMutator_Bots::StaticClass());
+    LOG_INFO(LogAI, "[fnoffline] bot mutator: {}", PhoebeMutatorClass ? "BP_Phoebe_Mutator" : "FortAthenaMutator_Bots");
 
    if (!BotMutator)
    {
@@ -153,6 +157,64 @@ static void SetupServerBotManager()
     if (!ServerBotManager)
         ServerBotManager = (UFortServerBotManagerAthena*)UGameplayStatics::SpawnObject(FortServerBotManagerClass, GameMode);
 
+    // fnoffline: the playlist's AI settings (its AI services) before the AI system starts them
+    if (Globals::bFnOfflineBotsAI)
+    {
+        static auto AISettingsOffset = GameMode->GetOffset("AISettings", false);
+        auto Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
+        static auto PlaylistAISettingsOffset = Playlist ? Playlist->GetOffset("AISettings", false) : -1;
+
+        if (AISettingsOffset != -1)
+        {
+            bool WasSet = GameMode->Get(AISettingsOffset) != nullptr;
+            if (!WasSet && Playlist && PlaylistAISettingsOffset != -1)
+                GameMode->Get(AISettingsOffset) = Playlist->Get(PlaylistAISettingsOffset);
+            LOG_INFO(LogAI, "[fnoffline] game mode AI settings: {} ({})", GameMode->Get(AISettingsOffset) ? GameMode->Get(AISettingsOffset)->GetName() : "none",
+                WasSet ? "already set" : "from the playlist");
+        }
+    }
+
+    // fnoffline: developer diagnostics of the AI system
+    if (Globals::bFnOfflineBotsAI && ServerBotManager)
+    {
+        auto World = GetWorld();
+        static auto AISystemOffset = World->GetOffset("AISystem", false);
+        auto AISystem = AISystemOffset != -1 ? World->Get<UObject*>(AISystemOffset) : nullptr;
+        // developer (FNOFFLINE_BOT_DIAG): the AI logs that say why a bot's behavior tree does not start, and the AI
+        // services the AI system made
+        static bool bDiag = [] { char V[8] = {}; return GetEnvironmentVariableA("FNOFFLINE_BOT_DIAG", V, sizeof(V)) && V[0] == '1'; }();
+
+        if (bDiag)
+        {
+            for (auto Cmd : { L"log LogBehaviorTree VeryVerbose", L"log LogAISpawnerData VeryVerbose", L"log LogAthenaBots VeryVerbose", L"log LogAthenaAIServices VeryVerbose", L"log LogNavigation VeryVerbose", L"log LogNavigationDataBuild VeryVerbose", L"log LogNavOctree VeryVerbose" })
+                UKismetSystemLibrary::ExecuteConsoleCommand(World, Cmd, nullptr);
+
+            static auto ServiceManagerOffset = AISystem ? AISystem->GetOffset("AIServiceManager", false) : -1;
+            auto ServiceManager = ServiceManagerOffset != -1 ? AISystem->Get<UObject*>(ServiceManagerOffset) : nullptr;
+            std::string Out;
+
+            if (ServiceManager)
+                for (auto Cls = ServiceManager->ClassPrivate; Cls; Cls = *(UClass**)(__int64(Cls) + Offsets::SuperStruct))
+                    for (void* Prop = *(void**)(__int64(Cls) + Offsets::Children); Prop; Prop = GetNext(Prop))
+                    {
+                        auto Name = GetFNameOfProp(Prop)->ToString();
+                        int Off = *(int*)(__int64(Prop) + Offsets::Offset_Internal);
+                        Out += " " + Name + "@" + std::to_string(Off);
+                        if (Name.find("Service") != std::string::npos)
+                        {
+                            auto& Arr = *(TArray<UObject*>*)(__int64(ServiceManager) + Off);
+                            Out += "[" + std::to_string(Arr.Num()) + ":";
+                            for (int i = 0; i < Arr.Num() && i < 16; i++)
+                                Out += " " + (Arr.at(i) && Arr.at(i)->IsValidLowLevel() ? Arr.at(i)->GetName() : std::string("?"));
+                            Out += "]";
+                        }
+                    }
+
+            LOG_INFO(LogAI, "[fnoffline] AI service manager {}:{}", ServiceManager ? ServiceManager->GetName() : "none", Out);
+        }
+
+    }
+
     if (ServerBotManager)
     {
         static auto CachedGameModeOffset = ServerBotManager->GetOffset("CachedGameMode");
@@ -165,6 +227,11 @@ static void SetupServerBotManager()
 
         static auto CachedBotMutatorOffset = ServerBotManager->GetOffset("CachedBotMutator");
         auto BotMutator = FindFirstMutator(FindObject<UClass>(L"/Script/FortniteGame.FortAthenaMutator_Bots"));
+
+        // fnoffline: with the game's AI on 14+, the playlist's gameplay modifier spawns its own Phoebe mutator after
+        // this; a second one is refused ("Bot Mutator already present!"). bots.h SetupPhoebe picks it before the first bot.
+        if (!BotMutator && Globals::bFnOfflineBotsAI && Fortnite_Version >= 14)
+            return;
 
         if (!BotMutator)
         {

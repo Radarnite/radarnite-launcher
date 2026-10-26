@@ -235,6 +235,7 @@ public sealed class Session
         env["FNOFFLINE_INFINITE_AMMO"] = _c.InfiniteAmmo || practice ? "1" : "0";
         env["FNOFFLINE_LATEGAME"] = _c.LateGame ? "1" : "0";
         env["FNOFFLINE_BOTS_AI"] = !practice && _c.BotsAI ? "1" : "0";
+        env["FNOFFLINE_BOT_SKILL"] = _c.BotSkill.ToString();
         env["FNOFFLINE_AUTOSTART_SECONDS"] = Math.Max(0, _c.AutoStartSeconds).ToString();
         env["FNOFFLINE_AUTOSTART_MINPLAYERS"] = "1";
         if (_b.ServerPatches.Length > 0) env["FNOFFLINE_PATCHES"] = _b.ServerPatches;

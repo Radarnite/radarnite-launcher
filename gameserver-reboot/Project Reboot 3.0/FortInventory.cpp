@@ -98,7 +98,7 @@ std::pair<std::vector<UFortItem*>, std::vector<UFortItem*>> AFortInventory::AddI
 
 	Count = OverStack > 0 ? OverStack : Count;
 
-	auto PlayerController = Cast<APlayerController>(GetOwner());
+	auto PlayerController = Cast<AController>(GetOwner()); // fnoffline: was APlayerController; the game AI bots' controllers own inventories too
 
 	if (!PlayerController)
 		return std::make_pair(NewItemInstances, ModifiedItemInstances);
