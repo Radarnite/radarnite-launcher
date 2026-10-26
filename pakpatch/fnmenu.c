@@ -1,6 +1,6 @@
 /*
- * fnmenu.c - the in-game menu of fnmods.dll on F8 (#included by fnmods.c): the settings of fnsettings.c and the
- * console, changed while playing. Changes last for the session; mods.json stays the launcher's.
+ * fnmenu.c - the in-game menu of fnmods.dll on F8 (#included by fnmods.c): the settings of fnsettings.c, the cheats of
+ * fncheats.c (their switches, and Enter runs the teleports and the bot spawn) and the console, changed while playing. Changes last for the session; mods.json stays the launcher's.
  *
  * Drawn by the engine, on the canvas of the player's HUD: UGameViewportClient::Draw calls AHUD::PostRender on every
  * local player's HUD, AHUD::DrawHUD calls the blueprint event ReceiveDrawHUD through ProcessEvent, and during that
@@ -19,9 +19,12 @@
  * the game). Nothing else is taken.
  */
 
-enum { MI_FOV, MI_FPS, MI_FX, MI_SLOMO, MI_FLY, MI_CONSOLE, MI_N };
+/* the first five keep their places: the mods test (fntest.c) reaches them with the arrows */
+enum { MI_FOV, MI_FPS, MI_FX, MI_SLOMO, MI_FLY, MI_AIM, MI_CONE, MI_GOD, MI_KEYS, MI_TPX, MI_TPPIN, MI_POI, MI_SPAWN, MI_CONSOLE, MI_N };
 static const int FPS_STEPS[] = { 30, 60, 120, 144, 165, 240, 0 };
 static const float SLOMO_STEPS[] = { 0.1f, 0.25f, 0.5f, 0.75f };
+static const int CONE_STEPS[] = { 5, 10, 15, 20, 30, 45, 60, 90, 180 };
+static const int SPAWN_STEPS[] = { 1, 2, 3, 5, 10, 20 };
 
 static struct {
     int state;
@@ -104,10 +107,22 @@ static void menu_value(int i, wchar_t *v, int cap, int *on, int *dim)
     case MI_FX: *on = g_cfg.nofx; v[0] = 0; break;
     case MI_SLOMO: *on = g_cfg.slomo_on; swprintf(v, cap, L"%gx", g_cfg.slomo); break;
     case MI_FLY: *on = g_cfg.fly_on; swprintf(v, cap, L"%ls", g_cfg.ghost ? L"through walls" : L"fly"); *dim = !menu_in_match(); break;
+    case MI_AIM: *on = g_cfg.aim_on; swprintf(v, cap, g_cfg.aim_strength >= 10 ? L"snap" : L"strength %d", g_cfg.aim_strength); *dim = !menu_in_match(); break;
+    case MI_CONE: *on = -1; swprintf(v, cap, L"%d°", g_cfg.aim_cone); *dim = !menu_in_match(); break;
+    case MI_GOD: *on = g_cfg.god; v[0] = 0; *dim = !menu_in_match(); break;
+    case MI_KEYS: *on = g_cfg.keys; swprintf(v, cap, L"F6 F7 F9"); *dim = !menu_in_match(); break;
+    case MI_TPX: *on = -1; swprintf(v, cap, g_cfg.keys ? L"F6" : L"Enter"); *dim = !menu_in_match(); break;
+    case MI_TPPIN: *on = -1; swprintf(v, cap, !CA.has_pin ? L"no pin yet" : g_cfg.keys ? L"F7" : L"Enter"); *dim = !menu_in_match() || !CA.has_pin; break;
+    case MI_POI: *on = -1; swprintf(v, cap, L"Enter"); *dim = !menu_in_match(); break;
+    case MI_SPAWN: *on = -1; swprintf(v, cap, L"%d %ls%ls", g_cfg.spawn_n, g_cfg.spawn_team ? L"teammate" : L"enem",
+                                      g_cfg.spawn_team ? (g_cfg.spawn_n == 1 ? L"" : L"s") : (g_cfg.spawn_n == 1 ? L"y" : L"ies"));
+                   *dim = !menu_in_match(); break;
     default: *on = -1; swprintf(v, cap, L"%hs", CN.key_now[0] ? CN.key_now : "-"); *dim = !CN.made; break;
     }
 }
-static const wchar_t *MENU_LABEL[MI_N] = { L"Field of view", L"FPS cap", L"Remove post effects", L"Slow motion", L"Fly", L"Open the console" };
+static const wchar_t *MENU_LABEL[MI_N] = { L"Field of view", L"FPS cap", L"Remove post effects", L"Slow motion", L"Fly",
+    L"Aim assist (hold right mouse)", L"Aim cone", L"God mode", L"Cheat keys", L"Teleport to the crosshair", L"Teleport to the map pin",
+    L"Teleport to a random POI", L"Spawn bots", L"Open the console" };
 static void menu_draw(void)
 {
     float W = (float)g_draw_w, H = (float)g_draw_h;
@@ -117,7 +132,7 @@ static void menu_draw(void)
     m_width(L"Ag", ts, &th);
     if (th <= 0) th = 24;
     ts = 26.0f * k / th; if (ts < 0.35f) ts = 0.35f;   /* text 26 px at 1080 lines whatever the engine's font size is */
-    float lh = 46 * k, pad = 22 * k, w = 560 * k, x = 48 * k, y = 140 * k;
+    float lh = 46 * k, pad = 22 * k, w = 660 * k, x = 48 * k, y = 110 * k;
     float h = pad * 2 + lh * (MI_N + 1) + 34 * k;
     lcolor bg = { 0.02f, 0.025f, 0.06f, 1.0f }, sel = { 0.45f, 0.33f, 1.0f, 0.55f }, white = { 1, 1, 1, 1 }, mute = { 1, 1, 1, 0.55f },
            green = { 0.25f, 0.85f, 0.45f, 1 }, off = { 1, 1, 1, 0.35f }, accent = { 0.72f, 0.61f, 1.0f, 1 };
@@ -143,7 +158,8 @@ static void menu_draw(void)
         if (v[0]) { float vw = m_width(v, ts, NULL); m_text(v, vx - vw, ty, ts, dim ? off : on == 0 ? mute : white); }
         cy += lh;
     }
-    const wchar_t *hint = g_menu_sel == MI_FLY && !menu_in_match() ? L"Fly works in a match" :
+    const wchar_t *hint = g_menu_sel >= MI_FLY && g_menu_sel < MI_CONSOLE && !menu_in_match() ? L"This works in a match" :
+                          g_menu_sel >= MI_TPX && g_menu_sel <= MI_SPAWN ? L"Enter: do it now   ←→ change" :
                           L"↑↓ choose   ←→ change   Enter on/off";
     m_text(hint, x + pad, cy + 6 * k, ts * 0.75f, mute);
     InterlockedIncrement(&g_menu_draws);
@@ -212,6 +228,18 @@ static void menu_step(int i, int dir)
         k += dir; if (k < 0) k = 0; if (k >= n) k = n - 1; g_cfg.slomo = SLOMO_STEPS[k]; g_cfg.slomo_on = 1; break;
     }
     case MI_FLY: g_cfg.ghost = !g_cfg.ghost; break;
+    case MI_AIM: g_cfg.aim_strength = g_cfg.aim_strength + dir < 1 ? 1 : g_cfg.aim_strength + dir > 10 ? 10 : g_cfg.aim_strength + dir; break;
+    case MI_CONE: {
+        int n = (int)(sizeof CONE_STEPS / sizeof CONE_STEPS[0]), k = 4;
+        for (int j = 0; j < n; j++) if (CONE_STEPS[j] == g_cfg.aim_cone) k = j;
+        k += dir; if (k < 0) k = 0; if (k >= n) k = n - 1; g_cfg.aim_cone = CONE_STEPS[k]; break;
+    }
+    case MI_SPAWN: {   /* 1 ... 20 enemies, then 1 ... 20 teammates */
+        int n = (int)(sizeof SPAWN_STEPS / sizeof SPAWN_STEPS[0]), k = 2;
+        for (int j = 0; j < n; j++) if (SPAWN_STEPS[j] == g_cfg.spawn_n) k = j;
+        k += g_cfg.spawn_team ? n : 0; k = (k + dir + 2 * n) % (2 * n);
+        g_cfg.spawn_team = k >= n; g_cfg.spawn_n = SPAWN_STEPS[k % n]; break;
+    }
     default: break;
     }
 }
@@ -223,6 +251,13 @@ static void menu_toggle(int i)
     case MI_FX: g_cfg.nofx = !g_cfg.nofx; break;
     case MI_SLOMO: g_cfg.slomo_on = !g_cfg.slomo_on; break;
     case MI_FLY: g_cfg.fly_on = !g_cfg.fly_on; break;
+    case MI_AIM: g_cfg.aim_on = !g_cfg.aim_on; break;
+    case MI_GOD: g_cfg.god = !g_cfg.god; break;
+    case MI_KEYS: g_cfg.keys = !g_cfg.keys; break;
+    case MI_TPX: if (menu_in_match()) { g_menu_open = 0; g_ch_action = 1; } break;
+    case MI_TPPIN: if (menu_in_match()) { g_menu_open = 0; g_ch_action = 2; } break;
+    case MI_POI: if (menu_in_match()) { g_menu_open = 0; g_ch_action = 4; } break;
+    case MI_SPAWN: if (menu_in_match()) g_ch_action = 3; break;
     case MI_CONSOLE: g_menu_open = 0; console_open(); break;
     }
 }
