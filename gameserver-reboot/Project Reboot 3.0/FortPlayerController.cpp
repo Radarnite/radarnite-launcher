@@ -1323,6 +1323,10 @@ void AFortPlayerController::ClientOnPawnDiedHook(AFortPlayerController* PlayerCo
 	if (!DeadPawn || !GameState || !DeadPlayerState)
 		return ClientOnPawnDiedOriginal(PlayerController, DeathReport);
 
+	// fnoffline: who eliminated the player, for the bots' ratings in the match result (fnoffline.h ResultsTick)
+	if (!DeadPlayerState->IsBot())
+		Globals::FnOfflineKilledBy = KillerPlayerState && KillerPlayerState != DeadPlayerState ? KillerPlayerState->GetPlayerName().ToString() : "";
+
 	auto DeathLocation = DeadPawn->GetActorLocation();
 
 	static auto FallDamageEnumValue = 1;

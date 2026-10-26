@@ -9,6 +9,9 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - Local backend (Node) that emulates the Epic services the game expects: auth, profiles, friends, matchmaking, MCP.
 - Local match server (gameserver) for Battle Royale with bots and a practice/creative mode.
 - Cosmetics generated from the build's own data (CUE4Parse); custom skins via the IoStore sig-fit tooling.
+- Play modes per profile: Legal (start with the defaults; levels, battle pass and V-bucks from matches; today's real
+  item shop limited to what the build has), Legal with infinite V-bucks, or everything unlocked.
+- Ragdoll deaths on 14.30: eliminated players fall with physics instead of the digitize effect.
 - One-click firewall rules so a build can never reach the internet.
 - WebView2 desktop UI (with a plain WinForms fallback).
 - Per-user install under `%LOCALAPPDATA%\Programs\Radarnite Launcher`; no administrator needed.
@@ -25,6 +28,10 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
   fn-port outfits into morph target weights (`pakpatch/test/fnbody-mock.c` runs it against a fake engine).
 - `paktools/` — the one copy of the pak signature fitter (sigfit) and the game guard the launcher ships
   (`tools/vendor-pak-tools.sh`).
+- `pakpatch/fnbody.c` — `fnbody.dll`, injected by the launcher into the 14.30 client: turns the body-slider styles of
+  fn-port outfits into morph target weights (`pakpatch/test/fnbody-mock.c` runs it against a fake engine), and
+  ragdoll deaths (`pakpatch/fnragdoll.c`).
+- `backend/progress.mjs` — play modes, profiles, levels, battle pass (`backend/seasons/`), V-bucks and the item shop.
 - `radarnite.nsi` — the NSIS installer script.
 - `tools/release.sh` — builds `RadarniteLauncherSetup-<version>.exe` and its `.sha256`.
 

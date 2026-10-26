@@ -6,11 +6,29 @@
 #include <knownfolders.h>
 #include <deque>
 #include <mutex>
+#include <thread>
 
 namespace rn {
 
 namespace {
 std::mutex g_stopLock;
+
+// The item shop of the progression (backend/progress.mjs): today's real shop, radarnite.com's data.json, into
+// offline\shop.json once a day, in the background: the launch never waits for it, and without a network the backend
+// uses the last copy or a rotation of the build's own items. Only in the legal play modes.
+// Nothing is logged from the download thread (it can outlive the session); the backend logs the shop it uses.
+void refreshShop(const std::wstring& off, const std::wstring& mode) {
+    if (mode != L"legal" && mode != L"legal-vbucks") return;
+    std::wstring file = join(off, L"shop.json");
+    SYSTEMTIME t; GetSystemTime(&t);
+    char today[32]; snprintf(today, sizeof today, "\"date\": \"%04u-%02u-%02u\"", t.wYear, t.wMonth, t.wDay);
+    std::string have;
+    if (readFile(file, &have) && have.substr(0, 400).find(today) != std::string::npos) return;
+    std::thread([file] {
+        std::wstring err;
+        net::fetchFile(L"https://radarnite.com/data.json", L"RadarniteLauncher", 60000, file, &err);
+    }).detach();
+}
 }
 
 bool backendAvailable() {
@@ -104,6 +122,7 @@ bool PlaySession::start() {
     if (!fileExists(join(off, L"cosmetics.json")))
         log_(L"Warning: this build has no cosmetics list yet (press Generate cosmetics): only the defaults will show.");
     fitOwnPaks(off);
+    refreshShop(off, c_.playMode());
 
     // 1. backend (127.0.0.1 only)
     setStage(L"backend", L"run");

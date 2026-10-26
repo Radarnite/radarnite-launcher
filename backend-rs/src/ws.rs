@@ -327,6 +327,7 @@ async fn match_session(app: Rc<App>, mut ws: Ws<BoxIo>, m: Matchmaking) {
     let ms = |n: u64| Duration::from_millis(n);
     let mut steps = 0u32;
     let mut next_poll = Some(m.t0 + ms(1000));
+    let mut queued = false;
     let mut play_at: Option<Instant> = None;
     let mut close_at: Option<Instant> = None;
     let mut tmp = vec![0u8; 16384];
@@ -368,7 +369,10 @@ async fn match_session(app: Rc<App>, mut ws: Ws<BoxIo>, m: Matchmaking) {
                     steps += 1;
                     ws.send(&status(payload, "StatusUpdate")).await;
                 } else if next_poll.map_or(false, |t| t <= now) {
-                    match app.server_for(&m.w) {
+                    // at least one Queued first: 14.30 rejects a SessionAssignment in WaitingForParty
+                    let ready = if queued { app.server_for(&m.w) } else { None };
+                    queued = true;
+                    match ready {
                         None => {
                             next_poll = next_poll.map(|t| t + ms(1000));
                             let waited = (m.t0.elapsed().as_millis() as f64 / 1000.0 + 0.5).floor();

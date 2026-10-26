@@ -30,6 +30,18 @@ struct LauncherConfig {
     std::vector<std::pair<std::string, std::string>> extra;
     int helpCount = 0;                               // entries of "_help" as read (-1 = "_help": null)
 
+    // Keys 3.x added after 2.x, kept among the extra members so a config that never set them is written exactly as
+    // 2.x wrote it: "playMode" ("" = absent: every cosmetic owned, no profiles; legal | legal-vbucks | unlocked) and
+    // "profile" (the progression's save, default "Main"). Read by the backend (backend/progress.mjs).
+    std::wstring extraStr(const char* key) const;    // "" when missing or not a string
+    void setExtraStr(const char* key, const std::wstring& value);
+    std::wstring playMode() const { return extraStr("playMode"); }
+    std::wstring profile() const { std::wstring p = extraStr("profile"); return p.empty() ? L"Main" : p; }
+    // "botSkill": the difficulty 1-10 of the bots on the game's AI (6 = the game's own skill, the default)
+    int extraInt(const char* key, int def) const;   // def when missing or not a number
+    void setExtraInt(const char* key, int value);
+    int botSkill() const { int v = extraInt("botSkill", 6); return v < 1 ? 1 : v > 10 ? 10 : v; }
+
     // Config.Load: defaults when missing; a file with a JSON/type error is copied to config.json.broken and only its
     // name and account id are kept; a missing name or account id is generated; saved when anything was generated,
     // the file was missing or "_help" is not the current one.

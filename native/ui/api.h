@@ -44,11 +44,14 @@ struct Config {
     std::wstring mode = L"practice";   // lobby | practice | bots (kept for config.json compatibility)
     int bots = 20;
     bool botsAI = false, infiniteMaterials = false, infiniteAmmo = false, lateGame = false;
+    std::wstring playMode;             // "" | legal | legal-vbucks | unlocked
+    std::wstring profile = L"Main";
+    int botSkill = 6;                  // 1-10, the bots on the game's AI
 };
 
 // A partial config change made in the window (only the set fields are written by the core).
 struct ConfigPatch {
-    enum Field : uint32_t { DisplayName = 1, Mode = 2, Bots = 4, BotsAI = 8, InfiniteMaterials = 16, InfiniteAmmo = 32, LateGame = 64 };
+    enum Field : uint32_t { DisplayName = 1, Mode = 2, Bots = 4, BotsAI = 8, InfiniteMaterials = 16, InfiniteAmmo = 32, LateGame = 64, PlayMode = 128, Profile = 256, BotSkill = 512 };
     uint32_t fields = 0;
     Config values;
 };

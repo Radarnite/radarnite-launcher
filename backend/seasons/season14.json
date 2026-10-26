@@ -1,0 +1,881 @@
+{
+ "season": 14,
+ "source": "AthenaSeason14",
+ "levelXp": [
+  40000,
+  50000,
+  50000,
+  60000,
+  60000,
+  60000,
+  60000,
+  60000,
+  60000,
+  60000,
+  60000,
+  60000,
+  70000,
+  70000,
+  70000,
+  70000,
+  70000,
+  70000,
+  70000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000,
+  80000
+ ],
+ "free": {
+  "2": [
+   {
+    "templateId": "AthenaSkyDiveContrail:trails_id_099_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "4": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "6": [
+   {
+    "templateId": "AthenaGlider:glider_id_233_hightowerdefault",
+    "quantity": 1
+   }
+  ],
+  "9": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_251_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "13": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "18": [
+   {
+    "templateId": "AthenaMusicPack:musicpack_056_s14_cine",
+    "quantity": 1
+   }
+  ],
+  "23": [
+   {
+    "templateId": "AthenaBackpack:bid_594_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "28": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "33": [
+   {
+    "templateId": "AthenaItemWrap:wrap_268_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "37": [
+   {
+    "templateId": "AthenaPickaxe:pickaxe_id_454_hightowergrapemale1h",
+    "quantity": 1
+   }
+  ],
+  "43": [
+   {
+    "templateId": "AthenaDance:spid_222_s14_hightowerradish",
+    "quantity": 1
+   }
+  ],
+  "48": [
+   {
+    "templateId": "AthenaItemWrap:wrap_271_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "52": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "58": [
+   {
+    "templateId": "AthenaDance:spid_223_s14_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "63": [
+   {
+    "templateId": "BannerToken:bannertoken_056_s14_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "68": [
+   {
+    "templateId": "AthenaBackpack:bid_599_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "72": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_246_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "76": [
+   {
+    "templateId": "Tokens:athena_s14_nobattlebundleoption_token",
+    "quantity": 1
+   }
+  ],
+  "77": [
+   {
+    "templateId": "BannerToken:bannertoken_059_s14_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "84": [
+   {
+    "templateId": "AthenaSkyDiveContrail:trails_id_097_hightowerspeedlines",
+    "quantity": 1
+   }
+  ],
+  "91": [
+   {
+    "templateId": "AthenaItemWrap:wrap_273_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "99": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ]
+ },
+ "paid": {
+  "1": [
+   {
+    "templateId": "AthenaCharacter:cid_845_athena_commando_m_hightowertapas",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_01",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_02",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_03",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_04",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_05",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_06",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_07",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_08",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_wasabi_schedule_09",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_alternatestyles_schedule_01",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_alternatestyles_schedule_02",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_alternatestyles_schedule_03",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_alternatestyles_schedule_04",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_alternatestyles_schedule_05",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_alternatestyles_schedule_06",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_tapas_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_honeydew_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_grape_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_squash_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_date_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_mango_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_tomato_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_s_wasabi_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_tapas_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_honeydew_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_grape_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_squash_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_date_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_mango_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_tomato_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_g_wasabi_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_tapas_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_honeydew_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_grape_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_squash_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_date_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_mango_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_tomato_schedule",
+    "quantity": 1
+   },
+   {
+    "templateId": "Season14:season14_superlevel_h_wasabi_schedule",
+    "quantity": 1
+   }
+  ],
+  "3": [
+   {
+    "templateId": "AthenaDance:spid_224_s14_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "5": [
+   {
+    "templateId": "AthenaBackpack:bid_600_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "7": [
+   {
+    "templateId": "BannerToken:bannertoken_062_s14_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "8": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowertapas1h_schedule",
+    "quantity": 1
+   }
+  ],
+  "10": [
+   {
+    "templateId": "AthenaItemWrap:wrap_272_hightowertapas",
+    "quantity": 1
+   }
+  ],
+  "11": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_743_hightowerglider_tapas",
+    "quantity": 1
+   }
+  ],
+  "12": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "14": [
+   {
+    "templateId": "AthenaGlider:glider_id_236_hightowertapasmale",
+    "quantity": 1
+   }
+  ],
+  "15": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowertapas_schedule",
+    "quantity": 1
+   }
+  ],
+  "16": [
+   {
+    "templateId": "AthenaItemWrap:wrap_269_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "17": [
+   {
+    "templateId": "AthenaDance:spid_220_s14_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "19": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "20": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_254_s14seasonala",
+    "quantity": 1
+   }
+  ],
+  "21": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_740_hightowerglider_honeydew",
+    "quantity": 1
+   }
+  ],
+  "22": [
+   {
+    "templateId": "AthenaCharacter:cid_842_athena_commando_f_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "24": [
+   {
+    "templateId": "BannerToken:bannertoken_058_s14_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "25": [
+   {
+    "templateId": "AthenaPickaxe:pickaxe_id_455_hightowerhoneydew1h",
+    "quantity": 1
+   }
+  ],
+  "26": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "27": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_248_hightowerhoneydew",
+    "quantity": 1
+   }
+  ],
+  "29": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowerhoneydew_schedule",
+    "quantity": 1
+   }
+  ],
+  "30": [
+   {
+    "templateId": "AthenaSkyDiveContrail:trails_id_096_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "31": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "32": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowergrapeb_schedule",
+    "quantity": 1
+   }
+  ],
+  "34": [
+   {
+    "templateId": "AthenaDance:spid_219_s14_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "35": [
+   {
+    "templateId": "AthenaMusicPack:musicpack_057_s14_hero",
+    "quantity": 1
+   }
+  ],
+  "36": [
+   {
+    "templateId": "BannerToken:bannertoken_057_s14_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "38": [
+   {
+    "templateId": "AthenaCharacter:cid_840_athena_commando_m_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "39": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_739_hightowerglider_grape",
+    "quantity": 1
+   }
+  ],
+  "40": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "41": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "42": [
+   {
+    "templateId": "AthenaGlider:glider_id_234_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "44": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_247_hightowergrape",
+    "quantity": 1
+   }
+  ],
+  "45": [
+   {
+    "templateId": "BannerToken:bannertoken_060_s14_hightowerradish",
+    "quantity": 1
+   }
+  ],
+  "46": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowergrape_schedule",
+    "quantity": 1
+   }
+  ],
+  "47": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "49": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "50": [
+   {
+    "templateId": "AthenaSkyDiveContrail:trails_id_098_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "51": [
+   {
+    "templateId": "BannerToken:bannertoken_061_s14_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "53": [
+   {
+    "templateId": "AthenaCharacter:cid_839_athena_commando_f_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "54": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_742_hightowerglider_squash",
+    "quantity": 1
+   }
+  ],
+  "55": [
+   {
+    "templateId": "AthenaPickaxe:pickaxe_id_457_hightowersquash1h",
+    "quantity": 1
+   }
+  ],
+  "56": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_250_hightowersquash",
+    "quantity": 1
+   }
+  ],
+  "57": [
+   {
+    "templateId": "AthenaGlider:glider_id_235_hightowersquashfemale",
+    "quantity": 1
+   }
+  ],
+  "59": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "60": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowersquash_schedule",
+    "quantity": 1
+   }
+  ],
+  "61": [
+   {
+    "templateId": "AthenaMusicPack:musicpack_058_s14_villain",
+    "quantity": 1
+   }
+  ],
+  "62": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "64": [
+   {
+    "templateId": "AthenaPickaxe:pickaxe_id_453_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "65": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "66": [
+   {
+    "templateId": "AthenaItemWrap:wrap_267_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "67": [
+   {
+    "templateId": "AthenaCharacter:cid_846_athena_commando_m_hightowerdate",
+    "quantity": 1
+   },
+   {
+    "templateId": "AthenaBackpack:bid_605_hightowerdate_cape",
+    "quantity": 1
+   }
+  ],
+  "69": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_738_hightowerglider_date",
+    "quantity": 1
+   }
+  ],
+  "70": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "71": [
+   {
+    "templateId": "AthenaGlider:glider_id_232_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "73": [
+   {
+    "templateId": "AthenaSkyDiveContrail:trails_id_095_hightowerdate",
+    "quantity": 1
+   }
+  ],
+  "74": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowerdate_schedule",
+    "quantity": 1
+   }
+  ],
+  "75": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_741_hightowerglider_mango",
+    "quantity": 1
+   }
+  ],
+  "76": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "78": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "79": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_249_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "80": [
+   {
+    "templateId": "AthenaCharacter:cid_844_athena_commando_f_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "81": [
+   {
+    "templateId": "AthenaBackpack:bid_595_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "82": [
+   {
+    "templateId": "AthenaDance:spid_221_s14_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "83": [
+   {
+    "templateId": "AthenaPickaxe:pickaxe_id_456_hightowermango1h",
+    "quantity": 1
+   }
+  ],
+  "85": [
+   {
+    "templateId": "AthenaItemWrap:wrap_270_hightowermango",
+    "quantity": 1
+   }
+  ],
+  "86": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowermango_schedule",
+    "quantity": 1
+   }
+  ],
+  "87": [
+   {
+    "templateId": "AthenaLoadingScreen:lsid_252_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "88": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "89": [
+   {
+    "templateId": "AthenaBackpack:bid_596_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "90": [
+   {
+    "templateId": "BannerToken:bannertoken_063_s14_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "92": [
+   {
+    "templateId": "Currency:MtxGiveaway",
+    "quantity": 100
+   }
+  ],
+  "93": [
+   {
+    "templateId": "AthenaCharacter:cid_843_athena_commando_m_hightowertomato_casual",
+    "quantity": 1
+   }
+  ],
+  "94": [
+   {
+    "templateId": "CosmeticVariantTokens:vtid_744_hightowerglider_tomato",
+    "quantity": 1
+   }
+  ],
+  "95": [
+   {
+    "templateId": "AthenaDance:spid_225_s14_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "96": [
+   {
+    "templateId": "AthenaPickaxe:pickaxe_id_459_hightowertomato1h",
+    "quantity": 1
+   }
+  ],
+  "97": [
+   {
+    "templateId": "AthenaDance:emoji_s14_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "98": [
+   {
+    "templateId": "AthenaGlider:glider_id_237_hightowertomato",
+    "quantity": 1
+   }
+  ],
+  "100": [
+   {
+    "templateId": "Season14:season14_awakenings_hightowertomato_schedule",
+    "quantity": 1
+   }
+  ]
+ },
+ "battlePassOfferIds": [
+  "6EFAD8A54BBFAF4F24FA17BFCA8A879E"
+ ],
+ "levelOfferIds": [
+  "461F34C046269604EAC31481F34BC405"
+ ]
+}

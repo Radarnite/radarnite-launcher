@@ -41,7 +41,7 @@ std::wstring helperArgs(const LaunchRequest& r) {
            fmt(L" --port %d --name ", c.port) + quoteArg(c.displayName) + L" --last-playlist " + quoteArg(c.lastPlaylist) +
            L" --practice-playlist " + quoteArg(c.practicePlaylist) + fmt(L" --bots %d --infinite-materials %ls --infinite-ammo %ls",
            c.bots, b(c.infiniteMaterials), b(c.infiniteAmmo)) + fmt(L" --late-game %ls --bots-ai %ls --autostart %d", b(c.lateGame),
-           b(c.botsAI), c.autoStartSeconds);
+           b(c.botsAI), c.autoStartSeconds) + fmt(L" --bot-skill %d", c.botSkill());
 }
 
 // What LaunchGame waits for: the client's pid, or the end of the helper's output.
