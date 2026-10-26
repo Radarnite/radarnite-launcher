@@ -198,6 +198,8 @@ int portTables(const std::wstring& file) {
         { L"items: 16620 listed, 412 to port", Line::Items, L"", 412 },
         { L"items: 16620 listed", Line::Other, L"", 0 },
         { L"items: many listed, 4 to port", Line::Other, L"", 0 },
+        { L"NOT INSTALLED /BRCosmetics/Athena/Items/Cosmetics/Dances/EID_SutureHalo.EID_SutureHalo: fn-modkit sigfit not found (x)", Line::NotInstalled, L"/BRCosmetics/Athena/Items/Cosmetics/Dances/EID_SutureHalo.EID_SutureHalo", 0 },
+        { L"NOT INSTALLED ", Line::Other, L"", 0 },
         { L"localization: 14 languages", Line::Localization, L"", 0 },
         { L"\r\n", Line::Other, L"", 0 },
     };
