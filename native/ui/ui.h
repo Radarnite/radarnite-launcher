@@ -107,6 +107,9 @@ private:
     void addLog(const LogLine& l);
     void toast(const std::wstring& text, Level level);
     void setConfig(uint32_t fields, const Config& v);
+    void setMods(const Mods& m);           // the Mods tab: saved to mods.json at once (the game reads it when it changes)
+    void modsActivate(int id);
+    void setSettingsTab(int tab);
     void select(const std::wstring& name, bool click = false);
     void activate(int id);
     void moveFocus(int dir);
@@ -123,6 +126,7 @@ private:
     const Build* sel() const;
     int level(const Build& b) const;       // 0 ok, 1 warn, 2 bad
     bool matchOk(const Build* b) const;
+    bool modsBuild(const Build* b) const;  // the build gets patches\fnmods.dll (launcher/Session.cs ModsBuilds)
 
     // drawing primitives
     ID2D1SolidColorBrush* br(uint32_t c, float a = 1.f);
@@ -156,6 +160,7 @@ private:
     float okline(float x, float y, float w);                    // the status line; returns the height
     float drawSettings(float x, float w, float top, float bottom);   // the match settings panel; returns its top
     float settingsBody(float x, float y, float w);                    // returns the bottom
+    float modsBody(float x, float y, float w);                        // the Mods tab's rows; returns the bottom
     void drawLaunch(D2D1_RECT_F pr, uint32_t glow);
     void stepBuild(int d);                                      // previous / next build (Q / E, ‹ ›, arrows)
     void drawActivity(float x, float y, float w, float h);
@@ -245,6 +250,7 @@ private:
     D2D1_RECT_F tabClip_{};
     int tabEnsure_ = -1;        // build index to scroll into view on the next frame
     bool settingsCompact_ = false;   // the match settings without their subtitle (a short window)
+    int settingsTab_ = -1;           // 0 match settings, 1 mods (builds with fnmods.dll); -1 = not read from the prefs yet
     D2D1_RECT_F playRect_{};
     float playRadius_ = 16;
     bool playShown_ = false, playDisabled_ = false;

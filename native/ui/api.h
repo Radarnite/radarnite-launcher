@@ -49,6 +49,19 @@ struct Config {
     int botSkill = 6;                  // 1-10, the bots on the game's AI
 };
 
+// mods.json (the 14.30 mods of patches\fnmods.dll, pakpatch/fnconfig.c): every mod on or off, some with a value. The
+// game reads the file at start and again when it is saved, so a change made while it runs applies in the game too.
+struct Mods {
+    bool body = true, ragdoll = true;
+    bool console = true; std::wstring consoleKey = L"F10";
+    bool menu = true;
+    bool fov = false; int fovValue = 90;           // 60-120 degrees
+    bool fps = false; int fpsValue = 60;           // 0 = no cap
+    bool noPostFx = false;
+    bool slomo = false; float slomoValue = 0.5f;   // 0.1-1
+    bool fly = false; bool ghost = false;          // ghost = fly through walls
+};
+
 // A partial config change made in the window (only the set fields are written by the core).
 struct ConfigPatch {
     enum Field : uint32_t { DisplayName = 1, Mode = 2, Bots = 4, BotsAI = 8, InfiniteMaterials = 16, InfiniteAmmo = 32, LateGame = 64, PlayMode = 128, Profile = 256, BotSkill = 512 };
@@ -79,6 +92,7 @@ struct State {
     std::wstring root;          // builds folder
     bool hasSession = false;
     Session session;
+    Mods mods;
 };
 
 enum class Level { Auto, Info, Ok, Warn, Bad };   // Auto = the UI classifies the text like the 2.x page did
@@ -172,6 +186,8 @@ struct Core {
     virtual void ready(UiSink* sink) = 0;
     virtual void command(Command c, const std::wstring& build) = 0;
     virtual void saveConfig(const ConfigPatch& p) = 0;
+    // The Mods tab: the whole of mods.json written (the window keeps its own copy, like the config).
+    virtual void saveMods(const Mods& m) = 0;
     // Per-user window preferences the 2.x page kept in localStorage ("lastBuild", "activityHeight").
     // The core decides where they live; "" = not set.
     virtual std::wstring uiPref(const wchar_t* key) = 0;

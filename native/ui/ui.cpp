@@ -13,7 +13,9 @@ enum : int {
     ID_MIN = 1, ID_MAX, ID_CLOSE, ID_ADD, ID_ROOT, ID_BUILDMENU, ID_EMPTY_ZIP, ID_EMPTY_FOLDER, ID_EMPTY_ROOT,
     ID_NOTICE_FW, ID_NOTICE_COS, ID_NAME, ID_STEP_DN, ID_BOTS, ID_STEP_UP, ID_RANGE, ID_TG0, ID_TG1, ID_TG2, ID_TG3, ID_PM0, ID_PM1, ID_PM2, ID_PROFILE, ID_BS0, ID_BS9 = ID_BS0 + 9,
     ID_GRIP, ID_F0, ID_F1, ID_F2, ID_SEARCH, ID_COPY, ID_OPENLOGS, ID_CLEAR, ID_ACT_X, ID_LINES, ID_ACT, ID_PLAY,
-    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT, ID_MENU0 = 200, ID_BUILD0 = 1000,
+    ID_SB_CONTENT, ID_SB_LOG, ID_POPUP, ID_TOAST, ID_META, ID_COSMETICS, ID_CELL0, ID_PREV = ID_CELL0 + 4, ID_NEXT,
+    // the settings' tabs (Match settings, Mods) and the Mods tab: a switch, then the value's ‹ › per mod (MOD_N of them)
+    ID_STAB0, ID_STAB1, ID_MS0, ID_MD0 = ID_MS0 + 16, ID_MU0 = ID_MD0 + 16, ID_MODS_END = ID_MU0 + 16, ID_MENU0 = 200, ID_BUILD0 = 1000,
 };
 enum { F_FOCUS = 1, F_HAND = 2, F_EDIT = 4, F_DISABLED = 8, F_RING_IN = 16, F_CONTENT = 32 };
 const UINT_PTR T_SPIN = 1, T_TOAST = 2, T_ANIM = 3;
@@ -1564,8 +1566,33 @@ float App::settingsBody(float x, float y0, float w) {
     Font lf{ Face::UI, 10.5f, 600, false }, df{ Face::UI, 11.5f, 400, false }, rf{ Face::UI, 13.5f, 400, false };
     // header: MATCH SETTINGS · 14.30 (or SETTINGS on a lobby-only build) and one muted line on what they apply to
     const float hh = 17.4f, sh = 16.7f;
-    text((hasMatch ? L"MATCH SETTINGS · " : L"SETTINGS · ") + verLabel(*b), lf, x, y, w, hh, C::white, 0, .84f, .62f);
+    std::wstring head = (hasMatch ? L"MATCH SETTINGS · " : L"SETTINGS · ") + verLabel(*b);
+    if (settingsTab_ < 0) settingsTab_ = core_->uiPref(L"settingsTab") == L"mods" ? 1 : 0;
+    bool mods = modsBuild(b) && !dis;
+    int tab = mods ? settingsTab_ : 0;
+    if (!mods) text(head, lf, x, y, w, hh, C::white, 0, .84f, .62f);
+    else {
+        // two tabs on the header line: the shown one brighter and underlined
+        float tx = x;
+        for (int i = 0; i < 2; i++) {
+            std::wstring l = i ? L"MODS" : head;
+            int id = ID_STAB0 + i;
+            float lw = textW(l, lf, .84f);
+            float hv = fx(K_HOVER | id, hover_ == id ? 1.f : 0.f, rc(tx, y, lw, hh));
+            text(l, lf, tx, y, lw + 2, hh, C::white, 0, .84f, i == tab ? .9f : .45f + .3f * hv);
+            if (i == tab) fill(rc(tx, y + hh, lw, 2), C::white, .7f, 1);
+            hit(id, rc(tx - 6, y - 4, lw + 12, hh + 8), F_FOCUS | F_HAND, 6);
+            tx += lw + 22;
+        }
+    }
     y += hh + 2;
+    if (tab == 1) {
+        const wchar_t* msub = L"Saved at once; a running game takes them too \u00b7 F8 in the game";
+        if (textW(msub, df) > w) msub = L"F8 in the game opens the mods menu";
+        if (!settingsCompact_) { text(msub, df, x, y, w, sh, C::white, 0, 0, .55f); y += sh; }
+        y += 8;
+        return modsBody(x, y, w);
+    }
     const wchar_t* sub = dis ? L"Not supported on this build" : !hasMatch ? L"No local match on this build: lobby, locker and styles"
                        : L"Battle Royale · Creative/Playground always has infinite materials and ammo";
     if (hasMatch && textW(sub, df) > w) sub = L"For Battle Royale matches";
@@ -1715,6 +1742,122 @@ float App::settingsBody(float x, float y0, float w) {
     }
     alpha_ = a0; noHit_ = false;
     return y;
+}
+
+// The Mods tab (builds with patches\fnmods.dll: 14.30): what the mods DLL does in the game, saved to mods.json at once
+// (pakpatch/fnconfig.c reads it; a running game takes a change within a second). A row per mod: its switch and, where it
+// has a value, ‹ value › to change it.
+constexpr int MOD_BODY = 0, MOD_RAGDOLL = 1, MOD_CONSOLE = 2, MOD_MENU = 3, MOD_FOV = 4, MOD_FPS = 5, MOD_FX = 6, MOD_SLOMO = 7, MOD_FLY = 8, MOD_N = 9;
+static const wchar_t* const kModLabel[MOD_N] = { L"Body sliders", L"Ragdoll on elimination", L"Engine console", L"Mods menu (F8)",
+    L"Field of view", L"FPS cap", L"No post effects", L"Slow motion", L"Fly (in a match)" };
+// the engine key names the console can take (InputSettings ConsoleKeys)
+static const wchar_t* const kModKeys[] = { L"F10", L"Tilde", L"F2", L"Insert" };
+static const int kModFps[] = { 30, 60, 120, 144, 165, 240, 0 };
+static const float kModSlomo[] = { 0.1f, 0.25f, 0.5f, 0.75f };
+static bool* modSwitch(Mods& m, int i) {
+    switch (i) {
+    case MOD_BODY: return &m.body;
+    case MOD_RAGDOLL: return &m.ragdoll;
+    case MOD_CONSOLE: return &m.console;
+    case MOD_MENU: return &m.menu;
+    case MOD_FOV: return &m.fov;
+    case MOD_FPS: return &m.fps;
+    case MOD_FX: return &m.noPostFx;
+    case MOD_SLOMO: return &m.slomo;
+    default: return &m.fly;
+    }
+}
+static std::wstring modValue(const Mods& m, int i) {   // "" = a switch only
+    switch (i) {
+    case MOD_CONSOLE: return m.consoleKey;
+    case MOD_FOV: return fmt(L"%d\u00b0", m.fovValue);
+    case MOD_FPS: return m.fpsValue ? fmt(L"%d fps", m.fpsValue) : L"No cap";
+    case MOD_SLOMO: return fmt(L"%g\u00d7", m.slomoValue);
+    case MOD_FLY: return m.ghost ? L"Through walls" : L"Fly";
+    default: return L"";
+    }
+}
+static void modStep(Mods& m, int i, int d) {
+    switch (i) {
+    case MOD_CONSOLE: {
+        int n = (int)(sizeof kModKeys / sizeof kModKeys[0]), k = 0;
+        for (int j = 0; j < n; j++) if (m.consoleKey == kModKeys[j]) k = j;
+        m.consoleKey = kModKeys[(k + d + n) % n];
+        break;
+    }
+    case MOD_FOV: m.fovValue = std::max(60, std::min(120, m.fovValue + 5 * d)); break;
+    case MOD_FPS: {
+        int n = (int)(sizeof kModFps / sizeof kModFps[0]), k = 1;
+        for (int j = 0; j < n; j++) if (kModFps[j] == m.fpsValue) k = j;
+        m.fpsValue = kModFps[std::max(0, std::min(n - 1, k + d))];
+        break;
+    }
+    case MOD_SLOMO: {
+        int n = (int)(sizeof kModSlomo / sizeof kModSlomo[0]), k = 2;
+        for (int j = 0; j < n; j++) if (fabsf(kModSlomo[j] - m.slomoValue) < .01f) k = j;
+        m.slomoValue = kModSlomo[std::max(0, std::min(n - 1, k + d))];
+        break;
+    }
+    case MOD_FLY: m.ghost = !m.ghost; break;
+    }
+}
+bool App::modsBuild(const Build* b) const { return b && b->major == 14 && b->minor == 30; }
+
+float App::modsBody(float x, float y, float w) {
+    Font rf{ Face::UI, 13.5f, 400, false }, sf{ Face::UI, 12, 500, false }, af{ Face::UI, 16, 600, false };
+    for (int i = 0; i < MOD_N; i++) {
+        Mods m = st_.mods;
+        bool on = *modSwitch(m, i);
+        std::wstring v = modValue(m, i);
+        float stw = v.empty() ? 0.f : std::min(140.f, w - textW(kModLabel[i], rf) - 30 - 12 - 24);
+        if (stw < 70) stw = 0;
+        fill(rc(x, y, w, 1), C::white, .1f);
+        text(kModLabel[i], rf, x, y, w - 30 - (stw > 0 ? stw + 12 : 0) - 12, 44, C::white);
+        int id = ID_MS0 + i;
+        float sx = x + w - 30, sy = y + (44 - 17) / 2;
+        float sv = fx(K_SWITCH | id, on ? 1.f : 0.f, rc(sx, sy, 30, 17), T2, Curve::Ui);
+        if (sv < 1) fill(rc(sx, sy, 30, 17), C::white, .18f * (1 - sv), 8.5f);
+        if (sv > 0) fill(rc(sx, sy, 30, 17), 0x3FC46A, sv, 8.5f);
+        if (!measuring_) rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(sx + 2 + 6.5f + 13 * sv, sy + 8.5f), 6.5f, 6.5f), br(C::white, .85f + .15f * sv));
+        hit(id, rc(x - 6, y + 1, w + 12, 43), F_FOCUS | F_HAND, 6);
+        if (stw > 0) {   // ‹ value ›, dimmed while the mod is off (still changeable)
+            float bx = sx - 12 - stw, by = y + 7;
+            int dn = ID_MD0 + i, up = ID_MU0 + i;
+            float a0 = alpha_;
+            if (!on) alpha_ = .6f * a0;
+            box(rc(bx, by, stw, 30), 8, C::bg2, 1, C::line2);
+            if (hover_ == dn) fill(rc(bx + 3, by + 3, 24, 24), C::hover, 1, 6);
+            if (hover_ == up) fill(rc(bx + stw - 27, by + 3, 24, 24), C::hover, 1, 6);
+            text(L"\u2039", af, bx + 3, by + 1, 24, 26, hover_ == dn ? C::text : C::muted, 1);
+            text(v, sf, bx + 27, by + 3, stw - 54, 24, C::text, 1);
+            text(L"\u203a", af, bx + stw - 27, by + 1, 24, 26, hover_ == up ? C::text : C::muted, 1);
+            alpha_ = a0;
+            hit(dn, rc(bx + 3, by + 3, 24, 24), F_FOCUS | F_HAND, 6);
+            hit(up, rc(bx + stw - 27, by + 3, 24, 24), F_FOCUS | F_HAND, 6);
+        }
+        y += 44;
+    }
+    return y;
+}
+
+void App::setSettingsTab(int tab) {
+    settingsTab_ = tab;
+    core_->setUiPref(L"settingsTab", tab ? L"mods" : L"match");
+    contentScroll_ = 0;
+    invalidate();
+}
+void App::setMods(const Mods& m) {
+    st_.mods = m;
+    core_->saveMods(m);
+    invalidate();
+}
+void App::modsActivate(int id) {
+    if (id == ID_STAB0 || id == ID_STAB1) { setSettingsTab(id - ID_STAB0); return; }
+    Mods m = st_.mods;
+    if (id >= ID_MU0) modStep(m, id - ID_MU0, 1);
+    else if (id >= ID_MD0) modStep(m, id - ID_MD0, -1);
+    else { bool* sw = modSwitch(m, id - ID_MS0); *sw = !*sw; }
+    setMods(m);
 }
 
 // .launch: white, as tall as the window allows (68 to 112 DIPs), a glow in the season's color; Stop while a session
@@ -2065,6 +2208,16 @@ std::wstring App::tooltip(int id) const {
     case ID_PM2: return L"Every cosmetic of the build owned";
     case ID_BS0: case ID_BS0 + 1: case ID_BS0 + 2: case ID_BS0 + 3: case ID_BS0 + 4: case ID_BS0 + 5: case ID_BS0 + 6: case ID_BS0 + 7:
     case ID_BS0 + 8: case ID_BS9: return L"Aim, reaction, building and dodging of the bots: 1 easy, 6 like the game's own bots, 10 hardest";
+    case ID_STAB1: return L"Game mods for this build (Fortnite 14.30)";
+    case ID_MS0 + MOD_BODY: return L"The body sliders of imported custom skins";
+    case ID_MS0 + MOD_RAGDOLL: return L"Eliminated players fall as ragdolls";
+    case ID_MS0 + MOD_CONSOLE: case ID_MD0 + MOD_CONSOLE: case ID_MU0 + MOD_CONSOLE: return L"Unreal's console in the game: its key opens it, twice for the full console";
+    case ID_MS0 + MOD_MENU: return L"F8 in the game: change these while playing (for that game only)";
+    case ID_MS0 + MOD_FOV: case ID_MD0 + MOD_FOV: case ID_MU0 + MOD_FOV: return L"The camera's field of view, 60 to 120 degrees";
+    case ID_MS0 + MOD_FPS: case ID_MD0 + MOD_FPS: case ID_MU0 + MOD_FPS: return L"The game's frame rate limit";
+    case ID_MS0 + MOD_FX: return L"Motion blur, depth of field, bloom, lens flares, color fringe and film grain off";
+    case ID_MS0 + MOD_SLOMO: case ID_MD0 + MOD_SLOMO: case ID_MU0 + MOD_SLOMO: return L"The whole game slower (in a match the match server does it)";
+    case ID_MS0 + MOD_FLY: case ID_MD0 + MOD_FLY: case ID_MU0 + MOD_FLY: return L"In a match: Space up, Ctrl down; Through walls also passes walls";
     case ID_PROFILE: return L"Your save: level, battle pass, V-bucks, items and locker. A new name starts a new one";
     case ID_BUILDMENU: return L"Build actions";
     case ID_ACT: return L"Activity (Ctrl+L)";
@@ -2191,6 +2344,7 @@ void App::wheel(float x, float y, float delta) {
 void App::activate(int id) {
     const std::wstring& b = selected_;
     if (id >= ID_PORT && id < ID_P_END) { portActivate(id); return; }
+    if (id >= ID_STAB0 && id < ID_MODS_END) { modsActivate(id); return; }
     if (id >= ID_BUILD0) { int i = id - ID_BUILD0; if (i < (int)st_.builds.size()) select(st_.builds[i].name, true); return; }
     if (id >= ID_MENU0) {
         int n; const MenuItem* it = menuItems(menu_, &n);
@@ -2352,7 +2506,7 @@ bool App::key(UINT vk, bool ctrl, bool shift) {
     }
     // Left / Right switch builds where they move nothing else (the tabs, the slider and the log took them above; not
     // from the match settings' controls)
-    bool inSettings = f == ID_RANGE || f == ID_BOTS || f == ID_NAME || (f >= ID_TG0 && f <= ID_PROFILE);
+    bool inSettings = f == ID_RANGE || f == ID_BOTS || f == ID_NAME || (f >= ID_TG0 && f <= ID_PROFILE) || (f >= ID_STAB0 && f < ID_MODS_END);
     if ((vk == VK_LEFT || vk == VK_RIGHT) && !menu_ && !pOpen_ && !inSettings && f != ID_LINES && f != ID_SEARCH && !(f >= ID_F0 && f <= ID_ACT_X)) {
         stepBuild(vk == VK_RIGHT ? 1 : -1);
         return true;

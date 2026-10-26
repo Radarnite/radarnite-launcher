@@ -5,6 +5,7 @@
 #include "buildinfo.h"
 #include "config.h"
 #include "firewall.h"
+#include "mods.h"
 #include "paktools.h"
 #include "paths.h"
 #include "port.h"
@@ -242,6 +243,7 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
         st.config.playMode = cfg.playMode();
         st.config.profile = cfg.profile();
         st.config.botSkill = cfg.botSkill();
+        st.mods = mods::load();
         st.root = root;
         std::lock_guard<std::mutex> g(sinkM);
         {
@@ -699,6 +701,10 @@ public:
         if (p.fields & ConfigPatch::BotSkill) c.setExtraInt("botSkill", v.botSkill < 1 ? 1 : v.botSkill > 10 ? 10 : v.botSkill);
         if (p.fields & ConfigPatch::Profile) { std::wstring n = trim(v.profile).substr(0, 24); c.setExtraStr("profile", n.empty() ? L"Main" : n); }
         c.save();
+    }
+
+    void saveMods(const Mods& m) override {
+        if (!mods::save(m)) c_->log(L"Mods: could not save " + mods::path() + L".", Level::Warn);
     }
 
     void portCatalog(const std::wstring& build, bool refresh) override {
