@@ -7,6 +7,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- launcher/Audio.cs calls Core Audio through vtable function pointers (built-in COM is off in a trimmed exe) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>radarnite-play</AssemblyName>
     <RootNamespace>FnOffline</RootNamespace>
     <Product>Radarnite Launcher</Product>
@@ -36,5 +38,6 @@
   <ItemGroup>
     <Compile Include="../launcher/Core.cs" Link="shared/Core.cs" />
     <Compile Include="../launcher/Session.cs" Link="shared/Session.cs" />
+    <Compile Include="../launcher/Audio.cs" Link="shared/Audio.cs" />
   </ItemGroup>
 </Project>

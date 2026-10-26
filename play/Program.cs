@@ -43,6 +43,8 @@ static class PlayProgram
     static async Task<int> Run(string[] args)
     {
         if (args.Length == 1 && args[0] == "--selftest-json") return SelfTestJson();
+        if (args.Length == 1 && args[0] == "--selftest-audio") return SelfTestAudio();
+        if (args.Length == 1 && args[0] == "--selftest-audio-tone") return SilentTone();
         var o = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < args.Length; i++)
         {
@@ -93,9 +95,74 @@ static class PlayProgram
             return 1;
         }
         Out("pid", s.ClientPid.ToString());
-        if (!matchOk) return 0;
-        await s.MatchLoop(off);   // returns when the client exits
+        if (matchOk) await s.MatchLoop(off);   // returns when the client exits
+        if (s.AudioRestore is { } audio) await audio;   // the sound check ends with the client or after its first minutes
         return 0;
+    }
+
+    // Developer: Audio.Restore against what a test tool leaves behind. A copy of this exe plays silence (its own audio
+    // session, nothing audible); its session is muted at volume 0 the way the fnviewer test tooling mutes the game; that
+    // exe runs again (Windows brings the mute back, per exe path); Audio.Restore, as the game start runs it, must leave
+    // that session unmuted at a volume above 0. Every process it starts is killed before it returns.
+    static int SelfTestAudio()
+    {
+        var self = Environment.ProcessPath ?? "";
+        System.Diagnostics.Process? tone = null;
+        List<Audio.State> Now(System.Diagnostics.Process p) => Audio.OnComThread(() => Audio.Sessions([(uint)p.Id])).GetAwaiter().GetResult();
+        bool WaitSession(System.Diagnostics.Process p)
+        {
+            for (var i = 0; i < 60; i++) { if (p.HasExited) return false; if (Now(p).Count > 0) return true; Thread.Sleep(250); }
+            return false;
+        }
+        System.Diagnostics.Process Tone() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(self, "--selftest-audio-tone") { UseShellExecute = false, CreateNoWindow = true })!;
+        try
+        {
+            tone = Tone();
+            if (!WaitSession(tone)) { Out("error", "audio selftest FAILED: the silent player opened no audio session"); return 1; }
+            var set = Audio.OnComThread(() => Audio.Set([(uint)tone.Id], true, 0f)).GetAwaiter().GetResult();
+            Out("log", $"test tool: muted {set} session(s) of pid {tone.Id} at volume 0");
+            tone.Kill(true); tone.WaitForExit(5000); tone.Dispose(); tone = null;
+
+            tone = Tone();
+            if (!WaitSession(tone)) { Out("error", "audio selftest FAILED: the second run opened no audio session"); return 1; }
+            var before = Now(tone);
+            var persisted = before.All(x => x.Muted);
+            Out("log", $"second run pid {tone.Id}: {string.Join(", ", before)} (Windows {(persisted ? "kept" : "did not keep")} the mute)");
+            if (!persisted) Audio.OnComThread(() => Audio.Set([(uint)tone.Id], true, 0f)).GetAwaiter().GetResult();
+
+            var lines = new List<string>();
+            Audio.Restore(tone, l => { lock (lines) lines.Add(l); }).GetAwaiter().GetResult();
+            foreach (var l in lines) Out("log", "launcher log: " + l);
+            var after = Now(tone);
+            var ok = after.Count > 0 && after.All(x => !x.Muted && x.Volume > 0f) && lines.Count > 0;
+            Out(ok ? "log" : "error", $"audio selftest {(ok ? "ok" : "FAILED")}: after Audio.Restore {string.Join(", ", after)}");
+            return ok ? 0 : 1;
+        }
+        finally { if (tone != null) try { tone.Kill(true); tone.WaitForExit(5000); } catch { } }
+    }
+
+    [System.Runtime.InteropServices.DllImport("winmm")] static extern bool PlaySoundW(IntPtr sound, IntPtr module, uint flags);
+
+    // Plays one second of digital silence in a loop for up to 2 minutes: an audio session with nothing audible in it.
+    static int SilentTone()
+    {
+        const int rate = 8000, bytes = rate * 2;
+        var wav = new byte[44 + bytes];
+        void Put(int at, string s) => Encoding.ASCII.GetBytes(s).CopyTo(wav, at);
+        void U32(int at, int v) => BitConverter.GetBytes(v).CopyTo(wav, at);
+        void U16(int at, short v) => BitConverter.GetBytes(v).CopyTo(wav, at);
+        Put(0, "RIFF"); U32(4, 36 + bytes); Put(8, "WAVE"); Put(12, "fmt "); U32(16, 16); U16(20, 1); U16(22, 1);
+        U32(24, rate); U32(28, rate * 2); U16(32, 2); U16(34, 16); Put(36, "data"); U32(40, bytes);
+        var h = System.Runtime.InteropServices.GCHandle.Alloc(wav, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            // SND_ASYNC | SND_NODEFAULT | SND_MEMORY | SND_LOOP
+            if (!PlaySoundW(h.AddrOfPinnedObject(), IntPtr.Zero, 0x1 | 0x2 | 0x4 | 0x8)) return 1;
+            Thread.Sleep(TimeSpan.FromMinutes(2));
+            PlaySoundW(IntPtr.Zero, IntPtr.Zero, 0);
+            return 0;
+        }
+        finally { h.Free(); }
     }
 
     // Developer: the reflection-based System.Text.Json calls of Session.MatchLoop/PostReady (a positional record and an

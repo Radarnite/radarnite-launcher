@@ -6,6 +6,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>RadarniteLauncher</AssemblyName>
     <Product>Radarnite Launcher</Product>
     <AssemblyTitle>Radarnite Launcher</AssemblyTitle>
