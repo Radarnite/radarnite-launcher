@@ -60,6 +60,12 @@ struct Mods {
     bool noPostFx = false;
     bool slomo = false; float slomoValue = 0.5f;   // 0.1-1
     bool fly = false; bool ghost = false;          // ghost = fly through walls
+    // the match cheats (pakpatch/fncheats.c)
+    bool aim = false; int aimStrength = 5;         // hold the right mouse button; 1-10, 10 snaps
+    int aimCone = 30;                              // 5-180 degrees off the crosshair
+    bool god = false;
+    bool cheatKeys = false;                        // F6 teleport to the crosshair, F7 to the map pin, F9 spawn bots
+    int spawnCount = 3; bool spawnTeam = false;    // what F9 spawns: 1-20 bots, enemies or teammates
 };
 
 // A partial config change made in the window (only the set fields are written by the core).
