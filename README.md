@@ -14,6 +14,8 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - Ragdoll deaths on 14.30: eliminated players fall with physics instead of the digitize effect.
 - Mods for 14.30, on or off in the Mods tab: the engine console (F10), an in-game menu (F8), field of view, FPS cap,
   no post effects, slow motion and fly.
+- Match cheats for 14.30 (Mods tab and F8 menu): aim assist, teleport to the crosshair, the map pin or a random POI,
+  spawn bots around you (enemies or teammates), god mode.
 - One-click firewall rules so a build can never reach the internet.
 - WebView2 desktop UI (with a plain WinForms fallback).
 - Per-user install under `%LOCALAPPDATA%\Programs\Radarnite Launcher`; no administrator needed.
@@ -29,7 +31,7 @@ Play old Fortnite builds on your own PC, offline. No Epic account, no internet, 
 - `paktools/` — the one copy of the pak signature fitter (sigfit) and the game guard the launcher ships
   (`tools/vendor-pak-tools.sh`).
 - `pakpatch/fnmods.c` — `fnmods.dll`, injected by the launcher into the 14.30 client: one DLL with modules (body
-  sliders of fn-port outfits, ragdoll deaths, engine console, settings, F8 menu), each on or off in `mods.json`
+  sliders of fn-port outfits, ragdoll deaths, engine console, settings, match cheats, F8 menu), each on or off in `mods.json`
   (`pakpatch/test/fnbody-mock.c` runs the body sliders against a fake engine).
 - `backend/progress.mjs` — play modes, profiles, levels, battle pass (`backend/seasons/`), V-bucks and the item shop.
 - `radarnite.nsi` — the NSIS installer script.
