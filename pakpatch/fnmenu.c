@@ -1,6 +1,7 @@
 /*
- * fnmenu.c - the in-game menu of fnmods.dll on F8, or the key mods.json gives it (#included by fnmods.c): the settings of fnsettings.c, the cheats of
- * fncheats.c (their switches, and Enter runs the teleports and the bot spawn) and the console, changed while playing. Changes last for the session; mods.json stays the launcher's.
+ * fnmenu.c - the in-game menu of fnmods.dll on F8, or the key mods.json gives it (#included by fnmods.c): the settings
+ * of fnsettings.c, the cheats of fncheats.c (their switches, and Enter runs the teleports and the bot spawn) and the
+ * console, changed while playing. Changes last for the session; mods.json stays the launcher's.
  *
  * Drawn by the engine, on the canvas of the player's HUD: UGameViewportClient::Draw calls AHUD::PostRender on every
  * local player's HUD, AHUD::DrawHUD calls the blueprint event ReceiveDrawHUD through ProcessEvent, and during that
